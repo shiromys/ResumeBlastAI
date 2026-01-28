@@ -60,16 +60,17 @@ from routes.payment_webhook import payment_webhook_bp  # ✅ NEW WEBHOOK BLUEPRI
 
 app = Flask(__name__)
 
-# ✅ FIXED: Added PATCH to allowed methods for support ticket resolution
+# backend/app.py around line 55
 CORS(app, resources={
     r"/api/*": {
         "origins": [
             "http://localhost:5173",
-            "http://localhost:5174",
             "http://localhost:3000",
             "https://resumeblast.ai",
+            "https://*.railway.app", # ✅ Allow all Railway subdomains
+            "https://your-frontend-url.up.railway.app" # You will update this later
         ],
-        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],  # ✅ ADDED PATCH
+        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         "allow_headers": ["Content-Type", "Authorization"],
         "supports_credentials": True
     }
