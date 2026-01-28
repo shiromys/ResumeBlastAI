@@ -480,14 +480,14 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
                   }}>
                     <div>
                       <h3 style={{margin:0, color:'#991B1B', fontSize: '20px', fontWeight: '700'}}>
-                        Premium Distribution
+                        Premium Plans
                       </h3>
                       <p style={{margin:'5px 0 0 0', fontSize:'14px', color:'#B91C1C'}}>
                         Send to 500+ Verified Recruiters
                       </p>
                     </div>
-                    <div style={{fontSize: '28px', fontWeight: 'bold', color:'#DC2626'}}>
-                      $149
+                    <div style={{fontSize: '24px', fontWeight: 'bold', color:'#DC2626'}}>
+                      Coming Soon
                     </div>
                   </div>
 
@@ -542,22 +542,23 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
                       Cancel
                     </button>
                     <button 
-                      onClick={handlePaymentAndBlast} 
                       className="btn-blast"
-                      disabled={status === 'payment_processing'}
+                      disabled={true}
                       style={{
                         flex: '2',
                         padding: '14px',
-                        background: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)',
+                        background: '#9CA3AF',
                         border: 'none',
                         borderRadius: '8px',
                         color: 'white',
                         fontSize: '16px',
                         fontWeight: '700',
-                        cursor: status === 'payment_processing' ? 'not-allowed' : 'pointer'
+                        cursor: 'not-allowed',
+                        boxShadow: 'none',
+                        opacity: 0.7
                       }}
                     >
-                      ⚡ Pay $149 & Blast
+                      Coming Soon
                     </button>
                   </div>
                 </>

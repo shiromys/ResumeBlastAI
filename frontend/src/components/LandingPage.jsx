@@ -228,20 +228,19 @@ function LandingPage({ onGetStarted }) {
             </div>
           </div>
 
-          {/* PREMIUM CARD - COMPACT */}
-          <div className="pricing-card featured" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', boxShadow: '0 10px 30px rgba(220, 38, 38, 0.1)', padding: '0'}}>
+          {/* PREMIUM CARD - UPDATED TO "COMING SOON" WITH RED THEME */}
+          <div className="pricing-card featured" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', boxShadow: 'none', padding: '0'}}>
             <div className="popular-badge" style={{background: '#DC2626', position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '2px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', color: 'white'}}>
-              Most Popular
+              Coming Soon
             </div>
 
             {/* Header */}
             <div className="price-header" style={{padding: '20px 20px 10px', borderBottom: '1px solid #F3F4F6'}}>
-              <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Premium Distribution</h3>
-              <div className="price-tag" style={{margin: '5px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'center'}}>
-                <span className="currency" style={{fontSize: '20px', fontWeight: '600', color: '#374151', marginTop: '4px'}}>$</span>
-                <span className="amount" style={{fontSize: '48px', fontWeight: '800', color: '#1F2937', lineHeight: '1'}}>149</span>
+              <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Premium Plans</h3>
+              <div className="price-tag" style={{margin: '15px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60px'}}>
+                <span className="amount" style={{fontSize: '32px', fontWeight: '800', color: '#374151', lineHeight: '1'}}>Coming Soon</span>
               </div>
-              <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>One-time payment</p>
+              <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>Join the waitlist</p>
             </div>
 
             {/* List */}
@@ -277,7 +276,7 @@ function LandingPage({ onGetStarted }) {
               <button 
                 className="cta-button featured" 
                 style={{
-                  background: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)',
+                  background: '#DC2626',
                   color: 'white',
                   width: '100%',
                   padding: '12px',
@@ -285,24 +284,16 @@ function LandingPage({ onGetStarted }) {
                   fontWeight: '700',
                   border: 'none',
                   borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)'
+                  cursor: 'not-allowed',
+                  boxShadow: 'none',
+                  opacity: 0.7
                 }}
-                onClick={onGetStarted}
-                onMouseOver={(e) => {
-                  e.target.style.transform = 'translateY(-2px)'
-                  e.target.style.boxShadow = '0 6px 16px rgba(220, 38, 38, 0.4)'
-                }}
-                onMouseOut={(e) => {
-                  e.target.style.transform = 'translateY(0)'
-                  e.target.style.boxShadow = '0 4px 12px rgba(220, 38, 38, 0.3)'
-                }}
+                disabled={true}
               >
-                Get Started Now
+                Coming Soon
               </button>
               <p className="guarantee" style={{textAlign: 'center', fontSize: '11px', color: '#6B7280', marginTop: '10px', fontWeight: '500'}}>
-                 100% Secure Payment
+                 Notify me when available
               </p>
             </div>
           </div>
