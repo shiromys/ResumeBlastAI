@@ -1,140 +1,121 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { signIn, signUp } from '../services/authService'
 import { trackUserLogin, trackUserSignup } from '../services/activityTrackingService'
 import { generateVerificationCode, sendVerificationEmail } from '../services/brevoEmailService'
 import { storeVerificationCode, verifyCode, clearVerificationCode } from '../utils/verificationStorage'
 import './AuthModal.css'
 
 function AuthModal({ onClose, onSuccess }) {
-  const [view, setView] = useState('login') // 'login', 'signup', 'forgot_password'
+  const [view, setView] = useState('login')
   
-  // Login/Signup States
+  // ✅ STATE INITIALIZATION: These are empty, ensuring no hardcoded values exist.
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
   
   // Forgot Password States
-  const [resetStep, setResetStep] = useState('email') // 'email', 'verify', 'new_password'
+  const [resetStep, setResetStep] = useState('email')
   const [verificationCode, setVerificationCode] = useState('')
   const [newPassword, setNewPassword] = useState('')
   
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // ✅ FIXED: Login Handler with Proper Tracking
+  // Login Handler
   const handleLogin = async (e) => {
     e.preventDefault()
     setLoading(true)
     setMessage('')
     
     try {
-      console.log('🔐 Attempting login...')
+      console.log('\n🔐 === LOGIN FLOW STARTED ===')
       
-      const { data, error } = await supabase.auth.signInWithPassword({ 
-        email: email.trim(), 
-        password 
-      })
+      const result = await signIn(email.trim(), password)
       
-      if (error) throw error
+      if (!result.success) throw new Error(result.error)
+      if (!result.user) throw new Error('Login failed - no user data returned')
       
-      if (data?.user) {
-        console.log('✅ Login successful, user:', data.user.email)
-        
-        // ✅ TRACK LOGIN - With proper error handling
-        try {
-          console.log('📊 Tracking login...')
-          const trackingResult = await trackUserLogin(data.user.id, data.user.email, {
-            login_method: 'password',
-            timestamp: new Date().toISOString()
-          })
-          
-          if (trackingResult.success) {
-            console.log('✅ Login tracked successfully')
-          } else {
-            console.error('⚠️ Login tracking failed:', trackingResult.error)
-          }
-        } catch (trackError) {
-          // Don't let tracking errors block login
-          console.error('⚠️ Login tracking error:', trackError)
-        }
-        
-        setMessage('✅ Login successful!')
-        setTimeout(() => onSuccess(data.user), 800)
+      console.log('✅ Authentication successful')
+      
+      // Track Login Activity
+      try {
+        await trackUserLogin(result.user.id, result.user.email, {
+          login_method: 'password',
+          timestamp: new Date().toISOString(),
+          user_agent: navigator.userAgent,
+          platform: navigator.platform
+        })
+      } catch (trackError) {
+        console.error('⚠️ Login tracking failed (non-critical):', trackError)
       }
+      
+      setMessage('✅ Login successful!')
+      setTimeout(() => onSuccess(result.user), 800)
+      
     } catch (error) {
       console.error('❌ Login error:', error)
-      setMessage('❌ ' + (error.message === 'Invalid login credentials' ? 'Invalid email or password' : error.message))
+      let errorMessage = error.message
+      if (errorMessage === 'Invalid login credentials') {
+        errorMessage = 'Invalid email or password'
+      }
+      setMessage('❌ ' + errorMessage)
     } finally {
       setLoading(false)
     }
   }
 
-  // ✅ FIXED: Signup Handler with Proper Tracking
+  // Signup Handler
   const handleSignUp = async (e) => {
     e.preventDefault()
     setLoading(true)
     setMessage('')
     
     try {
-      if (password.length < 6) {
-        throw new Error('Password must be at least 6 characters')
-      }
-      if (!fullName.trim()) {
-        throw new Error('Please enter your full name')
-      }
+      console.log('\n📝 === SIGNUP FLOW STARTED ===')
       
-      console.log('📝 Attempting signup...')
+      if (password.length < 6) throw new Error('Password must be at least 6 characters')
+      if (!fullName.trim()) throw new Error('Please enter your full name')
       
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim(),
-        password: password,
-        options: { 
-          data: { 
-            full_name: fullName, 
-            role: 'job_seeker' 
-          } 
-        }
-      })
+      const result = await signUp(email.trim(), password, fullName.trim())
       
-      if (error) throw error
+      if (!result.success) throw new Error(result.error)
+      if (!result.user) throw new Error('Signup failed - no user data returned')
       
-      if (data?.user) {
-        console.log('✅ Signup successful, user:', data.user.email)
-        
-        // ✅ TRACK SIGNUP
-        try {
-          console.log('📊 Tracking signup...')
-          const trackingResult = await trackUserSignup(data.user.id, data.user.email, {
-            full_name: fullName,
+      console.log('✅ Account created in Supabase Auth')
+      
+      // Track Signup Activity
+      try {
+        await trackUserSignup(
+          result.user.id, 
+          result.user.email, 
+          {
+            full_name: fullName.trim(),
             signup_method: 'email',
-            timestamp: new Date().toISOString()
-          })
-          
-          if (trackingResult.success) {
-            console.log('✅ Signup tracked successfully')
-          } else {
-            console.error('⚠️ Signup tracking failed:', trackingResult.error)
+            timestamp: new Date().toISOString(),
+            user_agent: navigator.userAgent,
+            platform: navigator.platform
           }
-        } catch (trackError) {
-          console.error('⚠️ Signup tracking error:', trackError)
-        }
-        
-        if (data.session) {
-          setMessage('✅ Account created successfully!')
-          setTimeout(() => onSuccess(data.user), 1000)
-        } else {
-          setMessage('✅ Account created! Please check your email to verify.')
-        }
+        )
+      } catch (trackError) {
+        console.error('❌ Signup tracking failed:', trackError)
       }
+      
+      if (result.session) {
+        setMessage('✅ Account created successfully!')
+        setTimeout(() => onSuccess(result.user), 1000)
+      } else {
+        setMessage('✅ Account created! Please check your email to verify.')
+      }
+      
     } catch (error) {
-      console.error('❌ Signup error:', error)
       setMessage('❌ ' + error.message)
     } finally {
       setLoading(false)
     }
   }
 
-  // Forgot Password Handlers - UNCHANGED
+  // Forgot Password Handlers
   const handleSendCode = async (e) => {
     e.preventDefault()
     setLoading(true)
@@ -166,20 +147,15 @@ function AuthModal({ onClose, onSuccess }) {
   const handleResetPassword = async (e) => {
     e.preventDefault()
     setLoading(true)
-    
     try {
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-      
       const response = await fetch(`${apiUrl}/api/auth/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, new_password: newPassword })
       })
-      
       const data = await response.json()
-      
       if (!response.ok) throw new Error(data.error || 'Failed to update password')
-      
       clearVerificationCode(email)
       setMessage('✅ Password updated! Please log in.')
       setTimeout(() => {
@@ -187,9 +163,7 @@ function AuthModal({ onClose, onSuccess }) {
         setResetStep('email')
         setPassword('')
       }, 2000)
-      
     } catch (error) {
-      console.error('Reset error:', error)
       setMessage('❌ ' + error.message)
     } finally {
       setLoading(false)
@@ -226,8 +200,9 @@ function AuthModal({ onClose, onSuccess }) {
           )}
 
           {/* LOGIN FORM */}
+          {/* ✅ FIX: Added autoComplete="off" to form and inputs */}
           {view === 'login' && (
-            <form onSubmit={handleLogin} className="form">
+            <form onSubmit={handleLogin} className="form" autoComplete="off">
               <div className="form-group">
                 <label>Email</label>
                 <input 
@@ -235,6 +210,9 @@ function AuthModal({ onClose, onSuccess }) {
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 
                   required 
+                  autoComplete="off" 
+                  placeholder="name@example.com"
+                  name="login_email_field_random_id" 
                 />
               </div>
               <div className="form-group">
@@ -244,6 +222,9 @@ function AuthModal({ onClose, onSuccess }) {
                   value={password} 
                   onChange={(e) => setPassword(e.target.value)} 
                   required 
+                  autoComplete="new-password"
+                  placeholder="••••••••"
+                  name="login_password_field_random_id"
                 />
                 <div style={{textAlign: 'right', marginTop: '5px'}}>
                    <button 
@@ -268,8 +249,9 @@ function AuthModal({ onClose, onSuccess }) {
           )}
 
           {/* SIGNUP FORM */}
+          {/* ✅ FIX: Added autoComplete="off" to form and inputs */}
           {view === 'signup' && (
-            <form onSubmit={handleSignUp} className="form">
+            <form onSubmit={handleSignUp} className="form" autoComplete="off">
               <div className="form-group">
                 <label>Full Name</label>
                 <input 
@@ -278,6 +260,8 @@ function AuthModal({ onClose, onSuccess }) {
                   onChange={(e) => setFullName(e.target.value)} 
                   placeholder="e.g. John Doe" 
                   required 
+                  autoComplete="off"
+                  name="signup_name_field"
                 />
               </div>
               <div className="form-group">
@@ -287,6 +271,9 @@ function AuthModal({ onClose, onSuccess }) {
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 
                   required 
+                  autoComplete="off"
+                  placeholder="name@example.com"
+                  name="signup_email_field"
                 />
               </div>
               <div className="form-group">
@@ -297,6 +284,9 @@ function AuthModal({ onClose, onSuccess }) {
                   onChange={(e) => setPassword(e.target.value)} 
                   required 
                   minLength={6} 
+                  autoComplete="new-password"
+                  placeholder="Min 6 characters"
+                  name="signup_password_field"
                 />
               </div>
               <button type="submit" disabled={loading} className="btn-primary">
@@ -305,11 +295,11 @@ function AuthModal({ onClose, onSuccess }) {
             </form>
           )}
 
-          {/* FORGOT PASSWORD FLOW */}
+          {/* FORGOT PASSWORD */}
           {view === 'forgot_password' && (
             <div className="form">
               {resetStep === 'email' && (
-                <form onSubmit={handleSendCode}>
+                <form onSubmit={handleSendCode} autoComplete="off">
                   <p className="subtitle">Enter your email to receive a verification code.</p>
                   <div className="form-group">
                     <label>Email</label>
@@ -318,6 +308,7 @@ function AuthModal({ onClose, onSuccess }) {
                       value={email} 
                       onChange={(e) => setEmail(e.target.value)} 
                       required 
+                      autoComplete="off"
                     />
                   </div>
                   <button type="submit" disabled={loading} className="btn-primary">
@@ -327,7 +318,7 @@ function AuthModal({ onClose, onSuccess }) {
               )}
 
               {resetStep === 'verify' && (
-                <form onSubmit={handleVerifyCode}>
+                <form onSubmit={handleVerifyCode} autoComplete="off">
                   <p className="subtitle">Enter the 6-digit code sent to {email}</p>
                   <div className="form-group">
                     <label>Verification Code</label>
@@ -337,6 +328,7 @@ function AuthModal({ onClose, onSuccess }) {
                       onChange={(e) => setVerificationCode(e.target.value)} 
                       placeholder="123456" 
                       required 
+                      autoComplete="off"
                     />
                   </div>
                   <button type="submit" className="btn-primary">Verify Code</button>
@@ -344,7 +336,7 @@ function AuthModal({ onClose, onSuccess }) {
               )}
 
               {resetStep === 'new_password' && (
-                <form onSubmit={handleResetPassword}>
+                <form onSubmit={handleResetPassword} autoComplete="off">
                   <p className="subtitle">Create a new password</p>
                   <div className="form-group">
                     <label>New Password</label>
@@ -354,6 +346,7 @@ function AuthModal({ onClose, onSuccess }) {
                       onChange={(e) => setNewPassword(e.target.value)} 
                       required 
                       minLength={6} 
+                      autoComplete="new-password"
                     />
                   </div>
                   <button type="submit" disabled={loading} className="btn-primary">

@@ -16,7 +16,7 @@ import PaymentSuccessHandler from './components/PaymentSuccessHandler'
 import UserDashboard from './components/UserDashboard'
 import AdminDashboard from './components/Admin/AdminDashboard'
 import PaymentBlastTrigger from './components/PaymentBlastTrigger'
-import ContactPage from './components/ContactPage' // ✅ ADD THIS IMPORT
+import ContactPage from './components/ContactPage'
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
@@ -27,36 +27,45 @@ function App() {
   const [user, setUser] = useState(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [showSignup, setShowSignup] = useState(false)
-  
-  // viewMode states: 'jobseeker-home', 'dashboard', 'upload-workbench', 'recruiter', 'admin', 'contact'
   const [viewMode, setViewMode] = useState('jobseeker-home') 
-  
   const [isRestoring, setIsRestoring] = useState(true) 
   const [paymentSuccess, setPaymentSuccess] = useState(false) 
   const [hasUploadedInSession, setHasUploadedInSession] = useState(false)
 
-  // Track previous user to prevent loop
   const prevUserIdRef = useRef(null)
-
   const [resumeText, setResumeText] = useState('')
   const [resumeUrl, setResumeUrl] = useState('')
   const [resumeId, setResumeId] = useState('')
 
-  // ✅ IMPROVED: Simplified Admin Check
-  // Uses hardcoded list instead of database query
-  const checkAdminStatus = (email) => {
+  // ✅ IMPROVED: Robust Admin Check with Timeout
+  // Prevents the app from getting stuck on the spinner if the DB call hangs
+  const checkAdminStatus = async (email) => {
     if (!email) return false
     
-    // List of admin emails
-    const adminEmails = [
-      'admin@resumeblast.ai',
-      'shuchitharamesh71@gmail.com',
-      // Add more admin emails here as needed
-    ]
-    
-    const isAdminUser = adminEmails.includes(email.toLowerCase())
-    console.log(`🔍 Admin Check: ${email} → ${isAdminUser ? '✅ ADMIN' : '❌ NOT ADMIN'}`)
-    return isAdminUser
+    try {
+      // Create a timeout promise that rejects after 5 seconds
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Admin check timed out')), 5000)
+      )
+
+      // The actual RPC call
+      const rpcPromise = supabase.rpc('check_is_admin', { check_email: email })
+
+      // Race them - if RPC hangs, timeout wins so the app can load
+      const { data, error } = await Promise.race([rpcPromise, timeoutPromise])
+      
+      if (error) {
+        console.warn('⚠️ Admin check warning:', error.message)
+        return false // Default to non-admin on error
+      }
+      
+      console.log(`🔍 DB Admin Check: ${email} → ${data ? '✅ ADMIN' : '❌ NOT ADMIN'}`)
+      return !!data 
+      
+    } catch (err) {
+      console.warn('⚠️ Admin check failed or timed out (defaulting to user):', err.message)
+      return false
+    }
   }
 
   // 1. INITIALIZATION
@@ -67,23 +76,27 @@ function App() {
         const params = new URLSearchParams(window.location.search)
         const isPaymentReturn = params.get('payment') === 'success'
         
-        const { data: { session } } = await supabase.auth.getSession()
+        const { data: { session }, error } = await supabase.auth.getSession()
         
+        if (error) throw error
+
         if (session?.user) {
           console.log('👤 User found in session:', session.user.email)
           setUser(session.user)
           prevUserIdRef.current = session.user.id
           
-          // ✅ FIXED: Synchronous admin check
-          const adminStatus = checkAdminStatus(session.user.email)
+          // Check Admin Status (Fail-safe)
+          const adminStatus = await checkAdminStatus(session.user.email)
           setIsAdmin(adminStatus)
           
-          // ✅ Routing Logic
           if (isPaymentReturn) {
+            console.log('💰 Payment return detected in App.jsx')
             setPaymentSuccess(true)
+            // We set this to true to show the workbench
             setHasUploadedInSession(true)
             setViewMode('upload-workbench') 
             
+            // Try to restore resume data from local storage if available
             const savedResumeData = localStorage.getItem('pending_blast_resume_data')
             if (savedResumeData) {
                try {
@@ -93,13 +106,11 @@ function App() {
                } catch (e) { console.error(e) }
             }
           } else if (adminStatus) {
-            // ✅ AUTO-REDIRECT ADMINS TO ADMIN PANEL
             console.log('🛡️ Admin detected - redirecting to admin panel')
             setViewMode('admin')
           } else if (session.user.user_metadata?.role === 'recruiter') {
             setViewMode('recruiter')
           } else {
-            // Default to dashboard for regular users
             setViewMode('dashboard')
           }
         } else {
@@ -107,8 +118,9 @@ function App() {
         }
       } catch (error) {
         console.error('❌ Session init error:', error)
+        // Ensure we don't get stuck in loading even on error
+        setViewMode('jobseeker-home')
       } finally {
-        // ✅ CRITICAL: This ensures spinner always disappears
         console.log('🏁 Session initialization complete')
         setIsRestoring(false) 
       }
@@ -121,21 +133,15 @@ function App() {
       console.log(`🔔 Auth event: ${event}`)
       
       if (event === 'SIGNED_IN' && session?.user) {
-         // Prevent re-running logic if it's just a token refresh
-         if (prevUserIdRef.current === session.user.id) {
-             return 
-         }
+         if (prevUserIdRef.current === session.user.id) return 
          
          prevUserIdRef.current = session.user.id
          setUser(session.user)
          
-         // ✅ FIXED: Synchronous admin check
-         const adminStatus = checkAdminStatus(session.user.email)
+         const adminStatus = await checkAdminStatus(session.user.email)
          setIsAdmin(adminStatus)
 
-         // ✅ IMPROVED: Better routing logic
          if (adminStatus) {
-             console.log('🛡️ Admin logged in - showing admin panel')
              setViewMode('admin')
          } else {
              const role = session?.user?.user_metadata?.role
@@ -167,40 +173,22 @@ function App() {
   }
 
   const handleViewChange = (view) => {
-    console.log(`🔄 View change requested: ${view}`)
     window.scrollTo(0, 0)
-    
     switch(view) {
-      case 'home':
-        setViewMode(user ? 'upload-workbench' : 'jobseeker-home')
-        break
-      case 'recruiter':
-        setViewMode('recruiter')
-        break
-      case 'dashboard':
-        setViewMode('dashboard') 
-        break
-      case 'contact': // ✅ ADD CONTACT CASE
-        setViewMode('contact')
-        break
+      case 'home': setViewMode(user ? 'upload-workbench' : 'jobseeker-home'); break;
+      case 'recruiter': setViewMode('recruiter'); break;
+      case 'dashboard': setViewMode('dashboard'); break;
+      case 'contact': setViewMode('contact'); break;
       case 'admin':
-        if (isAdmin) {
-          console.log('✅ Admin access granted')
-          setViewMode('admin')
-        } else {
-          console.warn('❌ Unauthorized admin access attempt')
-          alert('You do not have admin privileges')
-        }
-        break
+        if (isAdmin) setViewMode('admin');
+        else alert('You do not have admin privileges');
+        break;
       case 'how-it-works':
       case 'pricing':
         setViewMode('jobseeker-home')
-        setTimeout(() => {
-          document.getElementById(view)?.scrollIntoView({ behavior: 'smooth' })
-        }, 100)
-        break
-      default:
-        break
+        setTimeout(() => document.getElementById(view)?.scrollIntoView({ behavior: 'smooth' }), 100)
+        break;
+      default: break;
     }
   }
 
@@ -214,9 +202,7 @@ function App() {
   }
 
   const renderContent = () => {
-    // Show spinner only while restoring session
     if (isRestoring) {
-      console.log('⏳ Showing loading spinner...')
       return (
         <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
           <div className="spinner" style={{ width: '50px', height: '50px' }}></div>
@@ -224,44 +210,16 @@ function App() {
       )
     }
 
-    // ✅ CONTACT PAGE - ADD THIS BEFORE ADMIN CHECK
     if (viewMode === 'contact') {
-      console.log('📧 Rendering contact page')
-      return (
-        <ContactPage 
-          onBack={() => {
-            console.log('🔙 Going back from contact page')
-            setViewMode(user ? 'dashboard' : 'jobseeker-home')
-          }} 
-        />
-      )
+      return <ContactPage onBack={() => setViewMode(user ? 'dashboard' : 'jobseeker-home')} />
     }
 
-    // ✅ ADMIN DASHBOARD - HIGHEST PRIORITY
     if (viewMode === 'admin') {
-      console.log(`🛡️ Rendering admin dashboard for: ${user?.email}`)
-      
-      if (!user) {
-        console.warn('⚠️ Admin view requested but no user logged in')
-        setViewMode('jobseeker-home')
-        return null
+      if (!user || !isAdmin) {
+        // Fallback if trying to access admin without perms
+        return <LandingPage onGetStarted={handleStartBlast} />
       }
-      
-      if (!isAdmin) {
-        console.warn('⚠️ Admin view requested but user is not admin')
-        setViewMode('dashboard')
-        return null
-      }
-      
-      return (
-        <AdminDashboard 
-          user={user} 
-          onExit={() => {
-            console.log('👋 Exiting admin panel')
-            setViewMode('dashboard')
-          }} 
-        />
-      )
+      return <AdminDashboard user={user} onExit={() => setViewMode('dashboard')} />
     }
 
     if (viewMode === 'recruiter') {
@@ -270,26 +228,15 @@ function App() {
     }
 
     if (user) {
-        if (viewMode === 'dashboard') {
-            return (
-                <div className="container">
-                    <UserDashboard user={user} onStartBlast={handleStartBlast} />
-                </div>
-            )
-        }
+        if (viewMode === 'dashboard') return <div className="container"><UserDashboard user={user} onStartBlast={handleStartBlast} /></div>
+        if (viewMode === 'jobseeker-home') return <LandingPage onGetStarted={handleStartBlast} />
 
-        if (viewMode === 'jobseeker-home') {
-             return <LandingPage onGetStarted={() => handleStartBlast()} />
-        }
-
-        // Upload Workbench (Default fallback for user)
         return (
             <div className="container dashboard-container">
               <div style={{marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
                  <button className="btn-text" onClick={() => setViewMode('dashboard')}>← Back to Dashboard</button>
                  <h1 style={{fontSize: '24px', margin: 0}}>Resume Blast Workbench</h1>
               </div>
-    
               {hasUploadedInSession ? (
                 <>
                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '20px', padding: '15px', background: '#f3f4f6', borderRadius: '8px', alignItems:'center'}}>
@@ -299,60 +246,39 @@ function App() {
                   <ResumeAnalysis 
                     user={user} 
                     resumeText={resumeText} 
-                    resumeId={resumeId}
-                    resumeUrl={resumeUrl}
-                    isPaymentSuccess={paymentSuccess}
+                    resumeId={resumeId} 
+                    resumeUrl={resumeUrl} 
+                    isPaymentSuccess={paymentSuccess} 
                   />
                 </>
               ) : (
-                <ResumeUpload 
-                  user={user}
-                  onUploadSuccess={({ text, url, id }) => {
-                    setResumeText(text)
-                    setResumeUrl(url)
-                    setResumeId(id)
-                    setHasUploadedInSession(true)
-                  }} 
-                />
+                <ResumeUpload user={user} onUploadSuccess={({ text, url, id }) => { setResumeText(text); setResumeUrl(url); setResumeId(id); setHasUploadedInSession(true); }} />
               )}
             </div>
           )
     }
-
     return <LandingPage onGetStarted={() => setShowSignup(true)} />
   }
 
   const isRecruiterDashboard = viewMode === 'recruiter' && user
   const isAdminPage = viewMode === 'admin' && user
-  const isContactPage = viewMode === 'contact' // ✅ ADD THIS
-
-  // ✅ UPDATED: Determine if Footer should be shown
-  // Footer is hidden on admin panel and contact page but shown everywhere else
+  const isContactPage = viewMode === 'contact' 
   const shouldShowFooter = !isAdminPage && !isContactPage
 
   return (
     <div className="app-wrapper">
       <GoogleAnalytics />
       <PaymentSuccessHandler />
+      {/* PaymentBlastTrigger handles the "Success Modal" on return from Stripe.
+        It runs independently so it works even if ResumeAnalysis is empty.
+      */}
       <PaymentBlastTrigger />
       
       {!isRecruiterDashboard && !isAdminPage && !isContactPage && (
-        <Navbar 
-          user={user}
-          isAdmin={isAdmin}
-          onViewChange={handleViewChange}
-          onLoginClick={() => setShowSignup(true)}
-          onLogout={handleLogout}
-        />
+        <Navbar user={user} isAdmin={isAdmin} onViewChange={handleViewChange} onLoginClick={() => setShowSignup(true)} onLogout={handleLogout} />
       )}
-      
-      <main className="main-content" style={(isRecruiterDashboard || isAdminPage || isContactPage) ? { paddingTop: 0 } : {}}>
-        {renderContent()}
-      </main>
-
-      {/* ✅ UPDATED FOOTER - Shows on all pages except admin panel and contact page */}
+      <main className="main-content" style={(isRecruiterDashboard || isAdminPage || isContactPage) ? { paddingTop: 0 } : {}}>{renderContent()}</main>
       {shouldShowFooter && <Footer />}
-
       {showSignup && (
         viewMode === 'recruiter' 
           ? <RecruiterAuth onClose={() => setShowSignup(false)} onSuccess={(u) => { setUser({...u, role: 'recruiter'}); setShowSignup(false); }} />

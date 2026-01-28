@@ -4,13 +4,9 @@ import BlastConfig from './BlastConfig';
 
 /**
  * PaymentBlastTrigger Component
- * 
- * This component runs on every page load and checks if the user just completed
- * a payment (by checking URL params). If so, it loads the resume data from
- * localStorage and the database, then automatically shows the BlastConfig modal
- * with paymentVerified=true to trigger the blast.
- * 
- * This solves the issue where ResumeAnalysis isn't mounted after Stripe redirect.
+ * * This component runs on every page load and checks if the user just completed
+ * a payment. It fetches the resume data from the database and ensures 
+ * the Candidate Name and Email are used (instead of Login details).
  */
 function PaymentBlastTrigger() {
   const [showBlast, setShowBlast] = useState(false);
@@ -29,7 +25,6 @@ function PaymentBlastTrigger() {
       const sessionId = params.get('session_id');
 
       if (!paymentSuccess || !sessionId) {
-        console.log('⏭️  No payment success detected in URL');
         return;
       }
 
@@ -44,21 +39,16 @@ function PaymentBlastTrigger() {
         return;
       }
 
-      console.log('✅ User found:', user.email);
-
       // 3. Get resume data from localStorage
       const savedResumeData = localStorage.getItem('pending_blast_resume_data');
       if (!savedResumeData) {
         console.error('❌ No resume data found in localStorage');
-        alert('Resume data not found. Please upload your resume again to proceed with blast.');
-        
         // Clean up URL
         window.history.replaceState({}, '', window.location.pathname);
         return;
       }
 
       const parsedResumeData = JSON.parse(savedResumeData);
-      console.log('✅ Resume data loaded from localStorage:', parsedResumeData.id);
 
       // 4. Fetch the complete resume record from database
       const { data: resumeRecord, error: resumeError } = await supabase
@@ -70,19 +60,53 @@ function PaymentBlastTrigger() {
       if (resumeError || !resumeRecord) {
         console.error('❌ Could not fetch resume from database:', resumeError);
         alert('Resume not found in database. Please upload again.');
-        
-        // Clean up
         localStorage.removeItem('pending_blast_resume_data');
         window.history.replaceState({}, '', window.location.pathname);
         return;
       }
 
       console.log('✅ Resume fetched from database');
-      console.log('Resume details:', {
-        id: resumeRecord.id,
-        fileName: resumeRecord.file_name,
-        detectedRole: resumeRecord.detected_role
-      });
+
+      // --- CRITICAL FIX: Extract Candidate Info from Analysis Data ---
+      const analysis = resumeRecord.analysis_data || {};
+
+      // 1. Resolve Name (Strict Priority: AI Analysis > DB Column > Filename > Login Name)
+      let candidateName = analysis.candidate_name;
+      
+      // If AI failed to get name, try the root column
+      if (!candidateName || candidateName === 'Not Found' || candidateName === 'Candidate') {
+          candidateName = resumeRecord.candidate_name;
+      }
+      
+      // If still invalid, try to use the filename (better than login email)
+      if (!candidateName || candidateName === 'Not Found' || candidateName === 'Candidate') {
+          // Remove extension and underscores from filename
+          candidateName = resumeRecord.file_name?.split('.')[0].replace(/_/g, ' ') || '';
+      }
+
+      // Final fallback to login name only if absolutely nothing else exists
+      if (!candidateName || candidateName.trim() === '') {
+          candidateName = user.user_metadata?.full_name || user.email.split('@')[0];
+      }
+
+      // 2. Resolve Email
+      let candidateEmail = analysis.candidate_email;
+      if (!candidateEmail || candidateEmail === 'Not Found') {
+          candidateEmail = resumeRecord.candidate_email;
+      }
+      if (!candidateEmail || candidateEmail === 'Not Found') {
+          candidateEmail = user.email; // Fallback to login email
+      }
+
+      // 3. Resolve Phone
+      const candidatePhone = analysis.candidate_phone !== 'Not Found' 
+          ? analysis.candidate_phone 
+          : (resumeRecord.candidate_phone || '');
+
+      // 4. Resolve Role
+      const candidateRole = analysis.detected_role || 
+                            resumeRecord.detected_role || 
+                            'Professional';
 
       // 5. Prepare data for BlastConfig
       const preparedResumeData = {
@@ -93,49 +117,36 @@ function PaymentBlastTrigger() {
 
       const preparedUserData = {
         id: user.id,
-        name: resumeRecord.candidate_name || 
-              user.user_metadata?.full_name || 
-              user.email.split('@')[0],
-        email: resumeRecord.candidate_email || user.email,
-        phone: resumeRecord.candidate_phone || user.user_metadata?.phone || '',
-        targetRole: resumeRecord.detected_role || 'Professional',
-        skills: Array.isArray(resumeRecord.top_skills) 
-          ? resumeRecord.top_skills.join(', ') 
+        name: candidateName, // ✅ Now strictly prioritized
+        email: candidateEmail,
+        phone: candidatePhone,
+        targetRole: candidateRole,
+        skills: Array.isArray(analysis.top_skills) 
+          ? analysis.top_skills.join(', ') 
           : 'Professional Skills',
-        years_experience: resumeRecord.seniority_level || 
-                         resumeRecord.total_experience || 
+        years_experience: analysis.seniority_level || 
+                         analysis.total_experience || 
                          'Mid-Level'
       };
 
       console.log('✅ Data prepared for blast:');
-      console.log('User:', preparedUserData.name, preparedUserData.email);
-      console.log('Role:', preparedUserData.targetRole);
+      console.log('   Candidate Name:', preparedUserData.name);
+      console.log('   Candidate Email:', preparedUserData.email);
+      console.log('   Target Role:', preparedUserData.targetRole);
 
       // 6. Set state to show BlastConfig
       setResumeData(preparedResumeData);
       setUserData(preparedUserData);
       setShowBlast(true);
 
-      console.log('✅ BlastConfig will now mount with paymentVerified=true');
-      console.log('=== ✅ PAYMENT BLAST TRIGGER COMPLETE ===');
-      console.log('');
-
     } catch (error) {
-      console.error('');
-      console.error('=== ❌ ERROR IN PAYMENT BLAST TRIGGER ===');
-      console.error('Error:', error);
-      console.error('Stack:', error.stack);
-      console.error('');
-      
+      console.error('=== ❌ ERROR IN PAYMENT BLAST TRIGGER ===', error);
       alert('Error preparing blast data. Please try again or contact support.');
-      
-      // Clean up on error
       localStorage.removeItem('pending_blast_resume_data');
       window.history.replaceState({}, '', window.location.pathname);
     }
   };
 
-  // Don't render anything if blast shouldn't be shown
   if (!showBlast || !resumeData || !userData) {
     return null;
   }
@@ -149,26 +160,15 @@ function PaymentBlastTrigger() {
       onBlastComplete={(result) => {
         console.log('🎉 Blast completed successfully:', result);
         setShowBlast(false);
-        
-        // Clean up
         localStorage.removeItem('pending_blast_resume_data');
         localStorage.removeItem('pending_blast_config');
-        
-        // Show success message
         alert('✅ Blast Successful!\n\nYour resume has been sent to recruiters. Check your email for responses!');
-        
-        // Redirect to dashboard
         window.location.href = '/dashboard';
       }}
       onCancel={() => {
         console.log('❌ Blast cancelled by user');
         setShowBlast(false);
-        
-        // Clean up URL
         window.history.replaceState({}, '', window.location.pathname);
-        
-        // Optionally redirect to home
-        // window.location.href = '/';
       }}
     />
   );

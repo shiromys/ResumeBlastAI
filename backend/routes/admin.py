@@ -3,6 +3,7 @@ import os
 import requests
 from datetime import datetime, timedelta, timezone
 import time
+from services.user_service import UserService  # ✅ ADDED: Import UserService
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -148,21 +149,76 @@ def get_users():
         print(f"Admin Users Error: {e}")
         return jsonify({'error': str(e)}), 500
 
+# =========================================================
+# 2.1 DELETE USER ENDPOINT (✅ NEW - PROPERLY IMPLEMENTED)
+# =========================================================
 @admin_bp.route('/api/admin/users/delete', methods=['POST'])
-def delete_user_proxy():
-    # This acts as a proxy to the user_management logic if needed
-    # Ideally, user_management_bp handles this, but for completeness:
-    from services.user_service import UserService
+def delete_user():
+    """
+    Delete user with complete orchestration:
+    - Archives user data to deleted_users table
+    - Deletes from all database tables
+    - Removes from authentication
+    - Blacklists email to prevent re-signup
+    """
     try:
         data = request.json
         email = data.get('email')
         user_id = data.get('user_id')
-        reason = data.get('reason', 'Admin Dashboard Deletion')
+        admin_email = data.get('admin_email', 'system')
+        reason = data.get('reason', 'Admin deletion via dashboard')
         
-        result = UserService.delete_user_data(email, user_id, reason)
-        return jsonify({'success': True, 'details': result}), 200
+        # Validate required fields
+        if not email:
+            return jsonify({
+                'success': False,
+                'error': 'Email is required'
+            }), 400
+        
+        print(f"\n{'='*70}")
+        print(f"🗑️  ADMIN DELETE REQUEST")
+        print(f"{'='*70}")
+        print(f"📧 Email: {email}")
+        print(f"👤 User ID: {user_id or 'Will be resolved'}")
+        print(f"👮 Admin: {admin_email}")
+        print(f"📝 Reason: {reason}")
+        print(f"{'='*70}\n")
+        
+        # ✅ USE THE COMPLETE UserService.delete_user_data() METHOD
+        # This method handles:
+        # 1. Resolving user_id if not provided
+        # 2. Fetching full user data for archiving
+        # 3. Adding to deleted_users table with admin info
+        # 4. Deleting from all database tables
+        # 5. Banning user in users table
+        # 6. Deleting from Supabase Auth
+        deletion_summary = UserService.delete_user_data(
+            email=email,
+            user_id=user_id,
+            reason=reason,
+            deleted_by=admin_email  # ✅ Pass admin email
+        )
+        
+        print(f"\n{'='*70}")
+        print(f"✅ DELETION COMPLETED")
+        print(f"{'='*70}")
+        print(f"Steps completed: {deletion_summary.get('steps_completed', [])}")
+        print(f"Tables deleted: {len(deletion_summary.get('tables_deleted', []))}")
+        print(f"{'='*70}\n")
+        
+        # Return success with detailed summary
+        return jsonify({
+            'success': True,
+            'message': f'User {email} has been successfully deleted',
+            'details': deletion_summary
+        }), 200
+        
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        print(f"\n❌ DELETION ERROR: {e}\n")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 # =========================================================
 # 3. SYSTEM HEALTH (Fixed: Detailed Stats)

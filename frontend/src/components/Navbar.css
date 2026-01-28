@@ -5,7 +5,7 @@
   top: 0;
   left: 0;
   right: 0;
-  height: 80px;
+  height: 80px; 
   background-color: rgba(255, 255, 255, 0.98);
   border-bottom: 1px solid #E5E7EB;
   z-index: 1000;
@@ -29,18 +29,27 @@
   text-decoration: none;
   cursor: pointer;
   z-index: 1001;
+  transition: opacity 0.3s ease;
 }
 
-.logo-icon { font-size: 24px; }
-.logo-text { font-size: 20px; font-weight: 800; color: #111827; letter-spacing: -0.02em; }
+.navbar-logo:hover {
+  opacity: 0.85;
+}
 
-/* FIX: Ensure menu items are in a row and remove bullets */
+/* 60px Logo size */
+.logo-image {
+  height: 60px; 
+  width: auto;
+  display: block;
+}
+
+/* Menu layout */
 .navbar-menu {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 32px;
-  list-style: none !important; /* Removes bullets */
+  list-style: none !important;
   margin: 0;
   padding: 0;
 }
@@ -52,12 +61,13 @@
   align-items: center;
 }
 
+/* ✅ UPDATED: Made font bolder (600) and darker (#111827) */
 .nav-link {
   background: transparent;
   border: none;
-  color: #4B5563;
+  color: #111827; 
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 600; 
   cursor: pointer;
   padding: 8px 12px;
   border-radius: 6px;
@@ -72,7 +82,7 @@
 
 .nav-login {
   color: #DC2626;
-  font-weight: 600;
+  font-weight: 700;
   border: 1px solid #DC2626;
   padding: 8px 20px;
 }
@@ -82,7 +92,7 @@
   color: white;
 }
 
-.nav-logout { color: #DC2626; }
+.nav-logout { color: #DC2626; font-weight: 600; }
 .nav-logout:hover { text-decoration: underline; background: transparent; }
 
 .mobile-menu-btn {
@@ -99,6 +109,10 @@
 @media (max-width: 768px) {
   .mobile-menu-btn { display: block; }
   
+  .logo-image {
+    height: 50px; 
+  }
+  
   .navbar-menu {
     position: fixed;
     top: 0;
@@ -108,7 +122,7 @@
     background: white;
     flex-direction: column;
     justify-content: center;
-    padding-top: 60px;
+    padding-top: 60px; 
     transition: right 0.3s ease-in-out;
     box-shadow: -5px 0 15px rgba(0,0,0,0.1);
   }
@@ -116,4 +130,10 @@
   .navbar-menu.mobile-active { right: 0; }
   .navbar-menu li { margin: 15px 0; }
   .nav-link { font-size: 18px; padding: 12px 24px; }
+}
+
+@media (max-width: 480px) {
+  .logo-image {
+    height: 40px; 
+  }
 }

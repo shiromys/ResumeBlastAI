@@ -1,56 +1,38 @@
 import { useEffect, useState, useRef } from 'react'
 import './LandingPage.css'
 
-// --- INTERNAL COMPONENT: Live Counter (Resets on scroll) ---
+// --- INTERNAL COMPONENT: Live Counter ---
 const CountUp = ({ end, duration = 2000, suffix = '' }) => {
   const [count, setCount] = useState(0);
   const countRef = useRef(null);
   const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setIsVisible(true);
-        } else {
-          setIsVisible(false);
-          setCount(0);
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (countRef.current) {
-      observer.observe(countRef.current);
-    }
-
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) setIsVisible(true);
+      else { setIsVisible(false); setCount(0); }
+    }, { threshold: 0.1 });
+    if (countRef.current) observer.observe(countRef.current);
     return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
     if (!isVisible) return;
-
     let startTimestamp = null;
     const step = (timestamp) => {
       if (!startTimestamp) startTimestamp = timestamp;
       const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-      
       setCount(Math.floor(progress * end));
-      
-      if (progress < 1) {
-        window.requestAnimationFrame(step);
-      } else {
-        setCount(end);
-      }
+      if (progress < 1) window.requestAnimationFrame(step);
+      else setCount(end);
     };
-    
     window.requestAnimationFrame(step);
   }, [isVisible, end, duration]);
 
   return <span ref={countRef}>{count}{suffix}</span>;
 };
 
-// --- INTERNAL COMPONENT: Infinite Typewriter Effect ---
+// --- INTERNAL COMPONENT: Typewriter ---
 const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDeleteStart }) => {
   const [currentText, setCurrentText] = useState('');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -64,7 +46,6 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
 
   useEffect(() => {
     if (!isStarted) return;
-
     let timer;
     const typeSpeed = isDeleting ? 30 : 60;
     const pauseTime = 2000;
@@ -76,7 +57,6 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
       }, typeSpeed);
     } else if (!isDeleting && currentIndex === text.length) {
       if (onTypeEnd) onTypeEnd();
-      
       if (infinite) {
         timer = setTimeout(() => {
           setIsDeleting(true);
@@ -91,7 +71,6 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
     } else if (isDeleting && currentIndex === 0) {
       setIsDeleting(false);
     }
-
     return () => clearTimeout(timer);
   }, [currentIndex, isDeleting, isStarted, text, infinite, onTypeEnd, onDeleteStart]);
 
@@ -110,53 +89,45 @@ function LandingPage({ onGetStarted }) {
       {/* HERO SECTION */}
       <section id="home" className="hero">
         <div className="hero-content">
-          
-          {/* UPDATED: Animated Tagline (Left to Right wipe) */}
           <div className="tagline-wrapper">
             <p className="tagline animated-wipe">
-              AI-Powered Resume Distribution to <span className="counter-badge"><CountUp end={500} suffix="+" /></span> Recruiters
+              AI-Powered Resume Distribution to <span className="counter-badge"><CountUp end={2000} suffix="+" /></span> Recruiters
             </p>
           </div>
           
-          {/* ANIMATED HEADLINE */}
           <h1>
             <span style={{ display: 'block', minHeight: '1.2em' }}>
               <TypewriterEffect text="Stop Applying." />
             </span>
-            
             <span className="highlight-container" style={{ display: 'block', minHeight: '1.2em' }}>
               <TypewriterEffect 
                 text="Start Blasting." 
-                delay={1000} 
+                delay={800} 
                 infinite={true} 
                 onTypeEnd={() => setShowHighlight(true)} 
                 onDeleteStart={() => setShowHighlight(false)} 
               />
-              {/* Highlight Bar */}
               <span className={`highlight-bg ${showHighlight ? 'active' : ''}`}></span>
             </span>
           </h1>
           
-          {/* Highlighted Block */}
           <div className="hero-highlight-block">
             <p className="subtitle">
-              Don't waste time rewriting your resume. Our engine analyzes your profile and puts it directly in the inboxes of <strong style={{color: '#DC2626', fontWeight: '800'}}><CountUp end={500} suffix="+" /> verified recruiters</strong> looking for your skills.
+              Don't waste time rewriting your resume. Our engine analyzes your profile and puts it directly in the inboxes of <strong style={{color: '#DC2626', fontWeight: '800'}}><CountUp end={2000} suffix="+" /> verified recruiters</strong> looking for your skills.
             </p>
-            
             <div className="cta-container">
               <button className="cta-button large" onClick={onGetStarted}>
                 Start Your Job Search
               </button>
             </div>
           </div>
-
         </div>
       </section>
 
-      {/* How It Works Section */}
+      {/* How It Works */}
       <section id="how-it-works" className="how-it-works">
         <h2>How It Works</h2>
-        <p className="section-subtitle">Get noticed in 3 simple steps</p>
+        <p className="section-subtitle">Get noticed in 4 simple steps</p>
         <div className="steps">
           <div className="step">
             <div className="step-number">1</div>
@@ -174,46 +145,188 @@ function LandingPage({ onGetStarted }) {
             <div className="step-number">3</div>
             <div className="step-icon">📧</div>
             <h3>Mass Distribution</h3>
-            <p>We blast your resume to <strong style={{color: '#DC2626'}}>500+</strong> verified recruiters specifically looking for your skills.</p>
+            <p>We blast your resume to <strong style={{color: '#DC2626'}}>2000+</strong> verified recruiters specifically looking for your skills.</p>
           </div>
           <div className="step">
             <div className="step-number">4</div>
             <div className="step-icon">📊</div>
             <h3>Track Results</h3>
-            <p>Real-time analytics dashboard showing email opens and recruiter engagement.</p>
+            <p>Real-time analytics dashboard showing recent blasts and uploads.</p>
           </div>
         </div>
       </section>
 
-      {/* Pricing Section */}
+      {/* Pricing Section - MINIMIZED LENGTH */}
       <section id="pricing" className="pricing">
-        <h2>Simple, Transparent Pricing</h2>
-        <p className="section-subtitle">One-time payment. No subscriptions. No hidden fees.</p>
-        <div className="pricing-container">
-          <div className="pricing-card featured">
-            <div className="popular-badge">Most Popular</div>
-            <div className="price-header">
-              <h3>Distribution Package</h3>
-              <div className="price-tag">
-                <span className="currency">$</span>
-                <span className="amount">149</span>
-              </div>
-              <p className="price-description">One-time payment</p>
+        <h2>Choose Your Plan</h2>
+        <p className="section-subtitle">Start for free, upgrade for power.</p>
+        
+        <div className="pricing-container" style={{display: 'flex', gap: '20px', justifyContent: 'center', flexWrap: 'wrap', maxWidth: '850px', margin: '0 auto'}}>
+          
+          {/* FREEMIUM CARD - COMPACT */}
+          <div className="pricing-card" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', padding: '0'}}>
+            <div className="popular-badge" style={{background: '#DC2626', position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '2px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', color: 'white'}}>
+              New User Offer
             </div>
-            <ul className="features-list">
-              <li>✅ AI Targeting Analysis</li>
-              <li>✅ Instant Distribution to <strong><CountUp end={500} suffix="+" duration={1500} /> Recruiters</strong></li>
-              <li>✅ Verified Recruiter Database Access</li>
-              <li>✅ Real-time Analytics Dashboard</li>
-              <li>✅ Email Open & Click Tracking</li>
-              <li>✅ Direct Inbox Placement</li>
-              <li>✅ 30-Day Email Support</li>
+            
+            {/* Header */}
+            <div className="price-header" style={{padding: '20px 20px 10px', borderBottom: '1px solid #F3F4F6'}}>
+              <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Freemium Blast</h3>
+              <div className="price-tag" style={{margin: '5px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'center'}}>
+                <span className="currency" style={{fontSize: '20px', fontWeight: '600', color: '#374151', marginTop: '4px'}}>$</span>
+                <span className="amount" style={{fontSize: '48px', fontWeight: '800', color: '#1F2937', lineHeight: '1'}}>0</span>
+              </div>
+              <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>One-time use only</p>
+            </div>
+
+            {/* List */}
+            <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <strong>11 Verified Recruiters</strong>
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                Top Agencies Included
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                Instant Email Delivery
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                Professional Template
+              </li>
+              <li style={{padding: '5px 0', fontSize: '13px', color: '#9CA3AF', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                Limited to 11 Recruiters
+              </li>
             </ul>
-            <button className="cta-button featured" onClick={onGetStarted}>
-              Get Started Now
-            </button>
-            <p className="guarantee">🔒 100% Secure Payment</p>
+
+            {/* Button */}
+            <div style={{padding: '0 20px 20px'}}>
+              <button 
+                className="cta-button" 
+                style={{
+                  background: '#DC2626', 
+                  color: 'white', 
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '14px',
+                  fontWeight: '700',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  transition: 'background 0.3s ease'
+                }} 
+                onClick={onGetStarted}
+                onMouseOver={(e) => e.target.style.background = '#991B1B'}
+                onMouseOut={(e) => e.target.style.background = '#DC2626'}
+              >
+                Try for Free
+              </button>
+            </div>
           </div>
+
+          {/* PREMIUM CARD - COMPACT */}
+          <div className="pricing-card featured" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', boxShadow: '0 10px 30px rgba(220, 38, 38, 0.1)', padding: '0'}}>
+            <div className="popular-badge" style={{background: '#DC2626', position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '2px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', color: 'white'}}>
+              Most Popular
+            </div>
+
+            {/* Header */}
+            <div className="price-header" style={{padding: '20px 20px 10px', borderBottom: '1px solid #F3F4F6'}}>
+              <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Premium Distribution</h3>
+              <div className="price-tag" style={{margin: '5px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'center'}}>
+                <span className="currency" style={{fontSize: '20px', fontWeight: '600', color: '#374151', marginTop: '4px'}}>$</span>
+                <span className="amount" style={{fontSize: '48px', fontWeight: '800', color: '#1F2937', lineHeight: '1'}}>149</span>
+              </div>
+              <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>One-time payment</p>
+            </div>
+
+            {/* List */}
+            <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                AI Targeting Analysis
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                Distribution to <strong>&nbsp;<CountUp end={2000} suffix="+" duration={1500} /> Recruiters</strong>
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                Verified Recruiters
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                Real-time Analytics Dashboard
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                Direct Inbox Placement
+              </li>
+              <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                30-Day Email Support
+              </li>
+            </ul>
+
+            {/* Button */}
+            <div style={{padding: '0 20px 20px'}}>
+              <button 
+                className="cta-button featured" 
+                style={{
+                  background: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)',
+                  color: 'white',
+                  width: '100%',
+                  padding: '12px',
+                  fontSize: '14px',
+                  fontWeight: '700',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+                  boxShadow: '0 4px 12px rgba(220, 38, 38, 0.3)'
+                }}
+                onClick={onGetStarted}
+                onMouseOver={(e) => {
+                  e.target.style.transform = 'translateY(-2px)'
+                  e.target.style.boxShadow = '0 6px 16px rgba(220, 38, 38, 0.4)'
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.transform = 'translateY(0)'
+                  e.target.style.boxShadow = '0 4px 12px rgba(220, 38, 38, 0.3)'
+                }}
+              >
+                Get Started Now
+              </button>
+              <p className="guarantee" style={{textAlign: 'center', fontSize: '11px', color: '#6B7280', marginTop: '10px', fontWeight: '500'}}>
+                 100% Secure Payment
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Additional Info Section */}
+        <div style={{
+          marginTop: '40px',
+          textAlign: 'center',
+          padding: '20px',
+          background: '#F9FAFB',
+          borderRadius: '12px',
+          maxWidth: '800px',
+          margin: '40px auto 0'
+        }}>
+          <p style={{
+            color: '#374151',
+            fontSize: '14px',
+            lineHeight: '1.6',
+            margin: 0
+          }}>
+            <strong style={{color: '#DC2626'}}>New to ResumeBlast?</strong> Start with our <strong>FREE Freemium Blast</strong> to 11 top recruiters. 
+            Ready for more? Upgrade to <strong style={{color: '#DC2626'}}>Premium</strong> anytime to reach 2000+ verified recruiters with advanced analytics.
+          </p>
         </div>
       </section>
 
@@ -226,15 +339,13 @@ function LandingPage({ onGetStarted }) {
             <p>Get your resume AI-enhanced in minutes without mass distribution. Perfect for quick updates.</p>
             <span className="learn-more">Learn More →</span>
           </a>
-          
           <a href="https://resumedistribute.com" target="_blank" rel="noopener noreferrer" className="upsell-card">
             <h3>📧 ResumeDistribute</h3>
             <p>Access our premium recruiter database with 10,000+ contacts for targeted outreach campaigns.</p>
             <span className="learn-more">Learn More →</span>
           </a>
-          
-          <a href="https://blastmyresume.com" target="_blank" rel="noopener noreferrer" className="upsell-card">
-            <h3>💼 BlastMyResume</h3>
+          <a href="https://blastyourresume.com" target="_blank" rel="noopener noreferrer" className="upsell-card">
+            <h3>💼 BlastyourResume</h3>
             <p>Automated job application system - apply to 100+ jobs per day on major job boards.</p>
             <span className="learn-more">Learn More →</span>
           </a>
@@ -248,7 +359,7 @@ function LandingPage({ onGetStarted }) {
         <button className="cta-button large" onClick={onGetStarted}>
           Start Your Job Search Now
         </button>
-        <p className="cta-subtext">✅ One-time payment | 🔒 Secure checkout</p>
+        <p className="cta-subtext"> One-time payment | Secure checkout</p>
       </section>
     </div>
   )

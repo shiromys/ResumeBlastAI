@@ -49,11 +49,23 @@ INSTRUCTIONS:
 Return ONLY the optimized resume text. No explanations, no markdown, no code blocks.`;
 
   try {
+    // ✅ FIX 1: Ensure API key is properly formatted (remove any whitespace/newlines)
+    const apiKey = import.meta.env.VITE_CLAUDE_API_KEY?.trim();
+    
+    if (!apiKey) {
+      console.error('❌ API Key is missing!');
+      throw new Error('Claude API key is not configured. Please add VITE_CLAUDE_API_KEY to your .env file');
+    }
+
+    // ✅ FIX 2: Add detailed logging
+    console.log('🔑 API Key length:', apiKey.length);
+    console.log('🔑 API Key starts with:', apiKey.substring(0, 7));
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': import.meta.env.VITE_CLAUDE_API_KEY,
+        'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
@@ -67,7 +79,14 @@ Return ONLY the optimized resume text. No explanations, no markdown, no code blo
     const data = await response.json();
     
     if (!response.ok) {
-      throw new Error(data.error?.message || 'Claude API request failed');
+      // ✅ FIX 3: Better error handling
+      console.error('❌ Claude API Error Response:', data);
+      
+      if (data.error?.type === 'authentication_error') {
+        throw new Error('Invalid API key. Please check your VITE_CLAUDE_API_KEY in .env file');
+      }
+      
+      throw new Error(data.error?.message || `API Error: ${response.status}`);
     }
 
     // Clean up response - remove any markdown artifacts

@@ -1,17 +1,10 @@
-// frontend/src/hooks/useBlacklistCheck.js - CHECK BLACKLIST BEFORE SIGNUP/LOGIN
-
 import { useState } from 'react'
 
 export const useBlacklistCheck = () => {
   const [isChecking, setIsChecking] = useState(false)
-  const [isBlacklisted, setIsBlacklisted] = useState(false)
-  const [blacklistMessage, setBlacklistMessage] = useState('')
 
   const checkBlacklist = async (email) => {
     setIsChecking(true)
-    setIsBlacklisted(false)
-    setBlacklistMessage('')
-
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
     try {
@@ -25,31 +18,25 @@ export const useBlacklistCheck = () => {
 
       const data = await response.json()
 
+      // If user is blacklisted (403 or explicit flag)
       if (response.status === 403 || data.is_blacklisted) {
-        setIsBlacklisted(true)
-        setBlacklistMessage(
-          data.message || 
-          'Your account has been suspended. Please contact support@resumeblast.ai for assistance.'
-        )
         return {
           allowed: false,
-          isBlacklisted: true,
-          message: data.message || 'Account suspended'
+          // Use the message exactly as returned from backend
+          message: data.message || "For the signup/login contact support"
         }
       }
 
       return {
         allowed: true,
-        isBlacklisted: false,
         message: 'Account in good standing'
       }
 
     } catch (error) {
       console.error('Error checking blacklist:', error)
-      // Fail open - allow access if check fails
+      // Allow access if server is unreachable (prevent blocking everyone)
       return {
         allowed: true,
-        isBlacklisted: false,
         message: 'Check completed'
       }
     } finally {
@@ -59,8 +46,6 @@ export const useBlacklistCheck = () => {
 
   return {
     checkBlacklist,
-    isChecking,
-    isBlacklisted,
-    blacklistMessage
+    isChecking
   }
 }

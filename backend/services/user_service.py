@@ -1,7 +1,9 @@
-# backend/services/user_service.py - ENHANCED VERSION
+# backend/services/user_service.py
 import os
 import requests
 from datetime import datetime
+import json
+import traceback
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
@@ -18,28 +20,36 @@ class UserService:
         }
 
     @staticmethod
-    def delete_user_data(email, user_id=None, reason="Admin deletion"):
+    def get_full_user_data(user_id):
+        """Fetch full user record for archiving before deletion"""
+        try:
+            url = f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}"
+            resp = requests.get(url, headers=UserService._get_headers())
+            if resp.status_code == 200:
+                data = resp.json()
+                # Return the first record found
+                return data[0] if data else None
+            return None
+        except Exception as e:
+            print(f"⚠️ Failed to fetch user archive data: {e}")
+            return None
+
+    @staticmethod
+    def delete_user_data(email, user_id=None, reason="Admin deletion", deleted_by="system"):
         """
         Complete user data deletion orchestration:
         1. Resolve user_id if not provided
-        2. Add to blacklist (deleted_users table)
-        3. Delete from all database tables
-        4. Ban user in users table
-        5. Delete from Supabase Auth
-        
-        Args:
-            email: User email address
-            user_id: Optional user UUID
-            reason: Reason for deletion (e.g., "Stripe Refund", "Admin Ban")
-        
-        Returns:
-            dict: Deletion summary
+        2. Archive user data (fetch before delete)
+        3. Add to blacklist (deleted_users table) with admin info
+        4. Delete from all database tables
+        5. Ban user in users table
+        6. Delete from Supabase Auth
         """
         print(f"\n{'='*70}")
         print(f"🗑️  STARTING USER DELETION")
         print(f"{'='*70}")
         print(f"📧 Email: {email}")
-        print(f"📝 Reason: {reason}")
+        print(f"👤 Deleted By: {deleted_by}")
         
         deletion_summary = {
             'email': email,
@@ -62,13 +72,31 @@ class UserService:
             deletion_summary['user_id'] = user_id
             print(f"✅ User ID provided: {user_id}")
         
+        # STEP 1.5: Fetch Data to Archive (Before deleting!)
+        user_archive_data = None
+        if user_id:
+            print(f"\n📦 Step 1.5: Fetching user data for archiving...")
+            user_archive_data = UserService.get_full_user_data(user_id)
+            if user_archive_data:
+                print(f"✅ User data archived (contains {len(user_archive_data)} fields)")
+            else:
+                print(f"⚠️  No user data found to archive")
+
         # STEP 2: Add to Blacklist (CRITICAL - Do this first!)
         print(f"\n🚫 Step 2: Adding to blacklist...")
-        blacklist_result = UserService.add_to_blacklist(email, user_id, reason)
-        deletion_summary['steps_completed'].append('blacklist')
+        
+        # ✅ Pass deleted_by and the archived data
+        blacklist_result = UserService.add_to_blacklist(email, user_id, reason, deleted_by, user_archive_data)
+        
+        if blacklist_result:
+            print(f"   ✅ BLACKLIST STEP SUCCEEDED")
+            deletion_summary['steps_completed'].append('blacklist')
+        else:
+            print(f"   ❌ BLACKLIST STEP FAILED")
         
         if user_id:
             # STEP 3: Ban user in users table (before deletion)
+            # This ensures if deletion fails, they are at least locked out
             print(f"\n⛔ Step 3: Banning user account...")
             UserService.ban_user(user_id, reason)
             deletion_summary['steps_completed'].append('ban_user')
@@ -87,21 +115,15 @@ class UserService:
         print(f"\n{'='*70}")
         print(f"✅ USER DELETION COMPLETED")
         print(f"{'='*70}")
-        print(f"📊 Summary:")
-        print(f"   Email: {email}")
-        print(f"   User ID: {user_id or 'N/A'}")
-        print(f"   Blacklisted: Yes")
-        print(f"   Steps Completed: {len(deletion_summary['steps_completed'])}")
+        print(f"Steps completed: {deletion_summary.get('steps_completed')}")
+        print(f"Tables deleted: {len(deletion_summary.get('tables_deleted', []))}")
         print(f"{'='*70}\n")
         
         return deletion_summary
 
     @staticmethod
     def get_user_id_by_email(email):
-        """
-        Find user ID by email from multiple sources
-        Priority: auth.users -> public.users -> payments table
-        """
+        """Find user ID by email"""
         try:
             # Try public.users first (faster)
             url = f"{SUPABASE_URL}/rest/v1/users?email=eq.{email}&select=id"
@@ -110,7 +132,6 @@ class UserService:
             if resp.status_code == 200:
                 data = resp.json()
                 if data and len(data) > 0:
-                    print(f"   Found in users table")
                     return data[0]['id']
             
             # Try payments table as fallback
@@ -120,10 +141,8 @@ class UserService:
             if resp.status_code == 200:
                 data = resp.json()
                 if data and len(data) > 0:
-                    print(f"   Found in payments table")
                     return data[0]['user_id']
             
-            print(f"   User ID not found in database")
             return None
             
         except Exception as e:
@@ -131,48 +150,46 @@ class UserService:
             return None
 
     @staticmethod
-    def add_to_blacklist(email, original_user_id, reason):
-        """
-        Add email to deleted_users blacklist
-        Uses upsert to handle duplicates
-        """
+    def add_to_blacklist(email, original_user_id, reason, deleted_by="system", original_data=None):
+        """Add email to deleted_users blacklist with full archive data"""
         try:
             url = f"{SUPABASE_URL}/rest/v1/deleted_users"
             
+            # Prepare the data
             data = {
                 'email': email.lower(),
                 'original_user_id': original_user_id,
                 'reason': reason,
                 'deleted_at': datetime.utcnow().isoformat(),
-                'deleted_by': 'system',
+                'deleted_by': deleted_by,
+                'original_data': original_data,
                 'metadata': {
                     'deletion_timestamp': datetime.utcnow().isoformat(),
                     'reason_category': 'refund' if 'refund' in reason.lower() else 'admin'
                 }
             }
             
-            # Use upsert to avoid duplicate errors
+            # Get headers
             headers = UserService._get_headers()
-            headers['Prefer'] = 'resolution=merge-duplicates'
+            headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
             
-            response = requests.post(url, json=data, headers=headers)
+            # Make the request
+            response = requests.post(url, json=data, headers=headers, timeout=10)
             
             if response.status_code in [200, 201]:
-                print(f"✅ Added {email} to blacklist")
                 return True
             else:
-                print(f"⚠️  Blacklist response: {response.status_code} - {response.text}")
+                print(f"   ❌ FAILED to add to blacklist! Status: {response.status_code}")
+                print(f"      Response: {response.text}")
                 return False
                 
         except Exception as e:
-            print(f"❌ Error adding to blacklist: {e}")
+            print(f"   ❌ UNEXPECTED ERROR in add_to_blacklist: {str(e)}")
             return False
 
     @staticmethod
     def ban_user(user_id, reason):
-        """
-        Ban user in users table (mark as banned before deletion)
-        """
+        """Ban user in users table (mark as banned before deletion)"""
         try:
             url = f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}"
             
@@ -184,13 +201,7 @@ class UserService:
                 'updated_at': datetime.utcnow().isoformat()
             }
             
-            response = requests.patch(url, json=data, headers=UserService._get_headers())
-            
-            if response.status_code in [200, 204]:
-                print(f"✅ User banned in users table")
-            else:
-                print(f"⚠️  Could not ban user: {response.status_code}")
-                
+            requests.patch(url, json=data, headers=UserService._get_headers())
         except Exception as e:
             print(f"⚠️  Error banning user: {e}")
 
@@ -200,7 +211,9 @@ class UserService:
         Delete user data from all tables
         Returns list of tables that were successfully cleaned
         """
+        # ✅ ADDED 'user_profiles' to this list to ensure proper deletion
         tables = [
+            'user_profiles',        # <--- Critical Addition
             'resume_uploads',
             'blast_history', 
             'payment_history',
@@ -218,40 +231,50 @@ class UserService:
         
         deleted_tables = []
         
+        # 1. Delete Child Tables First
         for table in tables:
             try:
+                # Construct URL (handle both snake_case column names usually found in these tables)
                 url = f"{SUPABASE_URL}/rest/v1/{table}?user_id=eq.{user_id}"
+                
+                # Special case for tables that might use 'id' as the FK (like user_profiles often does)
+                if table == 'user_profiles':
+                     url = f"{SUPABASE_URL}/rest/v1/{table}?id=eq.{user_id}"
+
                 response = requests.delete(url, headers=UserService._get_headers())
                 
                 if response.status_code in [200, 204]:
                     print(f"   ✓ Cleared: {table}")
                     deleted_tables.append(table)
                 else:
-                    print(f"   ⚠ Skipped: {table} ({response.status_code})")
+                    # Ignore 404s or cases where table doesn't exist/empty
+                    print(f"   - Skipped: {table} ({response.status_code})")
                     
             except Exception as e:
-                print(f"   ⚠ Error clearing {table}: {e}")
+                print(f"   ⚠  Error clearing {table}: {e}")
         
-        # Also delete from users table
+        # 2. Finally Delete from 'users' table
         try:
+            print(f"   🗑️ Attempting to delete from 'users' table...")
             url = f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}"
             response = requests.delete(url, headers=UserService._get_headers())
             
             if response.status_code in [200, 204]:
-                print(f"   ✓ Cleared: users")
+                print(f"   ✅ SUCCESSFULLY DELETED USER RECORD")
                 deleted_tables.append('users')
+            else:
+                print(f"   ❌ Failed to delete from users table. Status: {response.status_code}")
+                print(f"      Error: {response.text}")
+                print(f"      HINT: Check if there are other tables referencing 'users.id' that are not in the list above.")
                 
         except Exception as e:
-            print(f"   ⚠ Error clearing users: {e}")
+            print(f"   ⚠  Error clearing users: {e}")
         
         return deleted_tables
 
     @staticmethod
     def delete_from_auth(user_id):
-        """
-        Delete user from Supabase Auth
-        This prevents them from logging in
-        """
+        """Delete user from Supabase Auth"""
         try:
             url = f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}"
             response = requests.delete(url, headers=UserService._get_headers())
@@ -263,44 +286,3 @@ class UserService:
                 
         except Exception as e:
             print(f"⚠️  Auth deletion error: {e}")
-
-    @staticmethod
-    def is_user_blacklisted(email):
-        """
-        Check if user is in blacklist
-        Returns: (is_blacklisted: bool, reason: str)
-        """
-        try:
-            url = f"{SUPABASE_URL}/rest/v1/deleted_users?email=eq.{email.lower()}"
-            response = requests.get(url, headers=UserService._get_headers())
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data and len(data) > 0:
-                    return True, data[0].get('reason', 'Account suspended')
-            
-            return False, None
-            
-        except Exception as e:
-            print(f"❌ Error checking blacklist: {e}")
-            return False, None
-
-    @staticmethod
-    def get_blacklist_info(email):
-        """
-        Get detailed blacklist information for an email
-        """
-        try:
-            url = f"{SUPABASE_URL}/rest/v1/deleted_users?email=eq.{email.lower()}"
-            response = requests.get(url, headers=UserService._get_headers())
-            
-            if response.status_code == 200:
-                data = response.json()
-                if data and len(data) > 0:
-                    return data[0]
-            
-            return None
-            
-        except Exception as e:
-            print(f"❌ Error getting blacklist info: {e}")
-            return None

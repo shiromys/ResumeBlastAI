@@ -144,7 +144,7 @@ function AdminDashboard({ user, onExit }) {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
     
     try {
-      console.log(` Deleting user: ${userEmail}`)
+      console.log(`🗑️ Deleting user: ${userEmail}`)
       
       const response = await fetch(`${API_URL}/api/admin/users/delete`, {
         method: 'POST',
@@ -162,11 +162,19 @@ function AdminDashboard({ user, onExit }) {
       const result = await response.json()
       
       if (result.success || response.status === 207) {
+        // ✅ CORRECTED: Safely access the details returned by backend
+        // This prevents the "undefined" error if the backend structure varies
+        const details = result.details || {}
+        const steps = details.steps_completed || []
+        const tables = details.tables_deleted || []
+
         alert(`✅ User "${userEmail}" has been successfully deleted!\n\nDetails:\n` +
-              `• Auth: ${result.details.auth_deleted ? 'Deleted' : 'Failed'}\n` +
-              `• Blacklisted: ${result.details.blacklisted ? 'Yes' : 'No'}\n` +
-              `• Data cleaned: ${Object.values(result.details.data_cleanup).filter(Boolean).length} tables`)
+              `• Auth Deleted: ${steps.includes('auth_deletion') ? 'Yes' : 'No/Already Gone'}\n` +
+              `• Blacklisted: ${steps.includes('blacklist') ? 'Yes' : 'Failed'}\n` +
+              `• Database: Cleared ${tables.length} tables\n` + 
+              `• Status: ${details.reason || 'Completed'}`)
         
+        // Refresh the user list
         fetchData('users')
       } else {
         alert(`❌ Error deleting user:\n${result.error || 'Unknown error'}`)

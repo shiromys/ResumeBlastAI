@@ -14,8 +14,7 @@ function Navbar({ user, isAdmin, onViewChange, onLoginClick, onLogout }) {
       <nav className="navbar">
         <div className="navbar-container">
           <div className="navbar-logo" onClick={() => handleNavClick('home')}>
-            <span className="logo-icon">🚀</span>
-            <span className="logo-text">ResumeBlast.ai</span>
+            <img src="/image/logo.png" alt="ResumeBlast.ai" className="logo-image" />
           </div>
           
           <ul className={`navbar-menu ${mobileMenuOpen ? 'mobile-active' : ''}`}>
@@ -28,7 +27,6 @@ function Navbar({ user, isAdmin, onViewChange, onLoginClick, onLogout }) {
                 <li><button className="nav-link" onClick={() => handleNavClick('pricing')}>Pricing</button></li>
                 <li><button className="nav-link" onClick={() => handleNavClick('recruiter')}>Employers</button></li>
                 
-                {/* ✅ UPDATED: Navigate to contact page instead of modal */}
                 <li>
                   <button 
                     className="nav-link" 
@@ -47,12 +45,12 @@ function Navbar({ user, isAdmin, onViewChange, onLoginClick, onLogout }) {
             ) : (
               <>
                 <li>
-                  <button className="nav-link" style={{fontWeight: 'bold', color: '#DC2626'}} onClick={() => handleNavClick('dashboard')}>
+                  {/* ✅ CHANGED: Removed red inline style so it is now black and bold like the other options */}
+                  <button className="nav-link" onClick={() => handleNavClick('dashboard')}>
                     Dashboard
                   </button>
                 </li>
 
-                {/* ✅ UPDATED: Navigate to contact page for logged in users */}
                 <li>
                   <button 
                     className="nav-link" 

@@ -174,9 +174,9 @@ function RecruiterOnboarding({ user, onComplete }) {
         <div className="container" style={{ maxWidth: '1000px', margin: '40px auto', padding: '0 20px' }}>
             
             {/* HEADER */}
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '15px'}}>
+            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px'}}>
                 <div>
-                    <h2 style={{fontSize: '28px', marginBottom: '5px'}}>👋 Welcome back, {formData.name}!</h2>
+                    <h2 style={{fontSize: '28px', marginBottom: '5px'}}> Welcome back, {formData.name}!</h2>
                     <p style={{color: '#666'}}>
                         Recruiting for <strong>{formData.company}</strong> • {formData.industry === 'All' ? 'All Industries' : formData.industry}
                     </p>
@@ -186,6 +186,24 @@ function RecruiterOnboarding({ user, onComplete }) {
                     <button className="btn-outline" onClick={() => setProfileExists(false)}>⚙️ Edit Profile</button>
                     <button className="btn-outline" onClick={handleLogout} style={{borderColor: '#DC2626', color: '#DC2626'}}>🚪 Sign Out</button>
                 </div>
+            </div>
+
+            {/* ✅ ADDED NOTE HERE */}
+            <div style={{
+                background: '#eff6ff', 
+                border: '1px solid #bfdbfe', 
+                borderRadius: '8px', 
+                padding: '12px 16px', 
+                marginBottom: '30px', 
+                display: 'flex', 
+                alignItems: 'center', 
+                gap: '10px',
+                color: '#1e40af'
+            }}>
+                <span style={{fontSize: '20px'}}>📧</span>
+                <p style={{margin: 0, fontSize: '14px', lineHeight: '1.5'}}>
+                    To ensure you don’t miss any candidate updates, please remember to check both your <strong>Inbox</strong> and <strong>Spam</strong> folders.
+                </p>
             </div>
 
             {/* ANALYTICS GRID */}
@@ -355,7 +373,7 @@ function RecruiterOnboarding({ user, onComplete }) {
                                             e.target.style.color = '#DC2626';
                                         }}
                                     >
-                                        📥 Download Resume
+                                         Download Resume
                                     </a>
                                 </div>
                             ))}
@@ -375,7 +393,7 @@ function RecruiterOnboarding({ user, onComplete }) {
             {/* DISCLAIMER MODAL */}
             {showDisclaimer && (
               <RecruiterDisclaimerModal 
-                recruiterId={user?.id} // ✅ ADDED THIS MISSING PROP
+                recruiterId={user?.id} 
                 onAccept={handleDisclaimerAccept}
                 onDecline={handleDisclaimerDecline}
               />
@@ -390,7 +408,7 @@ function RecruiterOnboarding({ user, onComplete }) {
   return (
     <div className="container" style={{ maxWidth: '800px', margin: '40px auto', padding: '0 20px' }}>
       <div className="resume-builder">
-        <h2 style={{textAlign: 'center'}}>🏢 Complete Your Profile</h2>
+        <h2 style={{textAlign: 'center'}}> Complete Your Profile</h2>
         <form onSubmit={handleSubmit} className="form-container">
             <div className="form-field"><label>Full Name</label><input name="name" value={formData.name} onChange={handleChange} required /></div>
             <div className="form-field"><label>Company</label><input name="company" value={formData.company} onChange={handleChange} required /></div>

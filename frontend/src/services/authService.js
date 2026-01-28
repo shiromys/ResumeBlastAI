@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 /**
- * Check if user email is blacklisted
+ * Check if user email is blacklisted/deleted
  * Call this BEFORE allowing signup or login
  */
 export const checkBlacklist = async (email) => {
@@ -21,12 +21,14 @@ export const checkBlacklist = async (email) => {
 
     const data = await response.json();
 
+    // Check specifically for the is_blacklisted flag
     if (data.is_blacklisted) {
       console.log('🚫 User is blacklisted:', email);
       return {
         allowed: false,
         reason: data.reason,
-        message: data.message || 'Your account has been suspended. Please contact support@resumeblast.ai'
+        // ✅ Return the specific message from backend
+        message: data.message || "For the signup/login contact support"
       };
     }
 
@@ -38,7 +40,8 @@ export const checkBlacklist = async (email) => {
 
   } catch (error) {
     console.error('❌ Error checking blacklist:', error);
-    // On error, allow to proceed (fail open) but log the error
+    // On network error, we typically allow to proceed to not block valid users 
+    // if the server is just down, unless you want strict blocking.
     return {
       allowed: true,
       error: error.message,
@@ -56,6 +59,7 @@ export const signUp = async (email, password, fullName) => {
     console.log('Email:', email);
 
     // STEP 1: Check blacklist FIRST
+    // This blocks deleted users from creating new accounts
     console.log('Step 1: Checking blacklist...');
     const blacklistCheck = await checkBlacklist(email);
 
@@ -63,7 +67,7 @@ export const signUp = async (email, password, fullName) => {
       console.log('🚫 Signup blocked - User is blacklisted');
       return {
         success: false,
-        error: blacklistCheck.message,
+        error: blacklistCheck.message, // "For the signup/login contact support"
         isBlacklisted: true
       };
     }
@@ -90,9 +94,6 @@ export const signUp = async (email, password, fullName) => {
       };
     }
 
-    console.log('✅ Signup successful');
-    console.log('=== ✅ SIGNUP PROCESS COMPLETE ===\n');
-
     return {
       success: true,
       user: data.user,
@@ -117,6 +118,7 @@ export const signIn = async (email, password) => {
     console.log('Email:', email);
 
     // STEP 1: Check blacklist FIRST
+    // This blocks deleted users from logging back in
     console.log('Step 1: Checking blacklist...');
     const blacklistCheck = await checkBlacklist(email);
 
@@ -124,7 +126,7 @@ export const signIn = async (email, password) => {
       console.log('🚫 Login blocked - User is blacklisted');
       return {
         success: false,
-        error: blacklistCheck.message,
+        error: blacklistCheck.message, // "For the signup/login contact support"
         isBlacklisted: true
       };
     }
@@ -146,9 +148,6 @@ export const signIn = async (email, password) => {
       };
     }
 
-    console.log('✅ Login successful');
-    console.log('=== ✅ LOGIN PROCESS COMPLETE ===\n');
-
     return {
       success: true,
       user: data.user,
@@ -165,7 +164,7 @@ export const signIn = async (email, password) => {
 };
 
 /**
- * Check auth status including blacklist
+ * Check auth status including blacklist (Restoring Session)
  */
 export const checkAuthStatus = async () => {
   try {
@@ -178,11 +177,11 @@ export const checkAuthStatus = async () => {
       };
     }
 
-    // Check if user is blacklisted
+    // Double check blacklist on session restore
     const blacklistCheck = await checkBlacklist(user.email);
 
     if (!blacklistCheck.allowed) {
-      // User is blacklisted, sign them out
+      // User is blacklisted, force sign out immediately
       await supabase.auth.signOut();
       
       return {

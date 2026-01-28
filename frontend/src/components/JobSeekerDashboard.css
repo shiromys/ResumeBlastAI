@@ -1,0 +1,48 @@
+/* Job Seeker Dashboard Styles */
+
+.job-seeker-dashboard {
+  min-height: 100vh;
+  background: #f5f7fa;
+  padding: 40px 20px;
+}
+
+.dashboard-content {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.upload-section,
+.analysis-section {
+  background: white;
+  border-radius: 12px;
+  padding: 40px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.upload-section h2 {
+  text-align: center;
+  font-size: 32px;
+  margin-bottom: 30px;
+  color: #1a202c;
+}
+
+/* Ensure content doesn't hide under navbar */
+.job-seeker-dashboard {
+  padding-top: 80px;
+}
+
+@media (max-width: 768px) {
+  .job-seeker-dashboard {
+    padding: 20px 10px;
+    padding-top: 70px;
+  }
+  
+  .upload-section,
+  .analysis-section {
+    padding: 20px;
+  }
+  
+  .upload-section h2 {
+    font-size: 24px;
+  }
+}
