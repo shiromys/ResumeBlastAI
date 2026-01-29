@@ -4,6 +4,7 @@ import os
 import resend
 import requests
 import base64  # ✅ ADDED: Needed for encoding the attachment
+import time    # ✅ ADDED: Needed for rate limiting delay
 from datetime import datetime
 
 class FreemiumEmailService:
@@ -251,6 +252,9 @@ class FreemiumEmailService:
             results = {'total': len(recruiters), 'successful': 0, 'failed': 0, 'results': []}
             
             for recruiter in recruiters:
+                # ✅ FIX: Add delay to prevent rate limits
+                time.sleep(1)
+                
                 result = self.send_to_single_recruiter(
                     candidate_data=candidate_data,
                     recruiter_data=recruiter,
