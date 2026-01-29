@@ -12,7 +12,7 @@ console.log('📧 blastService.js loaded - Direct Backend Integration (No Make.c
 export const triggerEmailBlast = async (blastData) => {
   try {
     console.log('');
-    console.log('=== 🚀 TRIGGER EMAIL BLAST STARTED ===');
+    console.log('=== TRIGGER EMAIL BLAST STARTED ===');
     
     // STEP 1: Validate recipients
     const recipientsArray = blastData.recipients || blastData.recruiters;
