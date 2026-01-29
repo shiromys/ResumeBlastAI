@@ -56,37 +56,42 @@ from routes.admin import admin_bp
 from routes.recruiter_activity import recruiter_activity_bp
 from routes.support_ticket import support_ticket_bp
 from routes.user_management import user_management_bp
-from routes.payment_webhook import payment_webhook_bp  # ✅ NEW WEBHOOK BLUEPRINT
+from routes.payment_webhook import payment_webhook_bp
 
 app = Flask(__name__)
 
-# backend/app.py around line 55
-CORS(app, resources={
-    r"/api/*": {
-        "origins": [
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "https://resumeblast.ai",
-            "https://*.railway.app", # ✅ Allow all Railway subdomains
-            "https://your-frontend-url.up.railway.app" # You will update this later
-        ],
-        "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"],
-        "supports_credentials": True
-    }
-})
+# ✅ UPDATED CORS CONFIGURATION - CRITICAL FIX
+CORS(app, 
+     resources={
+         r"/*": {  # Changed from r"/api/*" to r"/*"
+             "origins": [
+                 "http://localhost:5173",
+                 "http://localhost:3000",
+                 "http://localhost:5000",
+                 "https://resumeblast.ai",
+                 "https://*.railway.app",
+                 os.getenv('FRONTEND_URL', '*')
+             ],
+             "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+             "allow_headers": ["Content-Type", "Authorization", "Accept"],
+             "supports_credentials": True,
+             "expose_headers": ["Content-Type"],
+             "max_age": 3600
+         }
+     }
+)
 
 # Register Blueprints
 app.register_blueprint(payment_bp)
 app.register_blueprint(blast_bp)
 app.register_blueprint(auth_bp) 
-app.register_blueprint(analyze_bp) 
+app.register_blueprint(analyze_bp)  # ✅ This registers /api/analyze
 app.register_blueprint(admin_bp)
 app.register_blueprint(recruiter_activity_bp)
 app.register_blueprint(contact_bp)
 app.register_blueprint(support_ticket_bp)
 app.register_blueprint(user_management_bp)
-app.register_blueprint(payment_webhook_bp)  # ✅ REGISTER WEBHOOK BLUEPRINT
+app.register_blueprint(payment_webhook_bp)
 
 @app.route('/')
 def home():
@@ -108,12 +113,11 @@ def health():
     })
 
 # ✅ NEW: Debug route to verify CORS is working
-@app.route('/api/test-cors', methods=['GET', 'POST', 'PATCH'])
+@app.route('/api/test-cors', methods=['GET', 'POST', 'PATCH', 'OPTIONS'])
 def test_cors():
     return jsonify({
         'success': True,
         'message': 'CORS is working correctly',
-        'method': 'PATCH allowed',
         'cors_enabled': True
     })
 
@@ -127,7 +131,8 @@ if __name__ == '__main__':
     print(f'🌐 Port: {port}')
     print(f'🔧 Debug Mode: {debug}')
     print(f'💳 Stripe Webhook: /api/webhooks/stripe')
-    print(f'🎫 Support Tickets: CORS enabled with PATCH method')  # ✅ NEW
+    print(f'🎫 Support Tickets: CORS enabled with PATCH method')
+    print(f'🔍 Analyze Endpoint: /api/analyze')
     print('='*70 + '\n')
     
     app.run(host='0.0.0.0', port=port, debug=debug)

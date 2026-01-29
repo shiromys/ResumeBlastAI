@@ -27,9 +27,10 @@ export const analyzeResumeForBlast = async (resumeText) => {
   try {
     console.log('🤖 Sending resume to AI backend for comprehensive analysis...');
     console.log(`📄 Resume length: ${resumeText.length} characters`);
+    console.log(`📡 API Endpoint: ${API_URL}/api/analyze`);
     
-    // Call Python backend for AI analysis
-    const response = await fetch(`${API_URL}/api/analyze-resume`, {
+    // ✅ FIXED: Changed from /api/analyze-resume to /api/analyze
+    const response = await fetch(`${API_URL}/api/analyze`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'

@@ -151,19 +151,19 @@ function ContactPage({ onBack }) {
           <div className="contact-info-card">
             <div className="contact-icon">📧</div>
             <h3>Email Us</h3>
-            <p>support@shirotechnologies.com</p>
+            <p>support@resumeblast.ai</p>
           </div>
 
           <div className="contact-info-card">
             <div className="contact-icon">📞</div>
             <h3>Call Us</h3>
-            <p>(555) 971-8010</p>
+            <p>(800)971-8013</p>
           </div>
 
           <div className="contact-info-card">
             <div className="contact-icon">🕐</div>
             <h3>Business Hours</h3>
-            <p>Mon - Fri: 9:00 - 5 PM CST</p>
+            <p>Mon - Fri: 9:00 - 6 PM CST</p>
           </div>
         </div>
 

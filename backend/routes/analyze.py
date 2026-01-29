@@ -136,12 +136,17 @@ def calculate_ats_score(analysis_data):
         'total_skills_found': total_skills_count
     }
 
-@analyze_bp.route('/analyze-resume', methods=['POST'])
+# ✅ CHANGED: /analyze-resume → /analyze
+@analyze_bp.route('/analyze', methods=['POST', 'OPTIONS'])
 def analyze_resume():
     """
     Enhanced Resume Analysis Endpoint
     Extracts ALL skills, calculates detailed ATS score, and provides comprehensive insights
     """
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        return '', 204
+    
     try:
         data = request.get_json()
         resume_text = data.get('resume_text', '')
@@ -265,7 +270,8 @@ IMPORTANT:
             'error': f'Analysis failed: {str(e)}'
         }), 500
 
-@analyze_bp.route('/analyze-resume/test', methods=['GET'])
+# ✅ CHANGED: /analyze-resume/test → /test
+@analyze_bp.route('/test', methods=['GET'])
 def test_analyze():
     """Test endpoint to verify the analyze route is registered"""
     return jsonify({

@@ -113,7 +113,7 @@ function LandingPage({ onGetStarted }) {
           
           <div className="hero-highlight-block">
             <p className="subtitle">
-              Don't waste time rewriting your resume. Our engine analyzes your profile and puts it directly in the inboxes of <strong style={{color: '#DC2626', fontWeight: '800'}}><CountUp end={2000} suffix="+" /> verified recruiters</strong> looking for your skills.
+              Don't waste time rewriting your resume. Our engine analyzes your profile and sends it directly to <strong style={{color: '#DC2626', fontWeight: '800'}}><CountUp end={2000} suffix="+" /> verified recruiters</strong> looking for your skills.
             </p>
             <div className="cta-container">
               <button className="cta-button large" onClick={onGetStarted}>
@@ -182,23 +182,23 @@ function LandingPage({ onGetStarted }) {
             {/* List */}
             <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 <strong>11 Verified Recruiters</strong>
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 Top Agencies Included
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 Instant Email Delivery
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 Professional Template
               </li>
               <li style={{padding: '5px 0', fontSize: '13px', color: '#9CA3AF', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 Limited to 11 Recruiters
               </li>
             </ul>
@@ -246,27 +246,27 @@ function LandingPage({ onGetStarted }) {
             {/* List */}
             <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 AI Targeting Analysis
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                Distribution to <strong>&nbsp;<CountUp end={2000} suffix="+" duration={1500} /> Recruiters</strong>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
+                Distribution to <strong>2000+ Recruiters</strong>
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 Verified Recruiters
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 Real-time Analytics Dashboard
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 Direct Inbox Placement
               </li>
               <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
+                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}>✓</span>
                 30-Day Email Support
               </li>
             </ul>
@@ -330,8 +330,8 @@ function LandingPage({ onGetStarted }) {
             <p>Get your resume AI-enhanced in minutes without mass distribution. Perfect for quick updates.</p>
             <span className="learn-more">Learn More →</span>
           </a>
-          <a href="https://resumedistribute.com" target="_blank" rel="noopener noreferrer" className="upsell-card">
-            <h3>📧 ResumeDistribute</h3>
+          <a href="https://www.cloudsourcehrm.us/" target="_blank" rel="noopener noreferrer" className="upsell-card">
+            <h3>📧 Cloude Source HRM</h3>
             <p>Access our premium recruiter database with 10,000+ contacts for targeted outreach campaigns.</p>
             <span className="learn-more">Learn More →</span>
           </a>
@@ -350,7 +350,7 @@ function LandingPage({ onGetStarted }) {
         <button className="cta-button large" onClick={onGetStarted}>
           Start Your Job Search Now
         </button>
-        <p className="cta-subtext"> One-time payment | Secure checkout</p>
+        <p className="cta-subtext">✓ One-time payment | Secure checkout</p>
       </section>
     </div>
   )
