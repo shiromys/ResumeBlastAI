@@ -1,21 +1,29 @@
 // src/components/LegalPage.jsx
+import { useEffect } from 'react'
 import './LegalPage.css'
 
 function LegalPage({ type, onBack }) {
+  
+  // Scroll to top when page opens
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [type])
+
   const renderContent = () => {
     switch (type) {
       case 'privacy':
         return (
-          <>
-            <h1>Privacy Policy</h1>
-            <p className="effective-date">Effective Date: October 26, 2025</p>
+          <div className="document-body">
+            <h1 className="document-title">Privacy Policy</h1>
+            <p className="effective-date"><strong>Effective Date:</strong> March 09, 2026</p>
             
-            <p>ResumeBlast.ai ("ResumeBlast", "we", "our", or "us") is operated by <strong>Shiro Technologies LLC</strong>, 5080 Spectrum Drive, Suite 575 E, Addison, TX 75001, United States.</p>
-            <p>This Privacy Policy describes how we collect, use, disclose, and protect personal information when you access or use https://resumeblast.ai (the "Service"). By using the Service, you consent to this Privacy Policy.</p>
-
-            <hr />
+            <p>ResumeBlast.ai (“ResumeBlast”, “we”, “our”, or “us”) is operated by <strong>Shiro Technologies LLC</strong>,<br />
+            5080 Spectrum Drive, Suite 575 E, Addison, TX 75001, United States.</p>
+            
+            <p>This Privacy Policy describes how we collect, use, disclose, and protect personal information when you access or use https://resumeblast.ai (the “Service”). By using the Service, you consent to this Privacy Policy.</p>
 
             <h2>1. Information We Collect</h2>
+            
             <h3>1.1 Information You Provide</h3>
             <ul>
               <li>Full name, email address, phone number</li>
@@ -33,8 +41,6 @@ function LegalPage({ type, onBack }) {
               <li>Cookies and similar tracking technologies</li>
             </ul>
 
-            <hr />
-
             <h2>2. Purpose and Legal Basis for Processing</h2>
             <p>We process personal data for the following purposes:</p>
             <ul>
@@ -47,8 +53,6 @@ function LegalPage({ type, onBack }) {
             </ul>
             <p>Legal bases include user consent, contractual necessity, and legitimate business interests.</p>
 
-            <hr />
-
             <h2>3. Resume Distribution Authorization</h2>
             <p>By using ResumeBlast.ai, you <strong>explicitly authorize</strong> ResumeBlast.ai to distribute your resume and related professional information to third-party recruiters, employers, and hiring platforms located in the United States.</p>
             <p>You acknowledge and agree:</p>
@@ -56,8 +60,6 @@ function LegalPage({ type, onBack }) {
               <li>Resume distribution does <strong>not</strong> guarantee interviews, responses, employment, sponsorship, or immigration benefits</li>
               <li>Recruiters and employers act independently and are outside our control</li>
             </ul>
-
-            <hr />
 
             <h2>4. Data Sharing</h2>
             <p>We may share information with:</p>
@@ -68,8 +70,6 @@ function LegalPage({ type, onBack }) {
             </ul>
             <p>We do <strong>not</strong> sell personal information.</p>
 
-            <hr />
-
             <h2>5. CCPA Notice (California Residents)</h2>
             <p>California residents may request:</p>
             <ul>
@@ -78,8 +78,6 @@ function LegalPage({ type, onBack }) {
               <li>Confirmation that we do not sell personal data</li>
             </ul>
             <p>Requests: <strong>info@resumeblast.ai</strong></p>
-
-            <hr />
 
             <h2>6. GDPR-Lite Disclosure (EEA Users)</h2>
             <p>If you are located in the EEA:</p>
@@ -90,8 +88,6 @@ function LegalPage({ type, onBack }) {
             </ul>
             <p>Use of the Service constitutes consent to international data transfer.</p>
 
-            <hr />
-
             <h2>7. Data Retention</h2>
             <p>We retain data as necessary for:</p>
             <ul>
@@ -100,43 +96,33 @@ function LegalPage({ type, onBack }) {
               <li>Legal and regulatory obligations</li>
             </ul>
 
-            <hr />
-
             <h2>8. Security</h2>
             <p>We use commercially reasonable administrative, technical, and organizational safeguards. However, no system can guarantee absolute security.</p>
-
-            <hr />
 
             <h2>9. Children’s Privacy</h2>
             <p>The Service is not intended for individuals under 18 years of age.</p>
 
-            <hr />
-
             <h2>10. Policy Updates</h2>
             <p>We may update this Privacy Policy at any time. Continued use constitutes acceptance.</p>
 
-            <hr />
-
             <h2>11. Contact</h2>
-            <p><strong>Shiro Technologies LLC</strong><br />Email: <strong>info@resumeblast.ai</strong></p>
-          </>
+            <p><strong>Shiro Technologies LLC</strong><br />
+            Email: <strong>info@resumeblast.ai</strong></p>
+          </div>
         )
       
       case 'terms':
         return (
-          <>
-            <h1>Terms of Service</h1>
-            <p className="effective-date">Effective Date: October 26, 2025</p>
-            <p>These Terms of Service ("Terms") govern your use of ResumeBlast.ai (the "Service"), operated by <strong>Shiro Technologies LLC</strong>.</p>
+          <div className="document-body">
+            <h1 className="document-title">Terms of Service</h1>
+            <p className="effective-date"><strong>Effective Date:</strong> March 09, 2026</p>
+            
+            <p>These Terms of Service (“Terms”) govern your use of ResumeBlast.ai (the “Service”), operated by <strong>Shiro Technologies LLC</strong>.</p>
             <p>By accessing or using the Service, you agree to these Terms.</p>
-
-            <hr />
 
             <h2>1. Nature of Service</h2>
             <p>ResumeBlast.ai is a paid Software-as-a-Service (SaaS) platform that distributes user-submitted resumes to recruiters and employers within the United States.</p>
             <p>The Service provides <strong>resume exposure only</strong> and is not an employment agency, recruiter, or staffing firm.</p>
-
-            <hr />
 
             <h2>2. No Employment, Immigration, or Sponsorship Guarantee</h2>
             <p>ResumeBlast.ai does <strong>not</strong> guarantee:</p>
@@ -147,8 +133,6 @@ function LegalPage({ type, onBack }) {
             </ul>
             <p>Users are solely responsible for verifying eligibility to work in the United States.</p>
 
-            <hr />
-
             <h2>3. Payments, Final Sale, and No Refunds</h2>
             <p>All payments are <strong>final and non-refundable</strong>.</p>
             <p>By completing a purchase, you acknowledge:</p>
@@ -158,8 +142,6 @@ function LegalPage({ type, onBack }) {
               <li>Unused services are forfeited</li>
             </ul>
 
-            <hr />
-
             <h2>4. Chargebacks and Dispute Defense</h2>
             <p>To prevent fraud and abuse:</p>
             <ul>
@@ -167,8 +149,6 @@ function LegalPage({ type, onBack }) {
               <li>Chargebacks may be disputed with payment processors using service evidence</li>
               <li>Fraudulent disputes may result in permanent account termination</li>
             </ul>
-
-            <hr />
 
             <h2>5. User Representations</h2>
             <p>You represent and warrant that:</p>
@@ -179,8 +159,6 @@ function LegalPage({ type, onBack }) {
               <li>You will not impersonate any individual or entity</li>
             </ul>
 
-            <hr />
-
             <h2>6. Suspension and Termination</h2>
             <p>We may suspend or terminate access immediately for:</p>
             <ul>
@@ -189,12 +167,8 @@ function LegalPage({ type, onBack }) {
               <li>Misuse of the Service</li>
             </ul>
 
-            <hr />
-
             <h2>7. Intellectual Property</h2>
             <p>All software, branding, and platform content are owned by Shiro Technologies LLC. Unauthorized use is prohibited.</p>
-
-            <hr />
 
             <h2>8. Limitation of Liability</h2>
             <p>To the maximum extent permitted by law:</p>
@@ -204,41 +178,31 @@ function LegalPage({ type, onBack }) {
               <li>Total liability shall not exceed the amount paid for the Service</li>
             </ul>
 
-            <hr />
-
             <h2>9. Disclaimer of Warranties</h2>
-            <p>The Service is provided "AS IS" and "AS AVAILABLE" without warranties of any kind.</p>
-
-            <hr />
+            <p>The Service is provided “AS IS” and “AS AVAILABLE” without warranties of any kind.</p>
 
             <h2>10. Indemnification</h2>
             <p>You agree to indemnify and hold harmless Shiro Technologies LLC from claims arising from your use of the Service.</p>
 
-            <hr />
-
             <h2>11. Governing Law</h2>
             <p>These Terms are governed by the laws of the State of Texas.</p>
-
-            <hr />
 
             <h2>12. Changes</h2>
             <p>We may update these Terms at any time. Continued use constitutes acceptance.</p>
 
-            <hr />
-
             <h2>13. Contact</h2>
-            <p><strong>Shiro Technologies LLC</strong><br />Email: <strong>info@resumeblast.ai</strong></p>
-          </>
+            <p><strong>Shiro Technologies LLC</strong><br />
+            Email: <strong>info@resumeblast.ai</strong></p>
+          </div>
         )
 
       case 'refund':
         return (
-          <>
-            <h1>Refund Policy</h1>
-            <p className="effective-date">Effective Date: October 26, 2025</p>
+          <div className="document-body">
+            <h1 className="document-title">Refund Policy</h1>
+            <p className="effective-date"><strong>Effective Date:</strong> March 09, 2026</p>
+            
             <p>ResumeBlast.ai is operated by <strong>Shiro Technologies LLC</strong>.</p>
-
-            <hr />
 
             <h2>No Refund Policy</h2>
             <p>All purchases made on ResumeBlast.ai are <strong>final and non-refundable</strong>.</p>
@@ -250,8 +214,6 @@ function LegalPage({ type, onBack }) {
               <li>Resume distribution begins immediately upon purchase</li>
             </ul>
 
-            <hr />
-
             <h2>Chargebacks</h2>
             <p>Unauthorized chargebacks or payment disputes may result in:</p>
             <ul>
@@ -259,11 +221,10 @@ function LegalPage({ type, onBack }) {
               <li>Permanent restriction from future services</li>
             </ul>
 
-            <hr />
-
             <h2>Contact</h2>
-            <p>For questions related to this policy:<br /><strong>info@resumeblast.ai</strong></p>
-          </>
+            <p>For questions related to this policy:<br />
+            <strong>info@resumeblast.ai</strong></p>
+          </div>
         )
 
       default:
@@ -273,11 +234,16 @@ function LegalPage({ type, onBack }) {
 
   return (
     <div className="legal-page">
-      <div className="legal-container">
-        <button className="back-button" onClick={onBack}>← Back</button>
-        <div className="legal-content">
-          {renderContent()}
+      <div className="legal-nav-header">
+        <div className="legal-nav-content">
+          <button className="back-link" onClick={onBack}>
+            ← Back
+          </button>
+          <span className="nav-title">ResumeBlast.ai Legal</span>
         </div>
+      </div>
+      <div className="legal-container">
+        {renderContent()}
       </div>
     </div>
   )

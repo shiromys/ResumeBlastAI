@@ -1,96 +1,141 @@
 /* src/components/LegalPage.css */
+
 .legal-page {
-  background-color: #f9fafb;
+  background-color: #FFFFFF; /* Pure white background */
   min-height: 100vh;
-  padding: 40px 20px;
-}
-
-.legal-container {
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.back-button {
-  background: white;
-  border: 1px solid #e5e7eb;
-  padding: 8px 16px;
-  border-radius: 6px;
-  color: #374151;
-  font-weight: 500;
-  cursor: pointer;
-  margin-bottom: 30px;
-  transition: all 0.2s;
-}
-
-.back-button:hover {
-  border-color: #d1d5db;
-  background: #f3f4f6;
-}
-
-.legal-content {
-  background: white;
-  padding: 50px;
-  border-radius: 12px;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  color: #1f2937;
-}
-
-.legal-content h1 {
-  font-size: 32px;
-  font-weight: 800;
-  color: #111827;
-  margin-bottom: 10px;
-}
-
-.effective-date {
-  color: #6b7280;
-  font-size: 14px;
-  margin-bottom: 30px;
-  font-style: italic;
-}
-
-.legal-content h2 {
-  font-size: 20px;
-  color: #111827;
-  margin-top: 30px;
-  margin-bottom: 15px;
-  font-weight: 700;
-}
-
-.legal-content h3 {
-  font-size: 16px;
-  color: #374151;
-  margin-top: 20px;
-  margin-bottom: 10px;
-  font-weight: 600;
-}
-
-.legal-content p {
-  line-height: 1.7;
-  margin-bottom: 15px;
-  color: #4b5563;
-}
-
-.legal-content ul {
-  margin-bottom: 20px;
-  padding-left: 20px;
-  color: #4b5563;
-}
-
-.legal-content li {
-  margin-bottom: 8px;
+  color: #111827; /* Dark gray text for readability */
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.6;
 }
 
-.legal-content hr {
-  border: 0;
-  border-top: 1px solid #e5e7eb;
-  margin: 30px 0;
+/* Header Bar */
+.legal-nav-header {
+  position: sticky;
+  top: 0;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #E5E7EB;
+  z-index: 100;
+  padding: 16px 0;
+}
+
+.legal-nav-content {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.back-link {
+  background: none;
+  border: none;
+  color: #6B7280;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.back-link:hover {
+  color: #111827;
+}
+
+.nav-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+/* Document Container */
+.legal-container {
+  max-width: 800px; /* Optimal reading width */
+  margin: 0 auto;
+  padding: 60px 24px 100px;
+}
+
+.document-body {
+  animation: fadeIn 0.4s ease-out;
+}
+
+/* Typography */
+.document-title {
+  font-size: 42px;
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 16px;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.effective-date {
+  color: #6B7280;
+  font-size: 15px;
+  margin-bottom: 60px; /* Increased margin to separate title from content */
+}
+
+h2 {
+  font-size: 24px;
+  font-weight: 700;
+  color: #111827;
+  margin-top: 48px;
+  margin-bottom: 20px;
+}
+
+h3 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #374151;
+  margin-top: 32px;
+  margin-bottom: 12px;
+}
+
+p {
+  margin-bottom: 16px;
+  font-size: 16px;
+  color: #374151;
+}
+
+ul {
+  margin-bottom: 24px;
+  padding-left: 24px;
+}
+
+li {
+  margin-bottom: 8px;
+  font-size: 16px;
+  color: #374151;
+  list-style-type: disc;
+}
+
+strong {
+  color: #111827;
+  font-weight: 600;
+}
+
+/* Links inside document */
+.legal-container a {
+  color: #DC2626;
+  text-decoration: none;
+}
+
+.legal-container a:hover {
+  text-decoration: underline;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @media (max-width: 640px) {
-  .legal-content {
-    padding: 30px 20px;
+  .document-title {
+    font-size: 32px;
+  }
+  
+  .legal-container {
+    padding: 40px 20px;
   }
 }

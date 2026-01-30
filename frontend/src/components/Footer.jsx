@@ -1,12 +1,13 @@
 import './Footer.css'
 
-function Footer({ onViewChange }) { // ✅ Accept onViewChange prop
+function Footer({ onViewChange }) {
   const handleScrollOrNav = (sectionId) => {
-    // If onViewChange is not provided (e.g. standalone), just try scrolling
+    // Navigate to home first if we are on a different page (like admin or legal)
     if (onViewChange) {
       onViewChange('jobseeker-home')
     }
     
+    // Scroll to section after a brief delay to allow page load
     setTimeout(() => {
       const element = document.getElementById(sectionId)
       if (element) {
@@ -33,7 +34,7 @@ function Footer({ onViewChange }) { // ✅ Accept onViewChange prop
         </div>
         <div className="footer-section">
           <h4>Legal</h4>
-          {/* ✅ Updated Links to use button handlers */}
+          {/* ✅ NAVIGATION LINKS */}
           <button onClick={() => onViewChange('privacy')} className="footer-link">
             Privacy Policy
           </button>

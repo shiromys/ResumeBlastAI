@@ -17,7 +17,7 @@ import UserDashboard from './components/UserDashboard'
 import AdminDashboard from './components/Admin/AdminDashboard'
 import PaymentBlastTrigger from './components/PaymentBlastTrigger'
 import ContactPage from './components/ContactPage'
-import LegalPage from './components/LegalPage' // ✅ IMPORT ADDED
+import LegalPage from './components/LegalPage' // ✅ IMPORT LEGAL PAGE
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
@@ -38,7 +38,6 @@ function App() {
   const [resumeUrl, setResumeUrl] = useState('')
   const [resumeId, setResumeId] = useState('')
 
-  // Admin Check Logic...
   const checkAdminStatus = async (email) => {
     if (!email) return false
     try {
@@ -47,13 +46,9 @@ function App() {
       )
       const rpcPromise = supabase.rpc('check_is_admin', { check_email: email })
       const { data, error } = await Promise.race([rpcPromise, timeoutPromise])
-      if (error) {
-        console.warn('⚠️ Admin check warning:', error.message)
-        return false 
-      }
+      if (error) return false 
       return !!data 
     } catch (err) {
-      console.warn('⚠️ Admin check failed or timed out:', err.message)
       return false
     }
   }
@@ -61,17 +56,13 @@ function App() {
   // 1. INITIALIZATION
   useEffect(() => {
     const initSession = async () => {
-      console.log('📄 Initializing session...')
       try {
         const params = new URLSearchParams(window.location.search)
         const isPaymentReturn = params.get('payment') === 'success'
         
         const { data: { session }, error } = await supabase.auth.getSession()
         
-        if (error) throw error
-
         if (session?.user) {
-          console.log('👤 User found in session:', session.user.email)
           setUser(session.user)
           prevUserIdRef.current = session.user.id
           
@@ -79,7 +70,6 @@ function App() {
           setIsAdmin(adminStatus)
           
           if (isPaymentReturn) {
-            console.log('💰 Payment return detected in App.jsx')
             setPaymentSuccess(true)
             setHasUploadedInSession(true)
             setViewMode('upload-workbench') 
@@ -93,7 +83,6 @@ function App() {
                } catch (e) { console.error(e) }
             }
           } else if (adminStatus) {
-            console.log('🛡️ Admin detected - redirecting to admin panel')
             setViewMode('admin')
           } else if (session.user.user_metadata?.role === 'recruiter') {
             setViewMode('recruiter')
@@ -101,47 +90,33 @@ function App() {
             setViewMode('dashboard')
           }
         } else {
-          // Keep existing viewMode if it's already set (e.g. to a legal page)
-          // otherwise default to home
+          // If already on a legal page, stay there, otherwise go home
           if (!['privacy', 'terms', 'refund'].includes(viewMode)) {
              setViewMode('jobseeker-home')
           }
         }
       } catch (error) {
-        console.error('❌ Session init error:', error)
         setViewMode('jobseeker-home')
       } finally {
-        console.log('🏁 Session initialization complete')
         setIsRestoring(false) 
       }
     }
 
     initSession()
 
-    // 2. LISTEN FOR LOGIN/LOGOUT EVENTS
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log(`🔔 Auth event: ${event}`)
-      
       if (event === 'SIGNED_IN' && session?.user) {
          if (prevUserIdRef.current === session.user.id) return 
-         
          prevUserIdRef.current = session.user.id
          setUser(session.user)
-         
          const adminStatus = await checkAdminStatus(session.user.email)
          setIsAdmin(adminStatus)
-
-         if (adminStatus) {
-             setViewMode('admin')
-         } else {
+         if (adminStatus) setViewMode('admin')
+         else {
              const role = session?.user?.user_metadata?.role
-             if (role === 'recruiter') {
-                 setViewMode('recruiter')
-             } else {
-                 setViewMode('upload-workbench')
-             }
+             if (role === 'recruiter') setViewMode('recruiter')
+             else setViewMode('upload-workbench')
          }
-
       } else if (event === 'SIGNED_OUT') {
          prevUserIdRef.current = null
          setUser(null)
@@ -150,7 +125,6 @@ function App() {
          setHasUploadedInSession(false)
       }
     })
-
     return () => subscription.unsubscribe()
   }, []) 
 
@@ -165,7 +139,7 @@ function App() {
   const handleViewChange = (view) => {
     window.scrollTo(0, 0)
     
-    // ✅ ADDED: Legal page handling
+    // ✅ LEGAL PAGE NAVIGATION
     if (['privacy', 'terms', 'refund'].includes(view)) {
       setViewMode(view)
       return
@@ -207,7 +181,7 @@ function App() {
       )
     }
 
-    // ✅ ADDED: Legal Page Routing
+    // ✅ RENDER LEGAL PAGES
     if (viewMode === 'privacy' || viewMode === 'terms' || viewMode === 'refund') {
       return <LegalPage type={viewMode} onBack={() => setViewMode(user ? 'dashboard' : 'jobseeker-home')} />
     }
@@ -217,9 +191,7 @@ function App() {
     }
 
     if (viewMode === 'admin') {
-      if (!user || !isAdmin) {
-        return <LandingPage onGetStarted={handleStartBlast} />
-      }
+      if (!user || !isAdmin) return <LandingPage onGetStarted={handleStartBlast} />
       return <AdminDashboard user={user} onExit={() => setViewMode('dashboard')} />
     }
 
@@ -264,6 +236,9 @@ function App() {
   const isRecruiterDashboard = viewMode === 'recruiter' && user
   const isAdminPage = viewMode === 'admin' && user
   const isContactPage = viewMode === 'contact' 
+  // Don't show footer on legal pages if you prefer, but standard is to keep it.
+  const isLegalPage = ['privacy', 'terms', 'refund'].includes(viewMode)
+  
   const shouldShowFooter = !isAdminPage && !isContactPage
 
   return (
@@ -272,12 +247,13 @@ function App() {
       <PaymentSuccessHandler />
       <PaymentBlastTrigger />
       
-      {!isRecruiterDashboard && !isAdminPage && !isContactPage && (
+      {!isRecruiterDashboard && !isAdminPage && !isContactPage && !isLegalPage && (
         <Navbar user={user} isAdmin={isAdmin} onViewChange={handleViewChange} onLoginClick={() => setShowSignup(true)} onLogout={handleLogout} />
       )}
-      <main className="main-content" style={(isRecruiterDashboard || isAdminPage || isContactPage) ? { paddingTop: 0 } : {}}>{renderContent()}</main>
       
-      {/* ✅ UPDATED: Pass onViewChange to Footer */}
+      {/* Remove padding top for legal pages if they have their own header/back button */}
+      <main className="main-content" style={(isRecruiterDashboard || isAdminPage || isContactPage || isLegalPage) ? { paddingTop: 0 } : {}}>{renderContent()}</main>
+      
       {shouldShowFooter && <Footer onViewChange={handleViewChange} />}
       
       {showSignup && (
