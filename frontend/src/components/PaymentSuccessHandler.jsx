@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
+import { trackPaymentSuccess } from '../services/activityTrackingService'; // ✅ Import this
 import { verifyPayment } from '../services/paymentService';
 
 function PaymentSuccessHandler() {
@@ -19,28 +20,30 @@ function PaymentSuccessHandler() {
 
     processedSessions.current.add(sessionId);
 
+    // Get current user
     const { data: { user } } = await supabase.auth.getUser();
 
-    if (user) {
-      await supabase.from('user_activity').insert({
-        user_id: user.id,
-        email: user.email,
-        event_type: 'payment_success_viewed',
-        event_timestamp: new Date().toISOString(),
-        metadata: { session_id: sessionId }
-      });
-    }
-
     try {
+      // 1. Verify Payment with Stripe
       const result = await verifyPayment(sessionId);
 
       if (result.success) {
         console.log('✅ Payment verified & stored');
+        
+        // 2. ✅ Log Activity via Backend (Bypasses RLS)
+        if (user) {
+            await trackPaymentSuccess(user.id, sessionId, {
+                amount: 14900, // $149.00
+                currency: 'usd',
+                payment_status: 'completed'
+            });
+            console.log('✅ Payment activity logged to DB');
+        }
       } else {
-        console.warn('⚠️ Payment not completed yet');
+        console.warn('⚠️ Payment verification incomplete');
       }
     } catch (err) {
-      console.error('❌ Payment verification failed', err);
+      console.error('❌ Payment processing failed', err);
     }
   };
 

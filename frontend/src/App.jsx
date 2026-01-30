@@ -17,6 +17,7 @@ import UserDashboard from './components/UserDashboard'
 import AdminDashboard from './components/Admin/AdminDashboard'
 import PaymentBlastTrigger from './components/PaymentBlastTrigger'
 import ContactPage from './components/ContactPage'
+import LegalPage from './components/LegalPage' // ✅ IMPORT ADDED
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
@@ -37,33 +38,22 @@ function App() {
   const [resumeUrl, setResumeUrl] = useState('')
   const [resumeId, setResumeId] = useState('')
 
-  // ✅ IMPROVED: Robust Admin Check with Timeout
-  // Prevents the app from getting stuck on the spinner if the DB call hangs
+  // Admin Check Logic...
   const checkAdminStatus = async (email) => {
     if (!email) return false
-    
     try {
-      // Create a timeout promise that rejects after 5 seconds
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Admin check timed out')), 5000)
       )
-
-      // The actual RPC call
       const rpcPromise = supabase.rpc('check_is_admin', { check_email: email })
-
-      // Race them - if RPC hangs, timeout wins so the app can load
       const { data, error } = await Promise.race([rpcPromise, timeoutPromise])
-      
       if (error) {
         console.warn('⚠️ Admin check warning:', error.message)
-        return false // Default to non-admin on error
+        return false 
       }
-      
-      console.log(`🔍 DB Admin Check: ${email} → ${data ? '✅ ADMIN' : '❌ NOT ADMIN'}`)
       return !!data 
-      
     } catch (err) {
-      console.warn('⚠️ Admin check failed or timed out (defaulting to user):', err.message)
+      console.warn('⚠️ Admin check failed or timed out:', err.message)
       return false
     }
   }
@@ -85,18 +75,15 @@ function App() {
           setUser(session.user)
           prevUserIdRef.current = session.user.id
           
-          // Check Admin Status (Fail-safe)
           const adminStatus = await checkAdminStatus(session.user.email)
           setIsAdmin(adminStatus)
           
           if (isPaymentReturn) {
             console.log('💰 Payment return detected in App.jsx')
             setPaymentSuccess(true)
-            // We set this to true to show the workbench
             setHasUploadedInSession(true)
             setViewMode('upload-workbench') 
             
-            // Try to restore resume data from local storage if available
             const savedResumeData = localStorage.getItem('pending_blast_resume_data')
             if (savedResumeData) {
                try {
@@ -114,11 +101,14 @@ function App() {
             setViewMode('dashboard')
           }
         } else {
-          setViewMode('jobseeker-home')
+          // Keep existing viewMode if it's already set (e.g. to a legal page)
+          // otherwise default to home
+          if (!['privacy', 'terms', 'refund'].includes(viewMode)) {
+             setViewMode('jobseeker-home')
+          }
         }
       } catch (error) {
         console.error('❌ Session init error:', error)
-        // Ensure we don't get stuck in loading even on error
         setViewMode('jobseeker-home')
       } finally {
         console.log('🏁 Session initialization complete')
@@ -174,6 +164,13 @@ function App() {
 
   const handleViewChange = (view) => {
     window.scrollTo(0, 0)
+    
+    // ✅ ADDED: Legal page handling
+    if (['privacy', 'terms', 'refund'].includes(view)) {
+      setViewMode(view)
+      return
+    }
+
     switch(view) {
       case 'home': setViewMode(user ? 'upload-workbench' : 'jobseeker-home'); break;
       case 'recruiter': setViewMode('recruiter'); break;
@@ -210,13 +207,17 @@ function App() {
       )
     }
 
+    // ✅ ADDED: Legal Page Routing
+    if (viewMode === 'privacy' || viewMode === 'terms' || viewMode === 'refund') {
+      return <LegalPage type={viewMode} onBack={() => setViewMode(user ? 'dashboard' : 'jobseeker-home')} />
+    }
+
     if (viewMode === 'contact') {
       return <ContactPage onBack={() => setViewMode(user ? 'dashboard' : 'jobseeker-home')} />
     }
 
     if (viewMode === 'admin') {
       if (!user || !isAdmin) {
-        // Fallback if trying to access admin without perms
         return <LandingPage onGetStarted={handleStartBlast} />
       }
       return <AdminDashboard user={user} onExit={() => setViewMode('dashboard')} />
@@ -269,16 +270,16 @@ function App() {
     <div className="app-wrapper">
       <GoogleAnalytics />
       <PaymentSuccessHandler />
-      {/* PaymentBlastTrigger handles the "Success Modal" on return from Stripe.
-        It runs independently so it works even if ResumeAnalysis is empty.
-      */}
       <PaymentBlastTrigger />
       
       {!isRecruiterDashboard && !isAdminPage && !isContactPage && (
         <Navbar user={user} isAdmin={isAdmin} onViewChange={handleViewChange} onLoginClick={() => setShowSignup(true)} onLogout={handleLogout} />
       )}
       <main className="main-content" style={(isRecruiterDashboard || isAdminPage || isContactPage) ? { paddingTop: 0 } : {}}>{renderContent()}</main>
-      {shouldShowFooter && <Footer />}
+      
+      {/* ✅ UPDATED: Pass onViewChange to Footer */}
+      {shouldShowFooter && <Footer onViewChange={handleViewChange} />}
+      
       {showSignup && (
         viewMode === 'recruiter' 
           ? <RecruiterAuth onClose={() => setShowSignup(false)} onSuccess={(u) => { setUser({...u, role: 'recruiter'}); setShowSignup(false); }} />

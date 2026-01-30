@@ -1,11 +1,18 @@
 import './Footer.css'
 
-function Footer() {
-  const scrollToSection = (sectionId) => {
-    const element = document.getElementById(sectionId)
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' })
+function Footer({ onViewChange }) { // ✅ Accept onViewChange prop
+  const handleScrollOrNav = (sectionId) => {
+    // If onViewChange is not provided (e.g. standalone), just try scrolling
+    if (onViewChange) {
+      onViewChange('jobseeker-home')
     }
+    
+    setTimeout(() => {
+      const element = document.getElementById(sectionId)
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth' })
+      }
+    }, 100)
   }
 
   return (
@@ -17,24 +24,31 @@ function Footer() {
         </div>
         <div className="footer-section">
           <h4>Product</h4>
-          <button onClick={() => scrollToSection('how-it-works')} className="footer-link">
+          <button onClick={() => handleScrollOrNav('how-it-works')} className="footer-link">
             How It Works
           </button>
-          <button onClick={() => scrollToSection('pricing')} className="footer-link">
+          <button onClick={() => handleScrollOrNav('pricing')} className="footer-link">
             Pricing
           </button>
         </div>
         <div className="footer-section">
           <h4>Legal</h4>
-          <a href="#privacy" className="footer-link">Privacy Policy</a>
-          <a href="#terms" className="footer-link">Terms of Service</a>
+          {/* ✅ Updated Links to use button handlers */}
+          <button onClick={() => onViewChange('privacy')} className="footer-link">
+            Privacy Policy
+          </button>
+          <button onClick={() => onViewChange('terms')} className="footer-link">
+            Terms of Service
+          </button>
+          <button onClick={() => onViewChange('refund')} className="footer-link">
+            Refund Policy
+          </button>
         </div>
         <div className="footer-section">
           <h4>Contact</h4>
           <a href="mailto:support@resumeblast.ai" className="footer-link">
             support@resumeblast.ai
           </a>
-          {/* Added Physical Address */}
           <div style={{ marginTop: '12px', color: '#D1D5DB', fontSize: '14px', lineHeight: '1.5' }}>
             <strong>Address:</strong><br />
             5080 Spectrum Drive,<br />

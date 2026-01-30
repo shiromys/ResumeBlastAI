@@ -57,6 +57,8 @@ from routes.recruiter_activity import recruiter_activity_bp
 from routes.support_ticket import support_ticket_bp
 from routes.user_management import user_management_bp
 from routes.payment_webhook import payment_webhook_bp
+# ✅ ADDED: Import the new User Activity route
+from routes.user_activity import user_activity_bp
 
 app = Flask(__name__)
 
@@ -92,6 +94,8 @@ app.register_blueprint(contact_bp)
 app.register_blueprint(support_ticket_bp)
 app.register_blueprint(user_management_bp)
 app.register_blueprint(payment_webhook_bp)
+# ✅ ADDED: Register the new User Activity blueprint
+app.register_blueprint(user_activity_bp)
 
 @app.route('/')
 def home():
@@ -133,6 +137,7 @@ if __name__ == '__main__':
     print(f'💳 Stripe Webhook: /api/webhooks/stripe')
     print(f'🎫 Support Tickets: CORS enabled with PATCH method')
     print(f'🔍 Analyze Endpoint: /api/analyze')
+    print(f'📊 User Activity Tracking: /api/user-activity/log') # Added log for verification
     print('='*70 + '\n')
     
     app.run(host='0.0.0.0', port=port, debug=debug)
