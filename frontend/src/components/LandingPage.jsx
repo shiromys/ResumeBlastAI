@@ -78,7 +78,7 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
 };
 
 function LandingPage({ onGetStarted }) {
-  const [showHighlight, setShowHighlight] = useState(false);
+  // REMOVED: showHighlight state logic is no longer needed
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -104,10 +104,9 @@ function LandingPage({ onGetStarted }) {
                 text="Start Blasting." 
                 delay={800} 
                 infinite={true} 
-                onTypeEnd={() => setShowHighlight(true)} 
-                onDeleteStart={() => setShowHighlight(false)} 
+                // REMOVED: onTypeEnd and onDeleteStart props
               />
-              <span className={`highlight-bg ${showHighlight ? 'active' : ''}`}></span>
+              {/* REMOVED: The highlight-bg span that created the red line */}
             </span>
           </h1>
           

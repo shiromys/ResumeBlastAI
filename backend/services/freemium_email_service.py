@@ -3,14 +3,15 @@
 import os
 import resend
 import requests
-import base64  # ✅ ADDED: Needed for encoding the attachment
-import time    # ✅ ADDED: Needed for rate limiting delay
+import base64
+import time
 from datetime import datetime
 
 class FreemiumEmailService:
     """
     Handles freemium email blasts using Resend.com
     Fetches recruiters from database (freemium_recruiters table)
+    ✅ UPDATED: Now filters out bounced/blocked emails
     """
     
     def __init__(self):
@@ -45,7 +46,6 @@ class FreemiumEmailService:
             'Content-Type': 'application/json'
         }
 
-    # ✅ ADDED: Helper method to download and encode the resume from Supabase URL
     def _download_resume(self, resume_url):
         """
         Download resume file from URL and convert to base64
@@ -75,16 +75,18 @@ class FreemiumEmailService:
     def fetch_freemium_recruiters(self):
         """
         Fetch active freemium recruiters from database
+        ✅ UPDATED: Now filters out bounced/blocked emails from 'freemium_recruiters' table
         Returns list of recruiter dictionaries
         """
         try:
-            print("\n📊 Fetching freemium recruiters from database...")
+            print("\n📊 Fetching ACTIVE freemium recruiters from 'freemium_recruiters' table...")
             
             url = f"{self.supabase_url}/rest/v1/freemium_recruiters"
             params = {
                 'is_active': 'eq.true',
+                'email_status': 'eq.active',  # ✅ ADDED: Only fetch active email statuses
                 'order': 'sort_order.asc',
-                'select': 'email,name,company,industry,location'
+                'select': 'id,email,name,company,industry,location,email_status,sort_order'
             }
             
             response = requests.get(url, headers=self._get_db_headers(), params=params)
@@ -94,16 +96,58 @@ class FreemiumEmailService:
                 
                 if not recruiters or len(recruiters) == 0:
                     print("⚠️ WARNING: No active freemium recruiters found in database!")
+                    print("   Possible reasons:")
+                    print("   1. No recruiters in 'freemium_recruiters' table")
+                    print("   2. All recruiters have bounced emails (email_status != 'active')")
+                    print("   3. All recruiters marked as is_active=false")
+                    
+                    # Check for bounced recruiters
+                    url_check = f"{self.supabase_url}/rest/v1/freemium_recruiters"
+                    params_check = {
+                        'is_active': 'eq.true',
+                        'select': 'email,email_status,bounce_reason'
+                    }
+                    response_check = requests.get(url_check, headers=self._get_db_headers(), params=params_check)
+                    
+                    if response_check.status_code == 200:
+                        all_recruiters = response_check.json()
+                        if all_recruiters:
+                            bounced_count = sum(1 for r in all_recruiters if r.get('email_status') != 'active')
+                            if bounced_count > 0:
+                                print(f"   📊 Found {bounced_count} bounced/blocked recruiters out of {len(all_recruiters)} total")
+                    
                     return []
                 
-                print(f"✅ Fetched {len(recruiters)} active recruiters from database")
+                print(f"✅ Fetched {len(recruiters)} active recruiters (bounced emails filtered out)")
+                
+                # ✅ ADDED: Log any bounced recruiters for visibility
+                url_bounced = f"{self.supabase_url}/rest/v1/freemium_recruiters"
+                params_bounced = {
+                    'is_active': 'eq.true',
+                    'email_status': 'neq.active',
+                    'select': 'email,email_status,bounce_reason,bounce_date'
+                }
+                response_bounced = requests.get(url_bounced, headers=self._get_db_headers(), params=params_bounced)
+                
+                if response_bounced.status_code == 200:
+                    bounced = response_bounced.json()
+                    if bounced and len(bounced) > 0:
+                        print(f"⚠️ Found {len(bounced)} bounced/blocked recruiters (excluded from blast):")
+                        for rec in bounced[:5]:  # Show first 5
+                            print(f"   - {rec.get('email')}: {rec.get('email_status')} - {rec.get('bounce_reason', 'N/A')[:50]}")
+                        if len(bounced) > 5:
+                            print(f"   ... and {len(bounced) - 5} more")
+                
                 return recruiters
             else:
                 print(f"❌ Failed to fetch recruiters: HTTP {response.status_code}")
+                print(f"   Response: {response.text}")
                 return []
                 
         except Exception as e:
             print(f"❌ Error fetching freemium recruiters from database: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def _generate_email_template(self, candidate_data, recruiter_data):
@@ -186,13 +230,13 @@ class FreemiumEmailService:
             
             print(f"\n📧 Preparing email to: {recruiter_email}")
             
-            # ✅ ADDED: Download and encode the resume file
+            # Download and encode the resume file
             base64_content, filename = self._download_resume(resume_url)
             
             # Generate email content
             html_content = self._generate_email_template(candidate_data, recruiter_data)
             
-            # ✅ UPDATED: Added the 'attachments' parameter for Resend API
+            # Prepare email with attachment
             email_params = {
                 "from": f"{self.sender_name} <{self.sender_email}>",
                 "to": [recruiter_email],
@@ -231,7 +275,10 @@ class FreemiumEmailService:
             }
     
     def send_freemium_blast(self, candidate_data, resume_url):
-        """Send resume to all active freemium recruiters from database"""
+        """
+        Send resume to all active freemium recruiters from database
+        ✅ UPDATED: Now automatically excludes bounced/blocked recruiters
+        """
         try:
             print("\n" + "="*70)
             print("🎁 FREEMIUM BLAST STARTED (Database-Driven - Resend.com)")
@@ -240,6 +287,7 @@ class FreemiumEmailService:
             if not resume_url:
                 raise ValueError("Resume URL is required for the attachment")
 
+            # ✅ UPDATED: This now automatically filters bounced emails
             recruiters = self.fetch_freemium_recruiters()
             
             if not recruiters or len(recruiters) == 0:
@@ -252,7 +300,7 @@ class FreemiumEmailService:
             results = {'total': len(recruiters), 'successful': 0, 'failed': 0, 'results': []}
             
             for recruiter in recruiters:
-                # ✅ FIX: Add delay to prevent rate limits
+                # Add delay to prevent rate limits
                 time.sleep(1)
                 
                 result = self.send_to_single_recruiter(
@@ -261,10 +309,13 @@ class FreemiumEmailService:
                     resume_url=resume_url
                 )
                 results['results'].append(result)
-                if result['success']: results['successful'] += 1
-                else: results['failed'] += 1
+                if result['success']: 
+                    results['successful'] += 1
+                else: 
+                    results['failed'] += 1
             
             print(f"\n✅ FREEMIUM BLAST COMPLETE: {results['successful']}/{results['total']} sent")
+            print("="*70)
             
             return {
                 'success': True,
@@ -288,6 +339,10 @@ class FreemiumEmailService:
                 "subject": "Test Connection - ResumeBlast.ai",
                 "html": "<p>This is a test email</p>"
             })
-            return {'success': True, 'database_recruiters': len(recruiters), 'resend_message_id': response['id']}
+            return {
+                'success': True, 
+                'database_recruiters': len(recruiters), 
+                'resend_message_id': response['id']
+            }
         except Exception as e:
             return {'success': False, 'error': str(e)}

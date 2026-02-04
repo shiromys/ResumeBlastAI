@@ -15,7 +15,10 @@ SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 # Brevo Configuration
 BREVO_API_KEY = os.getenv('BREVO_API_KEY')
 SUPPORT_EMAIL = 'support@shirotechnologies.com'
-BREVO_SENDER_EMAIL = os.getenv('BREVO_SENDER_EMAIL', 'noreply@resumeblast.ai')
+
+# ✅ UPDATED: SENDER EMAIL IDENTITY
+# Pulls from .env first, falls back to 'info@resumeblast.ai' if missing
+BREVO_SENDER_EMAIL = os.getenv('BREVO_SENDER_EMAIL', 'info@resumeblast.ai')
 BREVO_SENDER_NAME = os.getenv('BREVO_SENDER_NAME', 'ResumeBlast Support')
 
 @contact_bp.route('/api/contact/submit', methods=['POST'])
@@ -37,18 +40,17 @@ def submit_contact():
         ticket_id = f"TKT-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}"
 
         # 3. Prepare data for Supabase
-        # ✅ FIX: We are now targeting the 'support_tickets' table you showed in screenshots
         submission_data = {
             'user_name': data['name'],      
             'user_email': data['email'],    
             'subject': data['subject'],
             'message': data['message'],
-            'status': 'open',               # Changed to 'open' to match standard ticket status
-            'ticket_id': ticket_id,         # Added via SQL in Step 1
+            'status': 'open',
+            'ticket_id': ticket_id,
             'created_at': datetime.utcnow().isoformat()
         }
         
-        # 4. Insert into 'support_tickets' table (instead of contact_submissions)
+        # 4. Insert into 'support_tickets' table
         url = f"{SUPABASE_URL}/rest/v1/support_tickets"
         headers = {
             'apikey': SUPABASE_SERVICE_KEY,

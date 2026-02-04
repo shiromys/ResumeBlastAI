@@ -17,11 +17,10 @@ BREVO_API_KEY = os.getenv('BREVO_API_KEY')
 # ✅ TARGET EMAIL (Based on your requirements)
 SUPPORT_EMAIL = 'support@shirotechnologies.com'
 
-# ✅ SENDER IDENTITY
-# This MUST be a verified sender in your Brevo account (e.g., the email you used to sign up)
-# If 'noreply@resumeblast.ai' is not verified, change this to your personal verified email for testing.
-BREVO_SENDER_EMAIL = 'noreply@resumeblast.ai' 
-BREVO_SENDER_NAME = 'ResumeBlast Support'
+# ✅ UPDATED: SENDER IDENTITY
+# Now uses .env value first, defaults to info@resumeblast.ai if missing
+BREVO_SENDER_EMAIL = os.getenv('BREVO_SENDER_EMAIL', 'info@resumeblast.ai')
+BREVO_SENDER_NAME = os.getenv('BREVO_SENDER_NAME', 'ResumeBlast Support')
 
 @support_ticket_bp.route('/api/support-ticket/submit', methods=['POST'])
 def submit_support_ticket():

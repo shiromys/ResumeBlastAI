@@ -52,7 +52,7 @@ function Navbar({ user, isAdmin, onViewChange, onLoginClick, onLogout }) {
                 </li>
 
                 <li>
-                  <button 
+                  <button
                     className="nav-link" 
                     onClick={() => handleNavClick('contact')}
                   >

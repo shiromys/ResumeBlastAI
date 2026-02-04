@@ -57,8 +57,9 @@ from routes.recruiter_activity import recruiter_activity_bp
 from routes.support_ticket import support_ticket_bp
 from routes.user_management import user_management_bp
 from routes.payment_webhook import payment_webhook_bp
-# ✅ ADDED: Import the new User Activity route
 from routes.user_activity import user_activity_bp
+# ✅ ADDED: Import webhooks blueprint for bounce handling
+from routes.webhooks import webhooks_bp
 
 app = Flask(__name__)
 
@@ -72,6 +73,7 @@ CORS(app,
                  "http://localhost:5000",
                  "https://resumeblast.ai",
                  "https://*.railway.app",
+                 "https://www.resumeblast.ai",
                  os.getenv('FRONTEND_URL', '*')
              ],
              "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -87,15 +89,16 @@ CORS(app,
 app.register_blueprint(payment_bp)
 app.register_blueprint(blast_bp)
 app.register_blueprint(auth_bp) 
-app.register_blueprint(analyze_bp)  # ✅ This registers /api/analyze
+app.register_blueprint(analyze_bp)
 app.register_blueprint(admin_bp)
 app.register_blueprint(recruiter_activity_bp)
 app.register_blueprint(contact_bp)
 app.register_blueprint(support_ticket_bp)
 app.register_blueprint(user_management_bp)
 app.register_blueprint(payment_webhook_bp)
-# ✅ ADDED: Register the new User Activity blueprint
 app.register_blueprint(user_activity_bp)
+# ✅ ADDED: Register webhooks blueprint for bounce handling
+app.register_blueprint(webhooks_bp)
 
 @app.route('/')
 def home():
@@ -113,7 +116,9 @@ def health():
         'webhook_configured': bool(os.getenv('MAKE_WEBHOOK_URL')),
         'supabase_configured': bool(os.getenv('SUPABASE_SERVICE_ROLE_KEY')),
         'anthropic_configured': bool(os.getenv('ANTHROPIC_API_KEY')),
-        'stripe_webhook_configured': bool(os.getenv('STRIPE_WEBHOOK_SECRET'))
+        'stripe_webhook_configured': bool(os.getenv('STRIPE_WEBHOOK_SECRET')),
+        # ✅ ADDED: Bounce handling webhook status
+        'bounce_webhooks_configured': True
     })
 
 # ✅ NEW: Debug route to verify CORS is working
@@ -137,7 +142,8 @@ if __name__ == '__main__':
     print(f'💳 Stripe Webhook: /api/webhooks/stripe')
     print(f'🎫 Support Tickets: CORS enabled with PATCH method')
     print(f'🔍 Analyze Endpoint: /api/analyze')
-    print(f'📊 User Activity Tracking: /api/user-activity/log') # Added log for verification
+    print(f'📊 User Activity Tracking: /api/user-activity/log')
+    print(f'📧 Bounce Webhooks: /api/webhooks/brevo/bounce & /api/webhooks/resend/bounce')  # ✅ ADDED
     print('='*70 + '\n')
     
     app.run(host='0.0.0.0', port=port, debug=debug)
