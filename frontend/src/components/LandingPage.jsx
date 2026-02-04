@@ -261,7 +261,7 @@ function LandingPage({ onGetStarted }) {
                 Coming Soon
               </button>
               <p className="guarantee" style={{textAlign: 'center', fontSize: '11px', color: '#6B7280', marginTop: '10px', fontWeight: '500'}}>
-                 Notify me when available
+                 
               </p>
             </div>
           </div>
