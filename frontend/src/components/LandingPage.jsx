@@ -1,36 +1,5 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import './LandingPage.css'
-
-// --- INTERNAL COMPONENT: Live Counter ---
-const CountUp = ({ end, duration = 2000, suffix = '' }) => {
-  const [count, setCount] = useState(0);
-  const countRef = useRef(null);
-  const [isVisible, setIsVisible] = useState(false);
-
-  useEffect(() => {
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) setIsVisible(true);
-      else { setIsVisible(false); setCount(0); }
-    }, { threshold: 0.1 });
-    if (countRef.current) observer.observe(countRef.current);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!isVisible) return;
-    let startTimestamp = null;
-    const step = (timestamp) => {
-      if (!startTimestamp) startTimestamp = timestamp;
-      const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-      setCount(Math.floor(progress * end));
-      if (progress < 1) window.requestAnimationFrame(step);
-      else setCount(end);
-    };
-    window.requestAnimationFrame(step);
-  }, [isVisible, end, duration]);
-
-  return <span ref={countRef}>{count}{suffix}</span>;
-};
 
 // --- INTERNAL COMPONENT: Typewriter ---
 const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDeleteStart }) => {
@@ -91,7 +60,7 @@ function LandingPage({ onGetStarted }) {
         <div className="hero-content">
           <div className="tagline-wrapper">
             <p className="tagline animated-wipe">
-              AI-Powered Resume Distribution to <span className="counter-badge"><CountUp end={2000} suffix="+" /></span> Recruiters
+              AI-Powered Resume Distribution to <span className="counter-badge">2000+</span> Recruiters
             </p>
           </div>
           
@@ -112,7 +81,7 @@ function LandingPage({ onGetStarted }) {
           
           <div className="hero-highlight-block">
             <p className="subtitle">
-              Don't waste time rewriting your resume. Our engine analyzes your profile and sends it directly to <strong style={{color: '#DC2626', fontWeight: '800'}}><CountUp end={2000} suffix="+" /> verified recruiters</strong> looking for your skills.
+              Don't waste time rewriting your resume. Our engine analyzes your profile and sends it directly to <strong style={{color: '#DC2626', fontWeight: '800'}}>2000+ verified recruiters</strong> looking for your skills.
             </p>
             <div className="cta-container">
               <button className="cta-button large" onClick={onGetStarted}>
@@ -345,7 +314,7 @@ function LandingPage({ onGetStarted }) {
       {/* Final CTA Section */}
       <section className="final-cta">
         <h2>Ready to Land Your Dream Job?</h2>
-        <p>Join 10,000+ professionals who found their next opportunity with ResumeBlast.ai</p>
+        <p>Join 1000+ professionals who found their next opportunity with ResumeBlast.ai</p>
         <button className="cta-button large" onClick={onGetStarted}>
           Start Your Job Search Now
         </button>

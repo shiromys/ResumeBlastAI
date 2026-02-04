@@ -50,6 +50,9 @@ function Footer({ onViewChange }) {
           <a href="mailto:support@resumeblast.ai" className="footer-link">
             support@resumeblast.ai
           </a>
+          <a href="tel:8009718013" className="footer-link">
+            (800)971-8013
+          </a>
           <div style={{ marginTop: '12px', color: '#D1D5DB', fontSize: '14px', lineHeight: '1.5' }}>
             <strong>Address:</strong><br />
             5080 Spectrum Drive,<br />
