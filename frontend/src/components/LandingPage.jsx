@@ -1,5 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import './LandingPage.css'
+
+// --- INTERNAL COMPONENT: Live Counter ---
+const CountUp = ({ end, duration = 2000, suffix = '' }) => {
+  const [count, setCount] = useState(0);
+  const countRef = useRef(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) setIsVisible(true);
+      else { setIsVisible(false); setCount(0); }
+    }, { threshold: 0.1 });
+    if (countRef.current) observer.observe(countRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    let startTimestamp = null;
+    const step = (timestamp) => {
+      if (!startTimestamp) startTimestamp = timestamp;
+      const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+      setCount(Math.floor(progress * end));
+      if (progress < 1) window.requestAnimationFrame(step);
+      else setCount(end);
+    };
+    window.requestAnimationFrame(step);
+  }, [isVisible, end, duration]);
+
+  return <span ref={countRef}>{count}{suffix}</span>;
+};
 
 // --- INTERNAL COMPONENT: Typewriter ---
 const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDeleteStart }) => {
@@ -47,8 +78,6 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
 };
 
 function LandingPage({ onGetStarted }) {
-  // REMOVED: showHighlight state logic is no longer needed
-
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
@@ -59,6 +88,7 @@ function LandingPage({ onGetStarted }) {
       <section id="home" className="hero">
         <div className="hero-content">
           <div className="tagline-wrapper">
+            {/* STATIC 2000+ HERE */}
             <p className="tagline animated-wipe">
               AI-Powered Resume Distribution to <span className="counter-badge">2000+</span> Recruiters
             </p>
@@ -73,15 +103,14 @@ function LandingPage({ onGetStarted }) {
                 text="Start Blasting." 
                 delay={800} 
                 infinite={true} 
-                // REMOVED: onTypeEnd and onDeleteStart props
               />
-              {/* REMOVED: The highlight-bg span that created the red line */}
             </span>
           </h1>
           
           <div className="hero-highlight-block">
             <p className="subtitle">
-              Don't waste time rewriting your resume. Our engine analyzes your profile and sends it directly to <strong style={{color: '#DC2626', fontWeight: '800'}}>2000+ verified recruiters</strong> looking for your skills.
+              {/* ANIMATED COUNTER HERE ONLY */}
+              Don't waste time rewriting your resume. Our engine analyzes your profile and sends it directly to <strong style={{color: '#DC2626', fontWeight: '800'}}><CountUp end={2000} suffix="+" /> verified recruiters</strong> looking for your skills.
             </p>
             <div className="cta-container">
               <button className="cta-button large" onClick={onGetStarted}>
@@ -124,20 +153,19 @@ function LandingPage({ onGetStarted }) {
         </div>
       </section>
 
-      {/* Pricing Section - MINIMIZED LENGTH */}
+      {/* Pricing Section */}
       <section id="pricing" className="pricing">
         <h2>Choose Your Plan</h2>
         <p className="section-subtitle">Start for free, upgrade for power.</p>
         
         <div className="pricing-container" style={{display: 'flex', gap: '20px', justifyContent: 'center', flexWrap: 'wrap', maxWidth: '850px', margin: '0 auto'}}>
           
-          {/* FREEMIUM CARD - COMPACT */}
+          {/* FREEMIUM CARD */}
           <div className="pricing-card" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', padding: '0'}}>
             <div className="popular-badge" style={{background: '#DC2626', position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '2px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', color: 'white'}}>
               New User Offer
             </div>
             
-            {/* Header */}
             <div className="price-header" style={{padding: '20px 20px 10px', borderBottom: '1px solid #F3F4F6'}}>
               <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Freemium Blast</h3>
               <div className="price-tag" style={{margin: '5px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'center'}}>
@@ -147,7 +175,6 @@ function LandingPage({ onGetStarted }) {
               <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>One-time use only</p>
             </div>
 
-            {/* List */}
             <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
                 <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
@@ -171,7 +198,6 @@ function LandingPage({ onGetStarted }) {
               </li>
             </ul>
 
-            {/* Button */}
             <div style={{padding: '0 20px 20px'}}>
               <button 
                 className="cta-button" 
@@ -196,13 +222,12 @@ function LandingPage({ onGetStarted }) {
             </div>
           </div>
 
-          {/* PREMIUM CARD - UPDATED TO "COMING SOON" WITH RED THEME */}
+          {/* PREMIUM CARD */}
           <div className="pricing-card featured" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', boxShadow: 'none', padding: '0'}}>
             <div className="popular-badge" style={{background: '#DC2626', position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '2px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', color: 'white'}}>
               Coming Soon
             </div>
 
-            {/* Header */}
             <div className="price-header" style={{padding: '20px 20px 10px', borderBottom: '1px solid #F3F4F6'}}>
               <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Premium Plans</h3>
               <div className="price-tag" style={{margin: '15px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60px'}}>
@@ -211,7 +236,6 @@ function LandingPage({ onGetStarted }) {
               <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>Join the waitlist</p>
             </div>
 
-            {/* List */}
             <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
                 <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
@@ -239,7 +263,6 @@ function LandingPage({ onGetStarted }) {
               </li>
             </ul>
 
-            {/* Button */}
             <div style={{padding: '0 20px 20px'}}>
               <button 
                 className="cta-button featured" 
