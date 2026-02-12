@@ -95,7 +95,7 @@ class RecruiterEmailService:
                     <tr>
                         <td style="background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%); padding: 40px 30px; border-radius: 12px 12px 0 0;">
                             <h1 style="color: #ffffff; margin: 0 0 10px 0; font-size: 28px; font-weight: 700;">
-                                🚀 New Candidate Profile
+                                 New Candidate Profile
                             </h1>
                             <p style="color: #FEE2E2; margin: 0; font-size: 16px;">
                                 Powered by ResumeBlast.ai
@@ -118,7 +118,7 @@ class RecruiterEmailService:
                         <td style="padding: 0 40px 30px;">
                             <div style="background: linear-gradient(135deg, #FEE2E2 0%, #FEF2F2 100%); border-left: 5px solid #DC2626; border-radius: 8px; padding: 25px;">
                                 <h2 style="color: #991B1B; margin: 0 0 20px 0; font-size: 22px; font-weight: 700;">
-                                    👤 {candidate_name}
+                                     {candidate_name}
                                 </h2>
                                 <p style="color: #DC2626; font-size: 18px; font-weight: 600; margin: 0;">
                                     {job_role}
@@ -131,7 +131,7 @@ class RecruiterEmailService:
                         <td style="padding: 0 40px 30px;">
                             <div style="background-color: #FEF3C7; border: 2px dashed #F59E0B; border-radius: 8px; padding: 20px; text-align: center;">
                                 <p style="color: #92400E; font-size: 16px; margin: 0; font-weight: 600;">
-                                    📎 <strong>Resume Attached</strong>
+                                     <strong>Resume Attached</strong>
                                 </p>
                                 <p style="color: #92400E; font-size: 14px; margin: 10px 0 0 0;">
                                     Please find the complete resume attached to this email
@@ -158,7 +158,7 @@ class RecruiterEmailService:
                     <tr>
                         <td style="background-color: #F3F4F6; padding: 30px 40px; text-align: center; border-radius: 0 0 12px 12px; border-top: 1px solid #E5E7EB;">
                             <div style="margin-bottom: 15px;">
-                                <span style="font-size: 24px;">🚀</span>
+                                <span style="font-size: 24px;"></span>
                             </div>
                             <p style="color: #6B7280; font-size: 14px; margin: 0 0 8px 0; font-weight: 600;">
                                 ResumeBlast.ai

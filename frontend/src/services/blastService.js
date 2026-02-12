@@ -1,29 +1,38 @@
 // /frontend/src/services/blastService.js
-// Updated to call backend API instead of Make.com directly
+// ✅ FIXED: Works with backend-driven recruiter selection
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
-console.log('📧 blastService.js loaded - Direct Backend Integration (No Make.com)');
+console.log('🔧 blastService.js loaded - Backend Integration (Backend fetches recruiters)');
 
 /**
- * Trigger email blast via backend API
- * Backend handles all email sending via Brevo (Paid Plan)
+ * ✅ FIXED: Trigger email blast via backend API
+ * Backend handles ALL recruiter fetching and selection based on plan
  */
 export const triggerEmailBlast = async (blastData) => {
   try {
     console.log('');
     console.log('=== TRIGGER EMAIL BLAST STARTED ===');
     
-    // STEP 1: Validate recipients
-    const recipientsArray = blastData.recipients || blastData.recruiters;
-    if (!recipientsArray || !Array.isArray(recipientsArray) || recipientsArray.length === 0) {
-      throw new Error('❌ No recipients selected for blast');
+    // ✅ VALIDATION: Check required fields (NOT recipients anymore!)
+    if (!blastData.plan_name) {
+      throw new Error('❌ Plan name is required');
+    }
+    
+    if (!blastData.resume_url) {
+      throw new Error('❌ Resume URL is required');
     }
 
-    console.log(`✅ Validation passed: ${recipientsArray.length} recipients`);
+    console.log(`✅ Validation passed`);
+    console.log(`   Plan: ${blastData.plan_name}`);
+    console.log(`   Campaign ID: ${blastData.campaign_id || 'Not provided'}`);
 
-    // STEP 2: Prepare payload for backend
+    // ✅ PREPARE PAYLOAD: Backend will fetch recruiters
     const payload = {
+      // Plan information (backend uses this to fetch recruiters)
+      plan_name: blastData.plan_name,
+      campaign_id: blastData.campaign_id,
+      
       // Candidate information
       candidate_name: blastData.candidate_name || 'Professional Candidate',
       candidate_email: blastData.candidate_email || 'candidate@example.com',
@@ -36,23 +45,17 @@ export const triggerEmailBlast = async (blastData) => {
       linkedin_url: blastData.linkedin_url || '',
       
       // Resume File Info
-      resume_url: blastData.resume_url || blastData.resumeUrl || '',
-      resume_name: blastData.resume_name || 'Resume.pdf', 
-      
-      // Recipients array
-      recipients: recipientsArray.map(recipient => ({
-        email: recipient.email || recipient.recruiter_email,
-        name: recipient.name || recipient.recruiter_name || 'Recruiter',
-        company: recipient.company || recipient.company_name || 'Company'
-      }))
+      resume_url: blastData.resume_url,
+      resume_name: blastData.resume_name || 'Resume.pdf'
     };
 
     console.log('📦 Payload prepared:');
     console.log('  - Candidate:', payload.candidate_name);
-    console.log('  - Resume Name:', payload.resume_name);
-    console.log('  - Recipients:', payload.recipients.length);
+    console.log('  - Plan:', payload.plan_name);
+    console.log('  - Resume:', payload.resume_name);
+    console.log('  - Campaign ID:', payload.campaign_id);
 
-    // STEP 3: Send request to backend
+    // ✅ SEND REQUEST TO BACKEND
     console.log('📡 Sending POST request to backend API...');
     console.log('   URL:', `${API_URL}/api/blast/send`);
 
@@ -89,7 +92,7 @@ export const triggerEmailBlast = async (blastData) => {
 };
 
 /**
- * ✅ NEW: Trigger Freemium Blast (Resend.com)
+ * ✅ Trigger Freemium Blast (Resend.com)
  * Sends to the specific 11 recruiters for free users.
  */
 export const triggerFreemiumBlast = async (userId, resumeUrl, candidateData) => {
@@ -147,7 +150,7 @@ export const testBackendConnection = async () => {
         success: true,
         message: result.message,
         brevo_configured: result.brevo_configured,
-        resend_configured: result.resend_configured, // Check Resend status too
+        resend_configured: result.resend_configured,
         integration_type: result.integration_type
       };
     } else {

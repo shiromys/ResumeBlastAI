@@ -13,12 +13,31 @@ export const initiateCheckout = async (user) => {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       email: user.email,
-      user_id: user.id
+      user_id: user.id,
+      plan: user.plan,
+      // ✅ NEW: Send disclaimer status to backend
+      disclaimer_accepted: user.disclaimer_accepted 
     })
   });
 
   const session = await response.json();
-  window.location.href = session.url;
+  
+  if (session.error) {
+    throw new Error(session.error);
+  }
+
+  // Redirect to Stripe
+  if (session.url) {
+      window.location.href = session.url;
+  } else {
+      const result = await stripe.redirectToCheckout({
+        sessionId: session.id
+      });
+
+      if (result.error) {
+        throw new Error(result.error.message);
+      }
+  }
 };
 
 export const verifyPayment = async (sessionId) => {

@@ -89,23 +89,24 @@ export const logError = async (functionName, errorMessage, context = {}) => {
     console.error('Failed to log error:', logError);
   }
 };
-// ... existing imports ...
 
 /**
  * Fetch recruiters from Supabase based on industry and count
+ * Enforces plan logic (First 250 or First 500)
  */
 export const fetchRecruiters = async (industry, limit = 5) => {
   try {
     console.log(`🔍 Fetching ${limit} recruiters for industry: ${industry}`);
     
-    // Start building the query
+    // UPDATED Logic: Added ordering by created_at to ensure consistent 
+    // "First N" retrieval as required by the pricing plans.
     let query = supabase
-      .from('recruiters') // Ensure your table name is 'recruiters'
-      .select('email, name, company, industry, location, seniority_level')
+      .from('recruiters') 
+      .select('email') 
+      .order('created_at', { ascending: true }) // Ensures we get the first 250 or 500
       .limit(limit);
 
     // Apply industry filter if it's not "All"
-    // Using ilike for case-insensitive matching (e.g., "Technology" matches "technology")
     if (industry && industry !== 'All') {
       query = query.ilike('industry', `%${industry}%`);
     }
@@ -118,7 +119,13 @@ export const fetchRecruiters = async (industry, limit = 5) => {
     }
 
     console.log(`✅ Successfully fetched ${data?.length || 0} recruiters`);
-    return data || [];
+    
+    // Map to a format the blast service expects using placeholders for deleted data
+    return (data || []).map(r => ({
+        email: r.email,
+        name: 'Hiring Manager', 
+        company: 'Partner Firm'
+    }));
   } catch (error) {
     console.error('❌ Error fetching recruiters:', error.message);
     throw error;

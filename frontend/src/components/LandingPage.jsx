@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react'
 import './LandingPage.css'
 
 // --- INTERNAL COMPONENT: Live Counter ---
-const CountUp = ({ end, duration = 2000, suffix = '' }) => {
+const CountUp = ({ end, duration = 500, suffix = '' }) => {
   const [count, setCount] = useState(0);
   const countRef = useRef(null);
   const [isVisible, setIsVisible] = useState(false);
@@ -48,7 +48,7 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
     if (!isStarted) return;
     let timer;
     const typeSpeed = isDeleting ? 30 : 60;
-    const pauseTime = 2000;
+    const pauseTime = 500;
 
     if (!isDeleting && currentIndex < text.length) {
       timer = setTimeout(() => {
@@ -78,9 +78,42 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
 };
 
 function LandingPage({ onGetStarted }) {
+  // ✅ STATE: Store plans fetched from DB
+  const [plans, setPlans] = useState({});
+
   useEffect(() => {
     window.scrollTo(0, 0);
+
+    // ✅ FETCH: Get dynamic pricing and limits from backend
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+    fetch(`${API_URL}/api/plans/public`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.plans) {
+          // Convert array to object map for easy access (e.g., plans['basic'])
+          const planMap = {};
+          data.plans.forEach(p => planMap[p.key_name] = p);
+          setPlans(planMap);
+        }
+      })
+      .catch(err => console.error("Failed to load plans:", err));
   }, []);
+
+  // ✅ HELPER: Format price parts (Whole . Decimal)
+  const getPriceParts = (key, defaultCents) => {
+    const cents = plans[key]?.price_cents ?? defaultCents;
+    const whole = Math.floor(cents / 100);
+    const fraction = (cents % 100).toString().padEnd(2, '0');
+    return { whole, fraction };
+  };
+
+  // ✅ HELPER: Get recruiter limit
+  const getLimit = (key, defaultLimit) => {
+    return plans[key]?.recruiter_limit || defaultLimit;
+  };
+
+  const basicPrice = getPriceParts('basic', 999);
+  const proPrice = getPriceParts('pro', 1299);
 
   return (
     <div className="landing-page">
@@ -88,9 +121,8 @@ function LandingPage({ onGetStarted }) {
       <section id="home" className="hero">
         <div className="hero-content">
           <div className="tagline-wrapper">
-            {/* STATIC 2000+ HERE */}
             <p className="tagline animated-wipe">
-              AI-Powered Resume Distribution to <span className="counter-badge">2000+</span> Recruiters
+              AI-Powered Resume Distribution to <span className="counter-badge">500+</span> Recruiters
             </p>
           </div>
           
@@ -109,8 +141,7 @@ function LandingPage({ onGetStarted }) {
           
           <div className="hero-highlight-block">
             <p className="subtitle">
-              {/* ANIMATED COUNTER HERE ONLY */}
-              Don't waste time rewriting your resume. Our engine analyzes your profile and sends it directly to <strong style={{color: '#DC2626', fontWeight: '800'}}><CountUp end={2000} suffix="+" /> verified recruiters</strong> looking for your skills.
+              Don't waste time rewriting your resume. Our engine analyzes your profile and sends it directly to <strong style={{color: '#DC2626', fontWeight: '800'}}><CountUp end={500} suffix="+" /> verified recruiters</strong> looking for your skills.
             </p>
             <div className="cta-container">
               <button className="cta-button large" onClick={onGetStarted}>
@@ -121,7 +152,7 @@ function LandingPage({ onGetStarted }) {
         </div>
       </section>
 
-      {/* How It Works */}
+      {/* How It Works Section */}
       <section id="how-it-works" className="how-it-works">
         <h2>How It Works</h2>
         <p className="section-subtitle">Get noticed in 4 simple steps</p>
@@ -130,7 +161,7 @@ function LandingPage({ onGetStarted }) {
             <div className="step-number">1</div>
             <div className="step-icon">📄</div>
             <h3>Upload Resume</h3>
-            <p>Upload your existing PDF. No rewriting, reformatting, or "AI optimizing" required.</p>
+            <p>Upload your existing  Resume (.PDF,.TXT, .DOCX format) . No rewriting, reformatting, or "AI optimizing" required.</p>
           </div>
           <div className="step">
             <div className="step-number">2</div>
@@ -142,7 +173,7 @@ function LandingPage({ onGetStarted }) {
             <div className="step-number">3</div>
             <div className="step-icon">📧</div>
             <h3>Mass Distribution</h3>
-            <p>We blast your resume to <strong style={{color: '#DC2626'}}>2000+</strong> verified recruiters specifically looking for your skills.</p>
+            <p>We blast your resume to <strong style={{color: '#DC2626'}}>500+</strong> verified recruiters specifically looking for your skills.</p>
           </div>
           <div className="step">
             <div className="step-number">4</div>
@@ -156,14 +187,14 @@ function LandingPage({ onGetStarted }) {
       {/* Pricing Section */}
       <section id="pricing" className="pricing">
         <h2>Choose Your Plan</h2>
-        <p className="section-subtitle">Start for free, upgrade for power.</p>
+        <p className="section-subtitle">Start for free, upgrade for maximum exposure.</p>
         
-        <div className="pricing-container" style={{display: 'flex', gap: '20px', justifyContent: 'center', flexWrap: 'wrap', maxWidth: '850px', margin: '0 auto'}}>
+        <div className="pricing-container" style={{display: 'flex', gap: '20px', justifyContent: 'center', flexWrap: 'wrap', maxWidth: '1200px', margin: '50px auto 0'}}>
           
           {/* FREEMIUM CARD */}
           <div className="pricing-card" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', padding: '0'}}>
             <div className="popular-badge" style={{background: '#DC2626', position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '2px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', color: 'white'}}>
-              New User Offer
+              
             </div>
             
             <div className="price-header" style={{padding: '20px 20px 10px', borderBottom: '1px solid #F3F4F6'}}>
@@ -178,114 +209,140 @@ function LandingPage({ onGetStarted }) {
             <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
                 <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                <strong>11 Verified Recruiters</strong>
+                {/* ✅ DYNAMIC: Freemium Count */}
+                <strong>{getLimit('freemium', 11)} Verified Recruiters</strong>
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
                 <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                Top Agencies Included
+                Resume Analysis
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
                 <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                Instant Email Delivery
+                Guaranteed Email Delivery
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
                 <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
                 Professional Template
               </li>
-              <li style={{padding: '5px 0', fontSize: '13px', color: '#9CA3AF', display: 'flex', alignItems: 'center'}}>
+              <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
                 <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                Limited to 11 Recruiters
+                Regular email support
               </li>
             </ul>
 
             <div style={{padding: '0 20px 20px'}}>
               <button 
                 className="cta-button" 
-                style={{
-                  background: '#DC2626', 
-                  color: 'white', 
-                  width: '100%',
-                  padding: '12px',
-                  fontSize: '14px',
-                  fontWeight: '700',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  transition: 'background 0.3s ease'
-                }} 
+                style={{ background: '#DC2626', color: 'white', width: '100%', padding: '12px', fontSize: '14px', fontWeight: '700', border: 'none', borderRadius: '6px', cursor: 'pointer' }} 
                 onClick={onGetStarted}
-                onMouseOver={(e) => e.target.style.background = '#991B1B'}
-                onMouseOut={(e) => e.target.style.background = '#DC2626'}
               >
                 Try for Free
               </button>
             </div>
           </div>
 
-          {/* PREMIUM CARD */}
-          <div className="pricing-card featured" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', boxShadow: 'none', padding: '0'}}>
+          {/* BASIC PLAN CARD */}
+          <div className="pricing-card featured" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', padding: '0'}}>
             <div className="popular-badge" style={{background: '#DC2626', position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '2px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', color: 'white'}}>
-              Coming Soon
+              
             </div>
-
+            
             <div className="price-header" style={{padding: '20px 20px 10px', borderBottom: '1px solid #F3F4F6'}}>
-              <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Premium Plans</h3>
-              <div className="price-tag" style={{margin: '15px 0', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60px'}}>
-                <span className="amount" style={{fontSize: '32px', fontWeight: '800', color: '#374151', lineHeight: '1'}}>Coming Soon</span>
+              <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Basic Plan</h3>
+              <div className="price-tag" style={{margin: '5px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'center'}}>
+                <span className="currency" style={{fontSize: '20px', fontWeight: '600', color: '#374151', marginTop: '4px'}}>$</span>
+                {/* ✅ DYNAMIC: Basic Price */}
+                <span className="amount" style={{fontSize: '48px', fontWeight: '800', color: '#1F2937', lineHeight: '1'}}>
+                  {basicPrice.whole}<span style={{fontSize: '24px'}}>.{basicPrice.fraction}</span>
+                </span>
               </div>
-              <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>Join the waitlist</p>
+              <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>Focused growth</p>
             </div>
 
             <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                AI Targeting Analysis
+                <strong>Everything in Freemium blast plus</strong>
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                Distribution to <strong>2000+ Recruiters</strong>
+                {/* ✅ DYNAMIC: Basic Limit */}
+                {getLimit('basic', 250)} Verified Recruiters
               </li>
               <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                Verified Recruiters
-              </li>
-              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                Real-time Analytics Dashboard
-              </li>
-              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                Direct Inbox Placement
+                Industry specific list
               </li>
               <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
-                <span style={{color: '#DC2626', marginRight: '8px', fontSize: '14px'}}></span>
-                30-Day Email Support
+                Customized resume score
+              </li>
+              <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                Priority email support
+              </li>
+              <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                Skill analysis
+              </li>
+              
+            </ul>
+
+            <div style={{padding: '0 20px 20px'}}>
+              <button 
+                className="cta-button" 
+                style={{ background: '#DC2626', color: 'white', width: '100%', padding: '12px', fontSize: '14px', fontWeight: '700', border: 'none', borderRadius: '6px', cursor: 'pointer' }} 
+                onClick={onGetStarted}
+              >
+                Get Started
+              </button>
+            </div>
+          </div>
+
+          {/* PRO PLAN CARD */}
+          <div className="pricing-card" style={{flex: '1', minWidth: '280px', position: 'relative', border: '2px solid #DC2626', padding: '0'}}>
+             <div className="popular-badge" style={{background: '#DC2626', position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', padding: '2px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '600', color: 'white'}}>
+              Most recommended
+            </div>
+            <div className="price-header" style={{padding: '20px 20px 10px', borderBottom: '1px solid #F3F4F6'}}>
+              <h3 style={{fontSize: '20px', fontWeight: '700', margin: '0 0 5px 0', color: '#1F2937'}}>Pro Plan</h3>
+              <div className="price-tag" style={{margin: '5px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'center'}}>
+                <span className="currency" style={{fontSize: '20px', fontWeight: '600', color: '#374151', marginTop: '4px'}}>$</span>
+                {/* ✅ DYNAMIC: Pro Price */}
+                <span className="amount" style={{fontSize: '48px', fontWeight: '800', color: '#1F2937', lineHeight: '1'}}>
+                  {proPrice.whole}<span style={{fontSize: '24px'}}>.{proPrice.fraction}</span>
+                </span>
+              </div>
+              <p className="price-description" style={{fontSize: '12px', color: '#6B7280', margin: '5px 0'}}>Maximum exposure</p>
+            </div>
+
+            <ul className="features-list" style={{listStyle: 'none', padding: '15px 25px', margin: '0'}}>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                <strong>Everything in Basic plan plus</strong>
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                {/* ✅ DYNAMIC: Pro Limit */}
+                {getLimit('pro', 500)} verified recruiters
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+               Domain specific list
+              </li>
+              <li style={{padding: '5px 0', borderBottom: '1px solid #F3F4F6', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                Customized resume score
+              </li>
+              <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                Priority support
+              </li>
+               <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                Skill Analysis
+              </li>
+              <li style={{padding: '5px 0', fontSize: '13px', color: '#374151', display: 'flex', alignItems: 'center'}}>
+                Resume Analysis
               </li>
             </ul>
 
             <div style={{padding: '0 20px 20px'}}>
               <button 
-                className="cta-button featured" 
-                style={{
-                  background: '#DC2626',
-                  color: 'white',
-                  width: '100%',
-                  padding: '12px',
-                  fontSize: '14px',
-                  fontWeight: '700',
-                  border: 'none',
-                  borderRadius: '6px',
-                  cursor: 'not-allowed',
-                  boxShadow: 'none',
-                  opacity: 0.7
-                }}
-                disabled={true}
+                className="cta-button" 
+                style={{ background: '#DC2626', color: 'white', width: '100%', padding: '12px', fontSize: '14px', fontWeight: '700', border: 'none', borderRadius: '6px', cursor: 'pointer' }} 
+                onClick={onGetStarted}
               >
-                Coming Soon
+                Get Pro Now
               </button>
-              <p className="guarantee" style={{textAlign: 'center', fontSize: '11px', color: '#6B7280', marginTop: '10px', fontWeight: '500'}}>
-                 
-              </p>
             </div>
           </div>
         </div>
@@ -300,15 +357,10 @@ function LandingPage({ onGetStarted }) {
           maxWidth: '800px',
           margin: '40px auto 0'
         }}>
-          <p style={{
-            color: '#374151',
-            fontSize: '14px',
-            lineHeight: '1.6',
-            margin: 0
-          }}>
-            <strong style={{color: '#DC2626'}}>New to ResumeBlast?</strong> Start with our <strong>FREE Freemium Blast</strong> to 11 top recruiters. 
-            Ready for more? Upgrade to <strong style={{color: '#DC2626'}}>Premium</strong> anytime to reach 2000+ verified recruiters with advanced analytics.
-          </p>
+          <p style={{ color: '#374151', fontSize: '14px', lineHeight: '1.6', margin: 0 }}>
+  New to ResumeBlast.ai? Start with our FREEmium Blast to {getLimit('freemium', 11)} top recruiters. 
+  Ready for more? Upgrade to our <strong>Basic</strong> or <strong>Pro plan</strong> to reach up to {getLimit('pro', 500)} hiring managers.
+</p>
         </div>
       </section>
 
@@ -322,12 +374,12 @@ function LandingPage({ onGetStarted }) {
             <span className="learn-more">Learn More →</span>
           </a>
           <a href="https://www.cloudsourcehrm.us/" target="_blank" rel="noopener noreferrer" className="upsell-card">
-            <h3>📧 Cloude Source HRM</h3>
+            <h3>📧 CloudeSourceHRM</h3>
             <p>Access our premium recruiter database with 10,000+ contacts for targeted outreach campaigns.</p>
             <span className="learn-more">Learn More →</span>
           </a>
           <a href="https://blastyourresume.com" target="_blank" rel="noopener noreferrer" className="upsell-card">
-            <h3>💼 BlastyourResume</h3>
+            <h3>💼 BlastYourResume</h3>
             <p>Automated job application system - apply to 100+ jobs per day on major job boards.</p>
             <span className="learn-more">Learn More →</span>
           </a>
@@ -341,7 +393,7 @@ function LandingPage({ onGetStarted }) {
         <button className="cta-button large" onClick={onGetStarted}>
           Start Your Job Search Now
         </button>
-        <p className="cta-subtext"> One-time payment | Secure checkout</p>
+        <p className="cta-subtext"> Secure checkout via Stripe</p>
       </section>
     </div>
   )

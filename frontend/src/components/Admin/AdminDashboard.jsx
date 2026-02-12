@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import ContactSubmissions from './ContactSubmissions'
+import RecruitersManager from './RecruitersManager' // ✅ NEW IMPORT
 import './AdminStyles.css'
 
 function AdminDashboard({ user, onExit }) {
@@ -26,7 +27,10 @@ function AdminDashboard({ user, onExit }) {
       if (onExit) onExit()
       return
     }
-    if (activeTab !== 'support') {
+    
+    // ✅ MODIFIED: Skip main data fetch for support AND recruiters tabs
+    // (RecruitersManager component handles its own data fetching)
+    if (activeTab !== 'support' && activeTab !== 'recruiters') {
       fetchData(activeTab)
     } else {
       setLoading(false)
@@ -162,8 +166,6 @@ function AdminDashboard({ user, onExit }) {
       const result = await response.json()
       
       if (result.success || response.status === 207) {
-        // ✅ CORRECTED: Safely access the details returned by backend
-        // This prevents the "undefined" error if the backend structure varies
         const details = result.details || {}
         const steps = details.steps_completed || []
         const tables = details.tables_deleted || []
@@ -174,7 +176,6 @@ function AdminDashboard({ user, onExit }) {
               `• Database: Cleared ${tables.length} tables\n` + 
               `• Status: ${details.reason || 'Completed'}`)
         
-        // Refresh the user list
         fetchData('users')
       } else {
         alert(`❌ Error deleting user:\n${result.error || 'Unknown error'}`)
@@ -203,6 +204,15 @@ function AdminDashboard({ user, onExit }) {
           >
              Monitoring
           </button>
+          
+          {/* ✅ NEW TAB ADDED HERE */}
+          <button
+            className={`nav-item ${activeTab === 'recruiters' ? 'active' : ''}`}
+            onClick={() => setActiveTab('recruiters')}
+          >
+             Recruiters & Plans
+          </button>
+
           <button
             className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
             onClick={() => setActiveTab('users')}
@@ -229,7 +239,6 @@ function AdminDashboard({ user, onExit }) {
             style={{ position: 'relative' }}
           >
              Support
-            {/* WhatsApp-style Unread Badge */}
             {unreadCount > 0 && (
               <span className="support-unread-badge">
                 {unreadCount}
@@ -354,6 +363,11 @@ function AdminDashboard({ user, onExit }) {
               </div>
             )}
 
+            {/* ✅ NEW SECTION RENDERED HERE */}
+            {activeTab === 'recruiters' && (
+              <RecruitersManager />
+            )}
+
             {activeTab === 'users' && data.users && (
               <div>
                 <h2> User Management</h2>
@@ -422,6 +436,7 @@ function AdminDashboard({ user, onExit }) {
 
             {activeTab === 'stripe' && (
               <div>
+                {/* ... existing stripe code ... */}
                 <h2> Revenue Analytics</h2>
                 
                 <div className="date-range-section">

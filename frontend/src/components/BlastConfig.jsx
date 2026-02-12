@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { triggerEmailBlast, triggerFreemiumBlast } from '../services/blastService'
-import { fetchRecruiters } from '../services/supabaseService'
 import { initiateCheckout } from '../services/paymentService'
 import { supabase } from '../lib/supabase'
 import { 
@@ -23,11 +22,46 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
   const [statusMessage, setStatusMessage] = useState('')
   const [error, setError] = useState(null)
   
-  // ✅ Freemium State
+  // Freemium State
   const [isFreemiumEligible, setIsFreemiumEligible] = useState(false)
   const [checkingEligibility, setCheckingEligibility] = useState(true)
+  const [freemiumDisclaimerAccepted, setFreemiumDisclaimerAccepted] = useState(false) // ✅ Added for Freemium
 
-  // 1. Check Freemium Eligibility on Mount
+  // Plans State
+  const [plans, setPlans] = useState({})
+  const [loadingPlans, setLoadingPlans] = useState(true)
+
+  // Disclaimer State (Paid Plans)
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false)
+
+  // ✅ IDEMPOTENCY LOCK: Prevents double-triggering the blast logic
+  const isBlasting = useRef(false);
+
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+  // 1. Fetch Plans from Database
+  useEffect(() => {
+    const fetchPlans = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/plans/public`);
+        if (response.ok) {
+          const data = await response.json();
+          const planMap = {};
+          if (data.plans) {
+            data.plans.forEach(p => planMap[p.key_name] = p);
+            setPlans(planMap);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load plans:", err);
+      } finally {
+        setLoadingPlans(false);
+      }
+    };
+    fetchPlans();
+  }, []);
+
+  // 2. Check Freemium Eligibility
   useEffect(() => {
     const checkEligibility = async () => {
       if (!userData?.id) {
@@ -47,7 +81,6 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
           console.error('Error checking eligibility:', error)
           setIsFreemiumEligible(false)
         } else {
-          // If count is 0, they are eligible for freemium
           const eligible = count === 0
           setIsFreemiumEligible(eligible)
           console.log(`🎁 Freemium Eligible: ${eligible} (Previous Blasts: ${count})`)
@@ -63,34 +96,44 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
     checkEligibility()
   }, [userData])
 
-  // 2. Trigger blast if paymentVerified is TRUE (Only for Paid Flow)
+  // 3. Trigger Auto Blast on Payment Success
   useEffect(() => {
     if (paymentVerified) {
       console.log('✅ Payment Verified - Initiating Paid Blast...')
       const savedConfig = localStorage.getItem('pending_blast_config')
+      const savedPlan = localStorage.getItem('selected_plan_type') || 'basic'
+      
       if (savedConfig) {
         try {
-          setBlastConfig(JSON.parse(savedConfig))
+          const parsedConfig = JSON.parse(savedConfig)
+          setBlastConfig(parsedConfig)
         } catch (e) {
           console.error('Error parsing saved config:', e)
         }
       }
+      
       setTimeout(() => {
-        handleAutoBlast()
+        handleAutoBlast(savedPlan)
       }, 500)
     }
   }, [paymentVerified])
 
-  // ✅ 3. Handler for Freemium Blast
   const handleFreemiumBlast = async () => {
+    // ✅ Check disclaimer before proceeding
+    if (!freemiumDisclaimerAccepted) {
+      alert("Please accept the disclaimer to proceed with your free blast.");
+      return;
+    }
+
+    // ✅ PREVENT DOUBLE TRIGGER
+    if (isBlasting.current) return;
+    isBlasting.current = true;
+
     try {
       setStatus('blasting')
-      setStatusMessage('Sending your resume to 11 Verified Recruiters (Free Plan)...')
+      const limit = plans['freemium']?.recruiter_limit || 11;
+      setStatusMessage(`Sending your resume to ${limit} Verified Recruiters (Free Plan)...`)
       setError(null)
-      
-      console.log('🎁 Starting Freemium Blast...')
-      console.log('User ID:', userData.id)
-      console.log('Resume URL:', resumeUrl)
       
       const result = await triggerFreemiumBlast(
         userData.id, 
@@ -103,17 +146,16 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
         }
       )
       
-      console.log('✅ Freemium Blast Result:', result)
-      
       setStatus('success')
-      setStatusMessage(`✅ Freemium Blast Sent Successfully! (${result.details?.successful || 11} emails sent)`)
-      setIsFreemiumEligible(false) // No longer eligible
+      setStatusMessage(`✅ Freemium Blast Sent Successfully! (${result.successful_sends || limit} emails sent)`)
+      setIsFreemiumEligible(false) 
       
       setTimeout(() => {
         if (onBlastComplete) onBlastComplete(result)
       }, 2000)
       
     } catch (err) {
+      isBlasting.current = false; // Reset lock to allow retry
       console.error('❌ Freemium Blast Failed:', err)
       setError(err.message || 'Failed to send freemium blast')
       setStatus('error')
@@ -121,15 +163,20 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
     }
   }
 
-  // 4. Handler for Paid Blast (Payment Flow)
-  const handlePaymentAndBlast = async () => {
+  const handlePaymentAndBlast = async (planType) => {
+    if (!disclaimerAccepted) {
+        alert("Please accept the disclaimer to proceed.");
+        return;
+    }
+
     try {
       setStatus('payment_processing')
-      setStatusMessage('Redirecting to secure payment...')
+      setStatusMessage(`Redirecting to secure payment for ${planType.toUpperCase()} plan...`)
       setError(null)
       
-      // Save config for after payment
       localStorage.setItem('pending_blast_config', JSON.stringify(blastConfig))
+      localStorage.setItem('selected_plan_type', planType)
+      
       if (resumeId && resumeUrl) {
         localStorage.setItem('pending_blast_resume_data', JSON.stringify({
           id: resumeId, 
@@ -138,15 +185,20 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
         }))
       }
       
-      console.log('💳 Initiating payment for user:', userData.email)
+      let amount = 999;
+      if (plans[planType]) {
+          amount = plans[planType].price_cents;
+      } else {
+          amount = planType === 'pro' ? 1299 : 999;
+      }
+
+      await trackPaymentInitiated(userData.id, userData.email, amount)
       
-      // Track payment initiation
-      await trackPaymentInitiated(userData.id, userData.email, 14900)
-      
-      // Redirect to Stripe checkout
       await initiateCheckout({ 
         email: userData.email, 
-        id: userData.id 
+        id: userData.id,
+        plan: planType,
+        disclaimer_accepted: true 
       })
       
     } catch (error) {
@@ -154,127 +206,89 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
       setError(error.message || 'Failed to initiate payment')
       setStatus('idle')
       setStatusMessage('')
-      
-      // Track payment failure
-      await trackPaymentFailure(userData.id, userData.email, error.message)
+      await trackPaymentFailure(userData.id, error.message)
     }
   }
 
-  // 5. Handle Auto Blast After Payment
-  const handleAutoBlast = async () => {
-    console.log('=== 🚀 PAID BLAST STARTED ===')
+  const handleAutoBlast = async (planType) => {
+    // ✅ PREVENT DOUBLE TRIGGER
+    if (isBlasting.current) return;
+    isBlasting.current = true;
+
     setStatus('blasting')
-    setStatusMessage('Payment verified! Finding matching recruiters...')
+    
+    let limit = 250;
+    if (plans[planType]) {
+        limit = plans[planType].recruiter_limit;
+    } else {
+        limit = planType === 'pro' ? 500 : 250;
+    }
+
+    setStatusMessage(`Payment verified! Sending to ${limit} recruiters...`)
     setError(null)
     let campaignId = null
 
     try {
-      // Get saved config
       const savedConfigStr = localStorage.getItem('pending_blast_config')
       const currentConfig = savedConfigStr ? JSON.parse(savedConfigStr) : blastConfig
       
-      console.log('📊 Fetching recruiters for industry:', currentConfig.industry)
+      const tracking = await trackBlastInitiated(userData.id, {
+        resume_id: resumeId,
+        industry: currentConfig.industry,
+        recipients_count: limit 
+      })
       
-      // Fetch recruiters
-      const recruiters = await fetchRecruiters(currentConfig.industry, 50)
-      const effectiveRecruiters = (recruiters && recruiters.length > 0) ? recruiters : [
-        { email: 'demo@example.com', name: 'Demo Recruiter', company: 'Demo Company' }
-      ]
-
-      console.log(`✅ Found ${effectiveRecruiters.length} recruiters`)
-
-      // Extract file name from URL
-      let correctFileName = 'Resume.pdf'
-      if (resumeUrl) {
-        try {
-          const urlObj = new URL(resumeUrl)
-          const pathName = urlObj.pathname.split('/').pop() 
-          if (pathName) correctFileName = decodeURIComponent(pathName)
-        } catch (e) {
-          console.error('Error parsing resume URL:', e)
-        }
+      if (tracking.success) {
+        campaignId = tracking.campaign_id
       }
 
-      // Prepare blast data
       const blastData = {
         candidate_name: userData.name || 'Professional Candidate',
         candidate_email: userData.email,
         candidate_phone: userData.phone || '',
         job_role: userData.targetRole || 'Professional',
         resume_url: resumeUrl,
-        resume_name: correctFileName,
-        recipients: effectiveRecruiters.map(r => ({
-          email: r.email, 
-          name: r.name, 
-          company: r.company
-        }))
+        plan_name: planType,
+        campaign_id: campaignId 
       }
 
-      console.log('📧 Blast Data Prepared:', {
-        candidate: blastData.candidate_name,
-        recipients: blastData.recipients.length
-      })
-
-      // Track initiation
-      const tracking = await trackBlastInitiated(userData.id, {
-        resume_id: resumeId,
-        industry: currentConfig.industry,
-        recipients_count: effectiveRecruiters.length
-      })
-      
-      if (tracking.success) {
-        campaignId = tracking.campaign_id
-        console.log('✅ Campaign tracked:', campaignId)
-      }
-
-      // Send Blast
-      setStatusMessage(`Sending to ${effectiveRecruiters.length} recruiters...`)
       const result = await triggerEmailBlast(blastData)
       
-      console.log('✅ Blast Result:', result)
-      
-      // Track completion
-      if (campaignId) {
-        await trackBlastCompleted(userData.id, campaignId, result)
-      }
-
       setStatus('success')
       setStatusMessage(`✅ Blast completed successfully! (${result.successful_sends} sent)`)
       
-      // Cleanup
       localStorage.removeItem('pending_blast_config')
       localStorage.removeItem('pending_blast_resume_data')
-      
-      // Remove payment params from URL
-      const url = new URL(window.location)
-      url.searchParams.delete('payment')
-      url.searchParams.delete('session_id')
-      window.history.replaceState({}, '', url.pathname + url.search)
+      localStorage.removeItem('selected_plan_type')
       
       setTimeout(() => {
         if (onBlastComplete) onBlastComplete(result)
       }, 2000)
 
     } catch (err) {
-      console.error('❌ Blast Failed:', err)
+      isBlasting.current = false; // Reset lock to allow retry
+      console.error('❌ Paid Blast Failed:', err)
       setError(err.message || 'Failed to send blast')
       setStatus('error')
-      setStatusMessage('')
-      
-      if (campaignId) {
-        await trackBlastFailure(userData.id, campaignId, err.message)
-      }
+      if (campaignId) await trackBlastFailure(userData.id, campaignId, err.message)
     }
   }
 
-  // Loading state while checking eligibility
-  if (checkingEligibility) {
+  const getPlanButtonText = (type, defaultText) => {
+    const plan = plans[type];
+    if (!plan) return defaultText;
+    
+    const price = (plan.price_cents / 100).toFixed(2);
+    return `${plan.display_name} ($${price} - ${plan.recruiter_limit} Recruiters)`;
+  };
+
+  if (checkingEligibility || loadingPlans) {
     return (
       <div className="blast-config-overlay">
         <div className="blast-config-modal">
           <div style={{padding:'40px', textAlign:'center'}}>
             <div className="spinner" style={{width: '40px', height: '40px', margin: '0 auto 20px'}}></div>
-            <p style={{color: '#6b7280'}}>Checking your eligibility...</p>
+            <p style={{color: '#6b7280'}}>Loading configuration...</p>
           </div>
         </div>
       </div>
@@ -284,11 +298,10 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
   return (
     <div className="blast-config-overlay">
       <div className="blast-config-modal">
-        {/* Header */}
         <div className="modal-header">
           <h2>
             {status === 'success' ? '🎉 Blast Complete!' : 
-             isFreemiumEligible ? '🎁 Free Resume Blast' : '🚀 Premium Resume Blast'}
+             isFreemiumEligible ? '🎁 Free Resume Blast' : ' Premium Resume Blast'}
           </h2>
           {status !== 'blasting' && status !== 'payment_processing' && (
             <button className="close-btn" onClick={onCancel}>✕</button>
@@ -296,7 +309,6 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
         </div>
 
         <div className="modal-body">
-          {/* Success View */}
           {status === 'success' && (
             <div className="success-message" style={{textAlign: 'center', padding: '40px'}}>
               <span style={{fontSize: '64px', marginBottom: '20px', display: 'block'}}>✅</span>
@@ -305,18 +317,9 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
             </div>
           )}
 
-          {/* Loading View */}
           {(status === 'blasting' || status === 'payment_processing') && (
             <div style={{textAlign: 'center', padding: '40px'}}>
-              <div className="spinner" style={{
-                width: '50px', 
-                height: '50px', 
-                margin: '0 auto 20px',
-                border: '4px solid #f3f3f3',
-                borderTop: '4px solid #DC2626',
-                borderRadius: '50%',
-                animation: 'spin 1s linear infinite'
-              }}></div>
+              <div className="spinner"></div>
               <h3 style={{margin: '0 0 10px 0', color: '#374151'}}>
                 {status === 'payment_processing' ? 'Processing Payment...' : 'Sending Emails...'}
               </h3>
@@ -324,244 +327,243 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
             </div>
           )}
 
-          {/* Error View */}
           {status === 'error' && error && (
-            <div className="error-message" style={{
-              background: '#FEE2E2',
-              border: '1px solid #DC2626',
-              borderRadius: '8px',
-              padding: '15px',
-              marginBottom: '20px'
-            }}>
-              <strong style={{color: '#991B1B'}}>⚠️ Error:</strong>
-              <p style={{margin: '5px 0 0 0', color: '#B91C1C'}}>{error}</p>
+            <div className="error-message">
+              <strong>⚠️ Error:</strong>
+              <p>{error}</p>
             </div>
           )}
 
-          {/* Config View */}
           {(status === 'idle' || status === 'error') && (
             <>
-              {/* FREEMIUM VIEW */}
               {isFreemiumEligible ? (
                 <div style={{textAlign: 'center', padding: '20px 0'}}>
-                  <div style={{
+                  <div className="freemium-card" style={{
                     background: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)', 
                     border: '2px solid #10B981', 
                     borderRadius: '12px',
                     padding: '30px',
-                    marginBottom: '25px',
-                    boxShadow: '0 4px 6px rgba(16, 185, 129, 0.1)'
+                    marginBottom: '25px'
                   }}>
                     <div style={{fontSize: '48px', marginBottom: '15px'}}>🎁</div>
-                    <h3 style={{
-                      color: '#047857', 
-                      fontSize: '24px', 
-                      margin: '0 0 10px 0',
-                      fontWeight: '700'
-                    }}>
-                      One-Time Free Blast
-                    </h3>
-                    <p style={{
-                      color: '#065F46', 
-                      marginBottom: '20px',
-                      fontSize: '16px',
-                      lineHeight: '1.6'
-                    }}>
-                      As a new user, send your resume to our curated list of{' '}
-                      <strong style={{color: '#047857'}}>11 Top Recruiters</strong> for free!
+                    <h3 style={{color: '#047857', fontSize: '24px', fontWeight: '700'}}>Free Blast</h3>
+                    <p style={{color: '#065F46', fontSize: '16px'}}>
+                      Send your resume to {plans['freemium']?.recruiter_limit || 11} Top Recruiters for free!
                     </p>
-                    
-                    {/* Recruiter List Preview */}
-                    <div style={{
-                      background: 'white',
-                      padding: '15px',
-                      borderRadius: '8px',
-                      fontSize: '13px',
-                      color: '#374151',
-                      border: '1px solid #A7F3D0',
-                      marginBottom: '15px'
-                    }}>
-                      <div style={{fontWeight: 'bold', color: '#059669', marginBottom: '8px'}}>
-                        📋 Includes Recruiters From:
-                      </div>
-                      <div style={{display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center'}}>
-                        <span style={{
-                          background: '#F0FDF4',
-                          padding: '4px 12px',
-                          borderRadius: '12px',
-                          border: '1px solid #BBF7D0',
-                          fontSize: '12px'
-                        }}>
-                          Shiro Technologies
-                        </span>
-                        <span style={{
-                          background: '#F0FDF4',
-                          padding: '4px 12px',
-                          borderRadius: '12px',
-                          border: '1px solid #BBF7D0',
-                          fontSize: '12px'
-                        }}>
-                          Star Workforce
-                        </span>
-                        <span style={{
-                          background: '#F0FDF4',
-                          padding: '4px 12px',
-                          borderRadius: '12px',
-                          border: '1px solid #BBF7D0',
-                          fontSize: '12px'
-                        }}>
-                          StarTekk
-                        </span>
-                        <span style={{
-                          background: '#F0FDF4',
-                          padding: '4px 12px',
-                          borderRadius: '12px',
-                          border: '1px solid #BBF7D0',
-                          fontSize: '12px'
-                        }}>
-                          + 8 More Verified Recruiters
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <button 
-                    onClick={handleFreemiumBlast}
-                    className="btn-blast"
-                    disabled={status === 'blasting'}
-                    style={{
-                      background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
-                      width: '100%',
-                      padding: '18px',
-                      fontSize: '18px',
-                      fontWeight: '700',
-                      border: 'none',
-                      borderRadius: '8px',
-                      color: 'white',
-                      cursor: status === 'blasting' ? 'not-allowed' : 'pointer',
-                      transition: 'transform 0.2s',
-                      boxShadow: '0 4px 6px rgba(16, 185, 129, 0.3)'
-                    }}
-                    onMouseOver={(e) => {
-                      if (status !== 'blasting') {
-                        e.target.style.transform = 'translateY(-2px)'
-                        e.target.style.boxShadow = '0 6px 8px rgba(16, 185, 129, 0.4)'
-                      }
-                    }}
-                    onMouseOut={(e) => {
-                      e.target.style.transform = 'translateY(0)'
-                      e.target.style.boxShadow = '0 4px 6px rgba(16, 185, 129, 0.3)'
-                    }}
-                  >
-                    🚀 Send Free Blast (11 Recruiters)
-                  </button>
-                  
-                  <p style={{
-                    fontSize: '12px', 
-                    color: '#6b7280', 
-                    marginTop: '15px',
-                    fontStyle: 'italic'
-                  }}>
-                    *Your next blast will require the $149 Premium Plan
-                  </p>
-                </div>
-              ) : (
-                /* PAID VIEW (Existing Premium Plan) */
-                <>
-                  <div className="payment-banner" style={{
-                    background: 'linear-gradient(135deg, #FEE2E2 0%, #FECACA 100%)',
-                    border: '2px solid #DC2626',
-                    borderRadius: '12px',
-                    padding: '20px',
-                    marginBottom: '25px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center'
-                  }}>
-                    <div>
-                      <h3 style={{margin:0, color:'#991B1B', fontSize: '20px', fontWeight: '700'}}>
-                        Premium Plans
-                      </h3>
-                      <p style={{margin:'5px 0 0 0', fontSize:'14px', color:'#B91C1C'}}>
-                        Send to 500+ Verified Recruiters
-                      </p>
-                    </div>
-                    <div style={{fontSize: '24px', fontWeight: 'bold', color:'#DC2626'}}>
-                      Coming Soon
-                    </div>
                   </div>
 
-                  <div className="config-section">
-                    <label style={{
-                      display:'block', 
-                      marginBottom:'8px', 
-                      fontWeight:'600', 
-                      color:'#374151'
+                  {/* ✅ Instructions for Freemium Disclaimer Acceptance */}
+                  {!freemiumDisclaimerAccepted && (
+                    <div style={{
+                      marginBottom: '15px',
+                      padding: '12px',
+                      background: '#FEF3C7',
+                      borderRadius: '6px',
+                      border: '1px solid #F59E0B',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px'
                     }}>
-                      Target Industry
+                      <span style={{fontSize: '20px'}}>ℹ️</span>
+                      <span style={{
+                        fontSize: '13px',
+                        color: '#92400E',
+                        fontWeight: '500',
+                        textAlign: 'left'
+                      }}>
+                        Please accept the disclaimer below to proceed with your resume blast
+                      </span>
+                    </div>
+                  )}
+
+                  {/* ✅ Freemium Disclaimer Section */}
+                  <div className="disclaimer-section" style={{
+                    marginBottom: '20px', 
+                    padding: '15px', 
+                    background: freemiumDisclaimerAccepted ? '#F0FDF4' : '#FEF2F2', 
+                    borderRadius: '8px', 
+                    border: freemiumDisclaimerAccepted ? '2px solid #10B981' : '2px solid #EF4444',
+                    transition: 'all 0.3s ease',
+                    textAlign: 'left'
+                  }}>
+                    <label style={{display: 'flex', gap: '12px', cursor: 'pointer', alignItems: 'flex-start'}}>
+                      <input 
+                        type="checkbox" 
+                        checked={freemiumDisclaimerAccepted} 
+                        onChange={(e) => setFreemiumDisclaimerAccepted(e.target.checked)}
+                        style={{
+                          marginTop: '3px', 
+                          width: '20px', 
+                          height: '20px', 
+                          accentColor: '#10B981',
+                          cursor: 'pointer'
+                        }}
+                      />
+                      <span style={{
+                        color: '#374151', 
+                        fontSize: '13px', 
+                        lineHeight: '1.6',
+                        fontWeight: '500'
+                      }}>
+                        I acknowledge that ResumeBlast.ai does not guarantee interviews, job offers, or employment. I understand that my resume will be sent to recruiters based on my selected plan and that this purchase is final and non-refundable.
+                      </span>
                     </label>
-                    <select 
-                      value={blastConfig.industry} 
-                      onChange={(e) => setBlastConfig({...blastConfig, industry: e.target.value})} 
-                      style={{
-                        width: '100%', 
-                        padding: '12px', 
-                        marginBottom: '20px', 
-                        border: '2px solid #E5E7EB', 
-                        borderRadius: '8px',
-                        fontSize: '15px'
-                      }}
-                    >
-                      <option value="Technology">Technology</option>
-                      <option value="Finance">Finance</option>
-                      <option value="Healthcare">Healthcare</option>
-                      <option value="Marketing">Marketing</option>
-                      <option value="All">All Industries</option>
-                    </select>
+                  </div>
+
+                  <button 
+                    onClick={handleFreemiumBlast} 
+                    className="btn-blast" 
+                    disabled={!freemiumDisclaimerAccepted}
+                    style={{
+                      background: freemiumDisclaimerAccepted ? '#10B981' : '#9CA3AF', 
+                      width: '100%', 
+                      padding: '18px',
+                      opacity: freemiumDisclaimerAccepted ? 1 : 0.6,
+                      cursor: freemiumDisclaimerAccepted ? 'pointer' : 'not-allowed'
+                    }}
+                  >
+                     Send Free Blast ({plans['freemium']?.recruiter_limit || 11} Recruiters)
+                  </button>
+                </div>
+              ) : (
+                <div className="plans-container">
+                   <div className="payment-banner">
+                    <div>
+                      <h3>Select a Paid Plan</h3>
+                      <p>Blast your resume to hundreds of recruiters</p>
+                    </div>
                   </div>
                   
-                  <div className="modal-footer" style={{
-                    padding: '20px 0 0 0',
-                    display: 'flex',
-                    gap: '15px'
+                  {!disclaimerAccepted && (
+                    <div style={{
+                      marginBottom: '15px',
+                      padding: '12px',
+                      background: '#FEF3C7',
+                      borderRadius: '6px',
+                      border: '1px solid #F59E0B',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px'
+                    }}>
+                      <span style={{fontSize: '20px'}}>ℹ️</span>
+                      <span style={{
+                        fontSize: '13px',
+                        color: '#92400E',
+                        fontWeight: '500',
+                        textAlign: 'left'
+                      }}>
+                        Please accept the disclaimer below to proceed with your resume blast
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="disclaimer-section" style={{
+                    marginBottom: '20px', 
+                    padding: '15px', 
+                    background: disclaimerAccepted ? '#F0FDF4' : '#FEF2F2', 
+                    borderRadius: '8px', 
+                    border: disclaimerAccepted ? '2px solid #10B981' : '2px solid #EF4444',
+                    transition: 'all 0.3s ease',
+                    textAlign: 'left'
                   }}>
+                    <label style={{display: 'flex', gap: '12px', cursor: 'pointer', alignItems: 'flex-start'}}>
+                      <input 
+                        type="checkbox" 
+                        checked={disclaimerAccepted} 
+                        onChange={(e) => setDisclaimerAccepted(e.target.checked)}
+                        style={{
+                          marginTop: '3px', 
+                          width: '20px', 
+                          height: '20px', 
+                          accentColor: '#DC2626',
+                          cursor: 'pointer'
+                        }}
+                      />
+                      <span style={{
+                        color: '#374151', 
+                        fontSize: '13px', 
+                        lineHeight: '1.6',
+                        fontWeight: '500'
+                      }}>
+                        I acknowledge that ResumeBlast.ai does not guarantee interviews, job offers, or employment. I understand that my resume will be sent to recruiters based on my selected plan and that this purchase is final and non-refundable.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
                     <button 
-                      onClick={onCancel} 
-                      className="cancel-btn"
-                      style={{
-                        flex: '1',
-                        padding: '14px',
-                        background: '#F3F4F6',
-                        border: '1px solid #D1D5DB',
-                        borderRadius: '8px',
-                        color: '#374151',
-                        fontSize: '16px',
-                        cursor: 'pointer'
-                      }}
+                        onClick={() => handlePaymentAndBlast('basic')} 
+                        className="btn-blast" 
+                        style={{
+                            background: disclaimerAccepted 
+                              ? 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)' 
+                              : 'linear-gradient(135deg, #FCA5A5 0%, #F87171 100%)',
+                            color: 'white',
+                            cursor: disclaimerAccepted ? 'pointer' : 'not-allowed',
+                            opacity: disclaimerAccepted ? 1 : 0.6,
+                            border: 'none',
+                            padding: '16px 24px',
+                            borderRadius: '8px',
+                            fontSize: '16px',
+                            fontWeight: '600',
+                            transition: 'all 0.3s ease',
+                            boxShadow: disclaimerAccepted 
+                              ? '0 4px 6px rgba(220, 38, 38, 0.3)' 
+                              : '0 2px 4px rgba(0, 0, 0, 0.1)',
+                            transform: disclaimerAccepted ? 'none' : 'scale(0.98)',
+                            position: 'relative',
+                            overflow: 'hidden'
+                        }}
+                        disabled={!disclaimerAccepted}
                     >
-                      Cancel
+                      {!disclaimerAccepted && (
+                        <span style={{
+                          position: 'absolute',
+                          top: '8px',
+                          right: '12px',
+                          fontSize: '20px'
+                        }}>🔒</span>
+                      )}
+                       {getPlanButtonText('basic', 'Basic Plan ($9.99 - 250 Recruiters)')}
                     </button>
+                    
                     <button 
-                      className="btn-blast"
-                      disabled={true}
-                      style={{
-                        flex: '2',
-                        padding: '14px',
-                        background: '#9CA3AF',
-                        border: 'none',
-                        borderRadius: '8px',
-                        color: 'white',
-                        fontSize: '16px',
-                        fontWeight: '700',
-                        cursor: 'not-allowed',
-                        boxShadow: 'none',
-                        opacity: 0.7
-                      }}
+                        onClick={() => handlePaymentAndBlast('pro')} 
+                        className="btn-blast" 
+                        style={{
+                            background: disclaimerAccepted 
+                              ? 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)' 
+                              : 'linear-gradient(135deg, #FCA5A5 0%, #F87171 100%)',
+                            color: 'white',
+                            cursor: disclaimerAccepted ? 'pointer' : 'not-allowed',
+                            opacity: disclaimerAccepted ? 1 : 0.6,
+                            border: disclaimerAccepted ? '2px solid #FBBF24' : 'none', 
+                            padding: '16px 24px',
+                            borderRadius: '8px',
+                            fontSize: '16px',
+                            fontWeight: '600',
+                            transition: 'all 0.3s ease',
+                            boxShadow: disclaimerAccepted 
+                              ? '0 4px 6px rgba(220, 38, 38, 0.3), 0 0 20px rgba(251, 191, 36, 0.3)' 
+                              : '0 2px 4px rgba(0, 0, 0, 0.1)',
+                            transform: disclaimerAccepted ? 'none' : 'scale(0.98)',
+                            position: 'relative',
+                            overflow: 'hidden'
+                        }}
+                        disabled={!disclaimerAccepted}
                     >
-                      Coming Soon
+                      {!disclaimerAccepted && (
+                        <span style={{
+                          position: 'absolute',
+                          top: '8px',
+                          right: '12px',
+                          fontSize: '20px'
+                        }}>🔒</span>
+                      )}
+                       {getPlanButtonText('pro', 'Pro Plan ($12.99 - 500 Recruiters)')}
                     </button>
                   </div>
-                </>
+                </div>
               )}
             </>
           )}
@@ -571,4 +573,4 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
   )
 }
 
-export default BlastConfig
+export default BlastConfig;

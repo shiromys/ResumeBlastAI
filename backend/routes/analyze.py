@@ -35,7 +35,7 @@ def extract_years_of_experience(text):
 
 def calculate_ats_score(analysis_data):
     """
-    Calculate ATS score based on multiple factors
+    Calculate  score based on multiple factors
     
     Scoring Breakdown (Total: 100 points):
     - Contact Information (10 points): Email, Phone, Location

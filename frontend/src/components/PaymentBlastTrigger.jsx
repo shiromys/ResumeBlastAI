@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import BlastConfig from './BlastConfig';
 
@@ -13,6 +13,9 @@ function PaymentBlastTrigger() {
   const [resumeData, setResumeData] = useState(null);
   const [userData, setUserData] = useState(null);
 
+  // ✅ IDEMPOTENCY CHECK: Ensures we don't process the same session multiple times
+  const processedSessionRef = useRef(null);
+
   useEffect(() => {
     checkForPaymentSuccess();
   }, []);
@@ -24,9 +27,13 @@ function PaymentBlastTrigger() {
       const paymentSuccess = params.get('payment') === 'success';
       const sessionId = params.get('session_id');
 
-      if (!paymentSuccess || !sessionId) {
+      // ✅ EXIT if not a successful payment return OR if this session was already processed
+      if (!paymentSuccess || !sessionId || processedSessionRef.current === sessionId) {
         return;
       }
+
+      // Mark this session as processed immediately
+      processedSessionRef.current = sessionId;
 
       console.log('');
       console.log('=== 💳 PAYMENT BLAST TRIGGER ACTIVATED ===');
