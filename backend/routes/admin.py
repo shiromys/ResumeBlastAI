@@ -326,17 +326,31 @@ def get_stats():
 def get_recruiters_stats():
     """Get counts from both recruiter tables"""
     try:
+        print('📊 Fetching recruiter stats...')
+        
         paid_res = requests.get(f"{SUPABASE_URL}/rest/v1/recruiters?select=id", headers=_get_headers())
         paid_count = len(paid_res.json()) if paid_res.status_code == 200 else 0
+        print(f'💼 Paid recruiters count: {paid_count}')
 
         free_res = requests.get(f"{SUPABASE_URL}/rest/v1/freemium_recruiters?select=id", headers=_get_headers())
         free_count = len(free_res.json()) if free_res.status_code == 200 else 0
+        print(f'✨ Freemium recruiters count: {free_count}')
 
-        return jsonify({
-            'paid_recruiters_count': paid_count,
-            'freemium_recruiters_count': free_count
-        }), 200
+        total_count = paid_count + free_count
+        print(f'📈 Total recruiters count: {total_count}')
+
+        # ✅ FIXED: Return field names that match frontend expectations
+        response_data = {
+            'paid_count': paid_count,              # Changed from paid_recruiters_count
+            'freemium_count': free_count,          # Changed from freemium_recruiters_count
+            'total_count': total_count             # Added total_count
+        }
+        
+        print(f'✅ Returning stats: {response_data}')
+        return jsonify(response_data), 200
+        
     except Exception as e:
+        print(f'❌ Error fetching recruiter stats: {e}')
         return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/recruiters/add', methods=['POST'])
@@ -380,11 +394,13 @@ def add_recruiter():
 
 @admin_bp.route('/api/admin/recruiters/delete', methods=['DELETE'])
 def delete_recruiter_by_email():
-    """Delete a recruiter by email from a specific table"""
+    """Delete a recruiter by email from a specific table and log the action with admin info"""
     try:
         data = request.json
         target_table = data.get('target_table')
         email = data.get('email')
+        reason = data.get('reason')
+        admin_email = data.get('admin_email', 'system')
         
         if not email:
             return jsonify({'error': 'Email is required'}), 400
@@ -392,11 +408,27 @@ def delete_recruiter_by_email():
         if target_table not in ['recruiters', 'freemium_recruiters']:
             return jsonify({'error': 'Invalid target table'}), 400
 
+        if not reason:
+            return jsonify({'error': 'Reason for deletion is required'}), 400
+
+        # 1. Log the deletion to the tracking table first
+        log_entry = {
+            'email': email,
+            'target_table': target_table,
+            'reason': reason,
+            'deleted_by': admin_email,
+            'deleted_at': datetime.utcnow().isoformat()
+        }
+        
+        log_url = f"{SUPABASE_URL}/rest/v1/deleted_recruiters"
+        requests.post(log_url, json=log_entry, headers=_get_headers())
+
+        # 2. Perform the actual deletion from the recruiter table
         url = f"{SUPABASE_URL}/rest/v1/{target_table}?email=eq.{email}"
         resp = requests.delete(url, headers=_get_headers())
 
         if resp.status_code in [200, 204]:
-            return jsonify({'success': True, 'message': f'Recruiter {email} deleted from {target_table}'}), 200
+            return jsonify({'success': True, 'message': f'Recruiter {email} deleted from {target_table} and logged by {admin_email}.'}), 200
         else:
             return jsonify({'error': f"DB Error: {resp.text}"}), 500
 

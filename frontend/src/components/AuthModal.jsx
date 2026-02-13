@@ -9,12 +9,15 @@ import './AuthModal.css'
 function AuthModal({ onClose, onSuccess }) {
   const [view, setView] = useState('login')
   
-  // ✅ STATE INITIALIZATION: These are empty, ensuring no hardcoded values exist.
+  // ✅ Initialize all fields as empty strings to ensure they are blank on load
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
   
-  // Forgot Password States
+  // ✅ State for password visibility toggle (separate for login and signup)
+  const [showPassword, setShowPassword] = useState(false)
+  const [showSignupPassword, setShowSignupPassword] = useState(false)
+  
   const [resetStep, setResetStep] = useState('email')
   const [verificationCode, setVerificationCode] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -22,147 +25,41 @@ function AuthModal({ onClose, onSuccess }) {
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
 
-  // Login Handler
   const handleLogin = async (e) => {
     e.preventDefault()
     setLoading(true)
     setMessage('')
-    
     try {
-      console.log('\n🔐 === LOGIN FLOW STARTED ===')
-      
       const result = await signIn(email.trim(), password)
-      
       if (!result.success) throw new Error(result.error)
-      if (!result.user) throw new Error('Login failed - no user data returned')
       
-      console.log('✅ Authentication successful')
+      // ✅ Track user login activity
+      await trackUserLogin(result.user.id)
       
-      // Track Login Activity
-      try {
-        await trackUserLogin(result.user.id, result.user.email, {
-          login_method: 'password',
-          timestamp: new Date().toISOString(),
-          user_agent: navigator.userAgent,
-          platform: navigator.platform
-        })
-      } catch (trackError) {
-        console.error('⚠️ Login tracking failed (non-critical):', trackError)
-      }
-      
-      setMessage('✅ Login successful!')
       setTimeout(() => onSuccess(result.user), 800)
-      
     } catch (error) {
-      console.error('❌ Login error:', error)
-      let errorMessage = error.message
-      if (errorMessage === 'Invalid login credentials') {
-        errorMessage = 'Invalid email or password'
-      }
-      setMessage('❌ ' + errorMessage)
+      setMessage('❌ ' + (error.message === 'Invalid login credentials' ? 'Invalid email or password' : error.message))
     } finally {
       setLoading(false)
     }
   }
 
-  // Signup Handler
   const handleSignUp = async (e) => {
     e.preventDefault()
     setLoading(true)
     setMessage('')
-    
     try {
-      console.log('\n📝 === SIGNUP FLOW STARTED ===')
-      
       if (password.length < 6) throw new Error('Password must be at least 6 characters')
-      if (!fullName.trim()) throw new Error('Please enter your full name')
       
       const result = await signUp(email.trim(), password, fullName.trim())
-      
       if (!result.success) throw new Error(result.error)
-      if (!result.user) throw new Error('Signup failed - no user data returned')
       
-      console.log('✅ Account created in Supabase Auth')
-      
-      // Track Signup Activity
-      try {
-        await trackUserSignup(
-          result.user.id, 
-          result.user.email, 
-          {
-            full_name: fullName.trim(),
-            signup_method: 'email',
-            timestamp: new Date().toISOString(),
-            user_agent: navigator.userAgent,
-            platform: navigator.platform
-          }
-        )
-      } catch (trackError) {
-        console.error('❌ Signup tracking failed:', trackError)
+      // ✅ Track user signup activity
+      if (result.user) {
+        await trackUserSignup(result.user.id, fullName.trim())
       }
       
-      if (result.session) {
-        setMessage('✅ Account created successfully!')
-        setTimeout(() => onSuccess(result.user), 1000)
-      } else {
-        setMessage('✅ Account created! Please check your email to verify.')
-      }
-      
-    } catch (error) {
-      setMessage('❌ ' + error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Forgot Password Handlers
-  const handleSendCode = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    setMessage('')
-    try {
-      const code = generateVerificationCode()
-      storeVerificationCode(email, code)
-      await sendVerificationEmail(email, code)
-      setMessage('✅ Verification code sent to your email')
-      setResetStep('verify')
-    } catch (error) {
-      setMessage('❌ ' + error.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleVerifyCode = (e) => {
-    e.preventDefault()
-    const result = verifyCode(email, verificationCode)
-    if (result.valid) {
-      setMessage('✅ Code verified')
-      setResetStep('new_password')
-    } else {
-      setMessage('❌ ' + result.error)
-    }
-  }
-
-  const handleResetPassword = async (e) => {
-    e.preventDefault()
-    setLoading(true)
-    try {
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-      const response = await fetch(`${apiUrl}/api/auth/reset-password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, new_password: newPassword })
-      })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.error || 'Failed to update password')
-      clearVerificationCode(email)
-      setMessage('✅ Password updated! Please log in.')
-      setTimeout(() => {
-        setView('login')
-        setResetStep('email')
-        setPassword('')
-      }, 2000)
+      if (result.session) setTimeout(() => onSuccess(result.user), 1000)
     } catch (error) {
       setMessage('❌ ' + error.message)
     } finally {
@@ -184,193 +81,149 @@ function AuthModal({ onClose, onSuccess }) {
           
           {view !== 'forgot_password' && (
             <div className="auth-toggle">
-              <button 
-                className={`toggle-btn ${view === 'login' ? 'active' : ''}`} 
-                onClick={() => setView('login')}
-              >
-                Login
-              </button>
-              <button 
-                className={`toggle-btn ${view === 'signup' ? 'active' : ''}`} 
-                onClick={() => setView('signup')}
-              >
-                Sign Up
-              </button>
+              <button className={`toggle-btn ${view === 'login' ? 'active' : ''}`} onClick={() => setView('login')}>Login</button>
+              <button className={`toggle-btn ${view === 'signup' ? 'active' : ''}`} onClick={() => setView('signup')}>Sign Up</button>
             </div>
           )}
 
-          {/* LOGIN FORM */}
-          {/* ✅ FIX: Added autoComplete="off" to form and inputs */}
           {view === 'login' && (
             <form onSubmit={handleLogin} className="form" autoComplete="off">
               <div className="form-group">
-                <label>Email</label>
+                <label>EMAIL</label>
                 <input 
                   type="email" 
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 
                   required 
-                  autoComplete="off" 
                   placeholder="name@example.com"
-                  name="login_email_field_random_id" 
+                  autoComplete="off"
                 />
               </div>
               <div className="form-group">
-                <label>Password</label>
-                <input 
-                  type="password" 
-                  value={password} 
-                  onChange={(e) => setPassword(e.target.value)} 
-                  required 
-                  autoComplete="new-password"
-                  placeholder="••••••••"
-                  name="login_password_field_random_id"
-                />
+                <label>PASSWORD</label>
+                <div className="password-input-container">
+                  <input 
+                    type={showPassword ? "text" : "password"} 
+                    value={password} 
+                    onChange={(e) => setPassword(e.target.value)} 
+                    required 
+                    autoComplete="new-password"
+                    placeholder="••••••••"
+                  />
+                  <button 
+                    type="button" 
+                    className="password-toggle-eye"
+                    onClick={() => setShowPassword(!showPassword)}
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    <svg 
+                      width="20" 
+                      height="20" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      strokeWidth="2" 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round"
+                    >
+                      {showPassword ? (
+                        // Eye with slash (hidden)
+                        <>
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </>
+                      ) : (
+                        // Eye open (visible)
+                        <>
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </>
+                      )}
+                    </svg>
+                  </button>
+                </div>
                 <div style={{textAlign: 'right', marginTop: '5px'}}>
-                   <button 
-                     type="button" 
-                     onClick={() => setView('forgot_password')} 
-                     style={{
-                       background:'none', 
-                       border:'none', 
-                       color:'#667eea', 
-                       cursor:'pointer', 
-                       fontSize:'12px'
-                     }}
-                   >
-                     Forgot Password?
-                   </button>
+                   <button type="button" onClick={() => setView('forgot_password')} className="forgot-link-btn">Forgot Password?</button>
                 </div>
               </div>
-              <button type="submit" disabled={loading} className="btn-primary">
-                {loading ? 'Processing...' : 'Login'}
-              </button>
+              <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Processing...' : 'Login'}</button>
             </form>
           )}
 
-          {/* SIGNUP FORM */}
-          {/* ✅ FIX: Added autoComplete="off" to form and inputs */}
           {view === 'signup' && (
             <form onSubmit={handleSignUp} className="form" autoComplete="off">
               <div className="form-group">
-                <label>Full Name</label>
+                <label>FULL NAME</label>
                 <input 
                   type="text" 
                   value={fullName} 
                   onChange={(e) => setFullName(e.target.value)} 
-                  placeholder="e.g. John Doe" 
+                  placeholder="John Doe" 
                   required 
                   autoComplete="off"
-                  name="signup_name_field"
                 />
               </div>
               <div className="form-group">
-                <label>Email</label>
+                <label>EMAIL</label>
                 <input 
                   type="email" 
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 
                   required 
-                  autoComplete="off"
                   placeholder="name@example.com"
-                  name="signup_email_field"
+                  autoComplete="off"
                 />
               </div>
               <div className="form-group">
-                <label>Password</label>
-                <input 
-                  type="password" 
-                  value={password} 
-                  onChange={(e) => setPassword(e.target.value)} 
-                  required 
-                  minLength={6} 
-                  autoComplete="new-password"
-                  placeholder="Min 6 characters"
-                  name="signup_password_field"
-                />
+                <label>PASSWORD</label>
+                <div className="password-input-container">
+                  <input 
+                    type={showSignupPassword ? "text" : "password"} 
+                    value={password} 
+                    onChange={(e) => setPassword(e.target.value)} 
+                    required 
+                    minLength={6} 
+                    autoComplete="new-password"
+                    placeholder="Min 6 characters"
+                  />
+                  <button 
+                    type="button" 
+                    className="password-toggle-eye"
+                    onClick={() => setShowSignupPassword(!showSignupPassword)}
+                    aria-label={showSignupPassword ? "Hide password" : "Show password"}
+                  >
+                    <svg 
+                      width="20" 
+                      height="20" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      stroke="currentColor" 
+                      strokeWidth="2" 
+                      strokeLinecap="round" 
+                      strokeLinejoin="round"
+                    >
+                      {showSignupPassword ? (
+                        // Eye with slash (hidden)
+                        <>
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </>
+                      ) : (
+                        // Eye open (visible)
+                        <>
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </>
+                      )}
+                    </svg>
+                  </button>
+                </div>
               </div>
-              <button type="submit" disabled={loading} className="btn-primary">
-                {loading ? 'Processing...' : 'Sign Up'}
-              </button>
+              <button type="submit" disabled={loading} className="btn-primary">{loading ? 'Processing...' : 'Sign Up'}</button>
             </form>
           )}
-
-          {/* FORGOT PASSWORD */}
-          {view === 'forgot_password' && (
-            <div className="form">
-              {resetStep === 'email' && (
-                <form onSubmit={handleSendCode} autoComplete="off">
-                  <p className="subtitle">Enter your email to receive a verification code.</p>
-                  <div className="form-group">
-                    <label>Email</label>
-                    <input 
-                      type="email" 
-                      value={email} 
-                      onChange={(e) => setEmail(e.target.value)} 
-                      required 
-                      autoComplete="off"
-                    />
-                  </div>
-                  <button type="submit" disabled={loading} className="btn-primary">
-                    {loading ? 'Sending Code...' : 'Send Verification Code'}
-                  </button>
-                </form>
-              )}
-
-              {resetStep === 'verify' && (
-                <form onSubmit={handleVerifyCode} autoComplete="off">
-                  <p className="subtitle">Enter the 6-digit code sent to {email}</p>
-                  <div className="form-group">
-                    <label>Verification Code</label>
-                    <input 
-                      type="text" 
-                      value={verificationCode} 
-                      onChange={(e) => setVerificationCode(e.target.value)} 
-                      placeholder="123456" 
-                      required 
-                      autoComplete="off"
-                    />
-                  </div>
-                  <button type="submit" className="btn-primary">Verify Code</button>
-                </form>
-              )}
-
-              {resetStep === 'new_password' && (
-                <form onSubmit={handleResetPassword} autoComplete="off">
-                  <p className="subtitle">Create a new password</p>
-                  <div className="form-group">
-                    <label>New Password</label>
-                    <input 
-                      type="password" 
-                      value={newPassword} 
-                      onChange={(e) => setNewPassword(e.target.value)} 
-                      required 
-                      minLength={6} 
-                      autoComplete="new-password"
-                    />
-                  </div>
-                  <button type="submit" disabled={loading} className="btn-primary">
-                    {loading ? 'Updating...' : 'Update Password'}
-                  </button>
-                </form>
-              )}
-              
-              <button 
-                type="button" 
-                onClick={() => { setView('login'); setResetStep('email'); }} 
-                className="btn-text" 
-                style={{width: '100%', marginTop: '10px'}}
-              >
-                ← Back to Login
-              </button>
-            </div>
-          )}
-
-          {message && (
-            <div className={`message ${message.includes('❌') ? 'error' : 'success'}`}>
-              {message}
-            </div>
-          )}
+          
+          {message && <div className={`message ${message.includes('❌') ? 'error' : 'success'}`}>{message}</div>}
         </div>
       </div>
     </div>

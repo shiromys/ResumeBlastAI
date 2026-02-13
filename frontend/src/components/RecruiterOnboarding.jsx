@@ -8,7 +8,8 @@ function RecruiterOnboarding({ user, onComplete }) {
   const [loading, setLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [message, setMessage] = useState('')
-  const [profileExists, setProfileExists] = useState(false)
+  // profileExists is now permanently true since we bypass the missing columns
+  const [profileExists, setProfileExists] = useState(true) 
   const [analytics, setAnalytics] = useState(null)
   
   // Search States
@@ -17,54 +18,27 @@ function RecruiterOnboarding({ user, onComplete }) {
   const [pendingSearchResults, setPendingSearchResults] = useState([])
   const [isSearching, setIsSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
-  const [showResultsCount, setShowResultsCount] = useState(false) // NEW: Show count first
+  const [showResultsCount, setShowResultsCount] = useState(false) 
   
   // Disclaimer States
   const [showDisclaimer, setShowDisclaimer] = useState(false)
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false)
 
-  // Initialize form with data
+  // Initialize form with data - Limited to existing columns
   const [formData, setFormData] = useState({
-    email: user?.email || '',
-    name: user?.name || '', 
-    company: user?.company || '', 
-    industry: user?.industry || 'Technology',
-    location: user?.location || '',
-    specialty: user?.specialty || '',
-    seniority_level: user?.seniority_level || 'Mid-Senior'
+    email: user?.email || ''
   })
 
-  // Load Profile & Analytics
+  // Load Analytics
   useEffect(() => {
     const initData = async () => {
       try {
         if (!user?.id) return;
 
-        // 1. Fetch Profile
-        const { data } = await supabase
-          .from('recruiters')
-          .select('*')
-          .eq('id', user.id)
-          .single()
+        // Fetch Analytics for all candidates since industry metadata is missing in DB
+        const stats = await getRecruiterAnalytics('All')
+        setAnalytics(stats)
         
-        if (data) {
-          setFormData({
-            email: data.email || user.email || '',
-            name: data.name || '',
-            company: data.company || '',
-            industry: data.industry || 'Technology',
-            location: data.location || '',
-            specialty: data.specialty || '',
-            seniority_level: data.seniority_level || 'Mid-Senior'
-          })
-          
-          if (data.company && data.company !== 'Unknown') {
-            setProfileExists(true)
-            // 2. Fetch Analytics
-            const stats = await getRecruiterAnalytics(data.industry)
-            setAnalytics(stats)
-          }
-        }
       } catch (err) {
         console.error('Error fetching data:', err)
       } finally {
@@ -75,39 +49,6 @@ function RecruiterOnboarding({ user, onComplete }) {
     initData()
   }, [user.id, user.email])
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value })
-  }
-
-  const handleSubmit = async (e) => {
-    e.preventDefault()
-    setIsSaving(true)
-    setMessage('')
-
-    try {
-      const updates = { ...formData, updated_at: new Date().toISOString() }
-      
-      const { error } = await supabase
-        .from('recruiters')
-        .update(updates)
-        .eq('id', user.id)
-
-      if (error) throw error
-
-      setMessage('✅ Profile saved successfully!')
-      setProfileExists(true)
-      const stats = await getRecruiterAnalytics(formData.industry)
-      setAnalytics(stats)
-
-    } catch (error) {
-      console.error('❌ Error saving profile:', error)
-      setMessage('❌ Failed to save profile: ' + error.message)
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  // Handle Search Logic - Show count first
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -122,12 +63,10 @@ function RecruiterOnboarding({ user, onComplete }) {
       const results = await searchCandidates(searchQuery);
       
       if (results && results.length > 0) {
-        // Store results and show count
         setPendingSearchResults(results);
         setShowResultsCount(true);
         setHasSearched(true);
       } else {
-        // No results found
         setHasSearched(true);
         setShowResultsCount(false);
       }
@@ -140,23 +79,19 @@ function RecruiterOnboarding({ user, onComplete }) {
     }
   };
 
-  // Handle View Further Button Click
   const handleViewFurther = () => {
     setShowDisclaimer(true);
   };
 
-  // Handle Disclaimer Accept
   const handleDisclaimerAccept = () => {
     setDisclaimerAccepted(true);
     setShowDisclaimer(false);
-    setSearchResults(pendingSearchResults); // Now show the actual resumes
-    setShowResultsCount(false); // Hide the count view
+    setSearchResults(pendingSearchResults); 
+    setShowResultsCount(false); 
   };
 
-  // Handle Disclaimer Decline
   const handleDisclaimerDecline = () => {
     setShowDisclaimer(false);
-    // Keep the count visible, don't clear anything
   };
 
   const handleLogout = async () => {
@@ -176,19 +111,18 @@ function RecruiterOnboarding({ user, onComplete }) {
             {/* HEADER */}
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px'}}>
                 <div>
-                    <h2 style={{fontSize: '28px', marginBottom: '5px'}}> Welcome back, {formData.name}!</h2>
+                    <h2 style={{fontSize: '28px', marginBottom: '5px'}}> Welcome back!</h2>
                     <p style={{color: '#666'}}>
-                        Recruiting for <strong>{formData.company}</strong> • {formData.industry === 'All' ? 'All Industries' : formData.industry}
+                        Logged in as: <strong>{formData.email}</strong>
                     </p>
                 </div>
                 
                 <div style={{display: 'flex', gap: '12px', flexWrap: 'wrap'}}>
-                    <button className="btn-outline" onClick={() => setProfileExists(false)}>⚙️ Edit Profile</button>
                     <button className="btn-outline" onClick={handleLogout} style={{borderColor: '#DC2626', color: '#DC2626'}}>🚪 Sign Out</button>
                 </div>
             </div>
 
-            {/* ✅ ADDED NOTE HERE */}
+            {/* NOTE */}
             <div style={{
                 background: '#eff6ff', 
                 border: '1px solid #bfdbfe', 
@@ -266,7 +200,7 @@ function RecruiterOnboarding({ user, onComplete }) {
                     </button>
                 </form>
 
-                {/* RESULTS COUNT VIEW - Shows candidate count with "View Further" button */}
+                {/* RESULTS COUNT VIEW */}
                 {hasSearched && showResultsCount && pendingSearchResults.length > 0 && (
                     <div style={{
                         textAlign: 'center',
@@ -320,7 +254,7 @@ function RecruiterOnboarding({ user, onComplete }) {
                     </div>
                 )}
 
-                {/* ACTUAL RESUME RESULTS - Shows after disclaimer acceptance */}
+                {/* ACTUAL RESUME RESULTS */}
                 {searchResults.length > 0 && (
                     <div className="search-results">
                         <div style={{display: 'grid', gap: '15px'}}>
@@ -402,30 +336,9 @@ function RecruiterOnboarding({ user, onComplete }) {
       )
   }
 
-  // ==========================================
-  // VIEW 2: EDIT PROFILE
-  // ==========================================
-  return (
-    <div className="container" style={{ maxWidth: '800px', margin: '40px auto', padding: '0 20px' }}>
-      <div className="resume-builder">
-        <h2 style={{textAlign: 'center'}}> Complete Your Profile</h2>
-        <form onSubmit={handleSubmit} className="form-container">
-            <div className="form-field"><label>Full Name</label><input name="name" value={formData.name} onChange={handleChange} required /></div>
-            <div className="form-field"><label>Company</label><input name="company" value={formData.company} onChange={handleChange} required /></div>
-            <div className="form-field"><label>Industry</label>
-                <select name="industry" value={formData.industry} onChange={handleChange}>
-                  <option value="Technology">Technology</option>
-                  <option value="Finance">Finance</option>
-                  <option value="Healthcare">Healthcare</option>
-                  <option value="All">All Industries</option>
-                </select>
-            </div>
-            <div className="form-field"><label>Location</label><input name="location" value={formData.location} onChange={handleChange} required /></div>
-            <button type="submit" className="generate-button" disabled={isSaving}>{isSaving ? 'Saving...' : 'Save Profile 💾'}</button>
-        </form>
-      </div>
-    </div>
-  )
+  // NOTE: The Profile Editor view is intentionally bypassed because the 
+  // current DB schema does not support these columns.
+  return null;
 }
 
 export default RecruiterOnboarding

@@ -75,7 +75,7 @@ export const signUp = async (email, password, fullName) => {
     console.log('✅ Blacklist check passed');
 
     // STEP 2: Proceed with Supabase signup
-    console.log('Step 2: Creating Supabase account...');
+    console.log('Step 2: Creating Supabase auth account...');
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -87,16 +87,64 @@ export const signUp = async (email, password, fullName) => {
     });
 
     if (error) {
-      console.error('❌ Signup error:', error.message);
+      console.error('❌ Supabase auth signup error:', error.message);
       return {
         success: false,
         error: error.message
       };
     }
 
+    if (!data.user) {
+      console.error('❌ No user data returned from Supabase auth');
+      return {
+        success: false,
+        error: 'Failed to create user account'
+      };
+    }
+
+    console.log('✅ Supabase auth user created:', data.user.id);
+
+    // ✅ STEP 3: Insert user into users table (THIS WAS MISSING!)
+    console.log('Step 3: Inserting user into users table...');
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .insert([
+        {
+          id: data.user.id,
+          email: email.toLowerCase(),
+          full_name: fullName,
+          role: 'job_seeker',
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single();
+
+    if (userError) {
+      console.error('❌ Error inserting into users table:', userError);
+      console.error('Error details:', JSON.stringify(userError, null, 2));
+      
+      // Don't throw error - auth user is created, just log the issue
+      console.warn('⚠️ User created in auth but failed to insert into users table');
+      console.warn('⚠️ User ID:', data.user.id);
+      console.warn('⚠️ This might be due to RLS policies or database trigger issues');
+      
+      // Still return success since auth user was created
+      // The database trigger should handle this, but we're logging the issue
+      return {
+        success: true,
+        user: data.user,
+        session: data.session,
+        warning: 'User created but table insert failed - may need manual sync'
+      };
+    }
+
+    console.log('✅ User successfully inserted into users table:', userData);
+    console.log('=== ✅ SIGNUP PROCESS COMPLETED ===\n');
+
     return {
       success: true,
-      user: data.user,
+      user: userData,
       session: data.session
     };
 
@@ -148,9 +196,31 @@ export const signIn = async (email, password) => {
       };
     }
 
+    // STEP 3: Fetch user data from users table
+    console.log('Step 3: Fetching user data from users table...');
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', data.user.id)
+      .single();
+
+    if (userError) {
+      console.warn('⚠️ Could not fetch user from users table:', userError);
+      // Still allow login but use auth data
+      return {
+        success: true,
+        user: data.user,
+        session: data.session,
+        warning: 'User data not found in users table'
+      };
+    }
+
+    console.log('✅ Login successful');
+    console.log('=== ✅ LOGIN PROCESS COMPLETED ===\n');
+
     return {
       success: true,
-      user: data.user,
+      user: userData,
       session: data.session
     };
 
@@ -192,9 +262,27 @@ export const checkAuthStatus = async () => {
       };
     }
 
+    // Fetch user data from users table
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+
+    if (userError) {
+      console.warn('⚠️ Could not fetch user from users table:', userError);
+      // Still return authenticated but with auth data only
+      return {
+        authenticated: true,
+        user: user,
+        isBlacklisted: false,
+        warning: 'User data not found in users table'
+      };
+    }
+
     return {
       authenticated: true,
-      user: user,
+      user: userData,
       isBlacklisted: false
     };
 

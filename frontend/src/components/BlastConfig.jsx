@@ -405,7 +405,7 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
                         lineHeight: '1.6',
                         fontWeight: '500'
                       }}>
-                        I acknowledge that ResumeBlast.ai does not guarantee interviews, job offers, or employment. I understand that my resume will be sent to recruiters based on my selected plan and that this purchase is final and non-refundable.
+                        I understand that ResumeBlast.ai does not guarantee interviews, job offers, or employment. I acknowledge that my resume will be sent to recruiters based on my selected plan and that this purchase is final and can not be reversed.
                       </span>
                     </label>
                   </div>
@@ -485,7 +485,7 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
                         lineHeight: '1.6',
                         fontWeight: '500'
                       }}>
-                        I acknowledge that ResumeBlast.ai does not guarantee interviews, job offers, or employment. I understand that my resume will be sent to recruiters based on my selected plan and that this purchase is final and non-refundable.
+                        I understand that ResumeBlast.ai does not guarantee interviews, job offers, or employment. I acknowledge that my resume will be sent to recruiters based on my selected plan and that this purchase is final and can not be reversed.
                       </span>
                     </label>
                   </div>
