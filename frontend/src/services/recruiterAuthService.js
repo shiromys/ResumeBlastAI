@@ -1,126 +1,89 @@
 // src/services/recruiterAuthService.js
 import { supabase } from '../lib/supabase'
 
-export const getCurrentSession = async () => {
-  try {
-    const { data: { session }, error } = await supabase.auth.getSession();
-    if (error || !session) return null;
-    return session.user;
-  } catch (error) {
-    console.error('Error getting session:', error);
-    return null;
-  }
-}
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 /**
- * UPDATED: Checks database tables AND handles Auth system conflicts
+ * Logic to ensure a recruiter ID is valid for Foreign Key constraints.
+ * Only adds to the 'recruiters' table if they don't exist in either table.
  */
+const ensureRecruiterExistsForActivity = async (authId, email, alreadyInDB) => {
+  if (alreadyInDB) {
+    console.log('✅ Recruiter already verified in database. Skipping duplication.');
+    return true;
+  }
+
+  try {
+    console.log('🔄 New recruiter detected, syncing to primary table...');
+    const response = await fetch(`${API_URL}/api/admin/recruiters/add`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        target_table: 'recruiters',
+        email: email,
+        id: authId,
+        is_active: true
+      })
+    });
+    return response.ok;
+  } catch (err) {
+    console.error('❌ Sync Error:', err);
+    return false;
+  }
+};
+
 export const checkRecruiterExists = async (email) => {
   try {
     const trimmedEmail = email.trim().toLowerCase();
+    
+    // Check primary table
+    const { data: paid } = await supabase.from('recruiters').select('id, email').eq('email', trimmedEmail).maybeSingle();
+    if (paid) return { exists: true, recruiter: paid, source: 'paid' };
 
-    // 1. Check primary recruiters table
-    const { data: paidRecruiter } = await supabase
-      .from('recruiters')
-      .select('id, email')
-      .eq('email', trimmedEmail)
-      .maybeSingle();
-
-    if (paidRecruiter) return { exists: true, recruiter: paidRecruiter };
-
-    // 2. Check freemium_recruiters table
-    const { data: freeRecruiter } = await supabase
-      .from('freemium_recruiters')
-      .select('id, email')
-      .eq('email', trimmedEmail)
-      .maybeSingle();
-
-    if (freeRecruiter) return { exists: true, recruiter: freeRecruiter };
+    // Check freemium table
+    const { data: free } = await supabase.from('freemium_recruiters').select('id, email').eq('email', trimmedEmail).maybeSingle();
+    if (free) return { exists: true, recruiter: free, source: 'freemium' };
 
     return { exists: false };
-  } catch (error) {
-    console.error('Check failed:', error);
-    return { exists: false, error: error.message };
+  } catch (err) {
+    return { exists: false, error: err.message };
   }
 }
 
-/**
- * FIXED: Handles 422 errors by catching existing users in the Auth system
- */
+export const grantDirectRecruiterAccess = async (email) => {
+  try {
+    const check = await checkRecruiterExists(email);
+    if (check.exists) {
+      // Direct access granted for existing recruiters in either table.
+      // alreadyInDB = true prevents duplication in the 'recruiters' table.
+      await ensureRecruiterExistsForActivity(check.recruiter.id, email, true);
+      return { success: true, recruiter: check.recruiter };
+    }
+    return { success: false, error: "Recruiter not found in verified lists" };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
 export const registerRecruiter = async (email, password) => {
   try {
-    const trimmedEmail = email.trim().toLowerCase()
-    
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: trimmedEmail,
+      email: email.trim().toLowerCase(),
       password: password,
-      options: {
-        data: { role: 'recruiter' }
-      }
-    })
+      options: { data: { role: 'recruiter' } }
+    });
 
-    if (authError) {
-      // Catch "Email already registered" or 422 status
-      if (authError.message.toLowerCase().includes('already registered') || authError.status === 422) {
-        return { 
-          success: false, 
-          isExisting: true, 
-          error: 'Email already registered in Auth system. Please use Login.' 
-        }
-      }
-      throw authError
-    }
+    if (authError) throw authError;
 
-    if (!authData.user) throw new Error('Registration failed')
-
-    // Ensure the database record exists in the 'recruiters' table
-    const newRecruiter = {
-      id: authData.user.id,
-      email: trimmedEmail,
-      is_active: true,
-      email_status: 'active',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    }
-
-    const { data, error: dbError } = await supabase
-      .from('recruiters')
-      .upsert(newRecruiter) 
-      .select()
-      .single()
-
-    if (dbError) throw dbError
-
-    return { success: true, recruiter: data || newRecruiter }
-  } catch (error) {
-    console.error('Registration failed:', error)
-    return { success: false, error: error.message }
+    // Only NEW registrations (alreadyInDB = false) get stored in 'recruiters'
+    await ensureRecruiterExistsForActivity(authData.user.id, email, false);
+    return { success: true, recruiter: authData.user };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 }
 
-export const loginRecruiter = async (email, password) => {
-  try {
-    const trimmedEmail = email.trim().toLowerCase()
-    
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: trimmedEmail,
-      password: password
-    })
-
-    if (authError) {
-        // If login fails with 400 Bad Request, it usually means wrong password
-        throw new Error('Invalid email or password')
-    }
-
-    // Double check that they are in a recruiter table
-    const { data: paid } = await supabase.from('recruiters').select('*').eq('id', authData.user.id).maybeSingle()
-    if (paid) return { success: true, recruiter: paid }
-
-    const { data: free } = await supabase.from('freemium_recruiters').select('*').eq('email', authData.user.email).maybeSingle()
-    if (free) return { success: true, recruiter: free }
-
-    throw new Error('Recruiter profile not found')
-  } catch (error) {
-    return { success: false, error: error.message }
-  }
+export const getCurrentSession = async () => {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.user || null;
 }

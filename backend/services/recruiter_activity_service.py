@@ -41,10 +41,15 @@ class RecruiterActivityService:
         try:
             url = f"{RecruiterActivityService._get_base_url()}/recruiter_activity"
             
+            # ✅ FIX: Extract email from activity_details to populate recruiter_email column
+            details = activity_details or {}
+            email = details.get('email')
+            
             activity_data = {
                 'recruiter_id': recruiter_id,
+                'recruiter_email': email,  # ✅ ADDED: This ensures the email is no longer NULL
                 'activity_type': activity_type,
-                'activity_details': activity_details or {},
+                'activity_details': details,
                 'created_at': datetime.utcnow().isoformat()
             }
             

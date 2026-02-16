@@ -473,3 +473,41 @@ def update_plan():
             return jsonify({'error': resp.text}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# ✅ ADDED: SECURE BYPASS FOR RECRUITER DASHBOARD
+@admin_bp.route('/api/admin/resumes/all', methods=['GET'])
+def get_all_resumes():
+    """
+    Backend route to fetch all resumes bypassing RLS.
+    Used by the Recruiter Dashboard search and analytics.
+    """
+    try:
+        # Fetching resumes using helper that utilizes SERVICE_ROLE_KEY
+        resumes = get_all_rows('resumes', 'select=*&order=created_at.desc')
+        
+        return jsonify({
+            'success': True,
+            'count': len(resumes),
+            'resumes': resumes
+        }), 200
+    except Exception as e:
+        print(f"❌ Error fetching resumes from backend admin route: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# ✅ ADDED: ROUTE TO FETCH USER COUNT FOR RECRUITER DASHBOARD
+@admin_bp.route('/api/admin/users/count', methods=['GET'])
+def get_user_count():
+    """
+    Backend route to fetch the total number of users bypassing RLS.
+    Used for the Recruiter Dashboard analytics count.
+    """
+    try:
+        # Fetching only IDs to count total registered users
+        users = get_all_rows('users', 'select=id')
+        return jsonify({
+            'success': True,
+            'total_users': len(users)
+        }), 200
+    except Exception as e:
+        print(f"❌ Error fetching user count: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
