@@ -363,9 +363,9 @@ function AdminDashboard({ user, onExit }) {
               </div>
             )}
 
-            {/* ✅ NEW SECTION RENDERED HERE */}
+            {/* ✅ UPDATED: Now passing the user object to RecruitersManager */}
             {activeTab === 'recruiters' && (
-              <RecruitersManager />
+              <RecruitersManager user={user} />
             )}
 
             {activeTab === 'users' && data.users && (

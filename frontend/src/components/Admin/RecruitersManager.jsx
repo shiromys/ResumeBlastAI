@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { supabase } from '../../lib/supabase' // Ensure this path correctly points to your supabase client
 
 function RecruitersManager({ user }) {
   const [activeTab, setActiveTab] = useState('recruiters') 
@@ -118,7 +119,13 @@ function RecruitersManager({ user }) {
       return;
     }
 
-    const adminEmail = user?.email || 'unknown_admin';
+    // ✅ FIXED: Fetch current admin email from props or session
+    let adminEmail = user?.email;
+    
+    if (!adminEmail) {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      adminEmail = authUser?.email || 'unknown_admin';
+    }
     
     console.log('🔍 Admin performing deletion:', adminEmail);
 
@@ -156,7 +163,6 @@ function RecruitersManager({ user }) {
     }
   }
 
-  // ✅ FIXED: Check for changes and store original values for reset
   const initiatePlanUpdate = (planId) => {
     const originalPlan = plans.find(p => p.id === planId)
     
@@ -205,12 +211,10 @@ function RecruitersManager({ user }) {
     setShowPlanDisclaimer(true);
   }
 
-  // ✅ NEW: Handle cancel - reset inputs to original values
   const handleCancelDisclaimer = () => {
     if (pendingPlanUpdate) {
       const { id, originalName, originalPrice, originalLimit } = pendingPlanUpdate
       
-      // Reset input fields to original values
       document.getElementById(`name-${id}`).value = originalName
       document.getElementById(`price-${id}`).value = originalPrice
       document.getElementById(`limit-${id}`).value = originalLimit
@@ -267,7 +271,6 @@ function RecruitersManager({ user }) {
 
   return (
     <div style={{padding: '0'}}>
-      {/* Tab buttons section */}
       <div style={{marginBottom: '30px'}}>
         <div style={{display: 'flex', gap: '15px', borderBottom: '2px solid #e5e7eb'}}>
           <button onClick={() => setActiveTab('recruiters')} style={{padding: '12px 24px', border: 'none', background: activeTab === 'recruiters' ? '#DC2626' : 'transparent', color: activeTab === 'recruiters' ? 'white' : '#6b7280', fontWeight: 'bold', cursor: 'pointer', borderRadius: '8px 8px 0 0'}}>
@@ -281,7 +284,25 @@ function RecruitersManager({ user }) {
 
       {activeTab === 'recruiters' && (
         <>
-          {/* Live Recruiter Statistics Display */}
+          {/* ✅ ADDED: SYSTEM MAINTENANCE NOTE */}
+          <div style={{
+            background: '#eff6ff',
+            border: '1px solid #bfdbfe',
+            borderRadius: '12px',
+            padding: '16px 20px',
+            marginBottom: '30px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '15px',
+            color: '#1e40af',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+          }}>
+            <span style={{ fontSize: '24px' }}>ℹ️</span>
+            <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', fontWeight: '500' }}>
+              <strong>System Note:</strong> Please make sure to update the plans and pricing limits whenever a recruiter is added or deleted in the Manage Recruiter section to maintain accurate system settings.
+            </p>
+          </div>
+
           <div className="stats-grid" style={{ marginBottom: '30px' }}>
             <div className="stat-card" style={{background: 'linear-gradient(135deg, #FEF2F2 0%, #FEE2E2 100%)', border: '2px solid #DC2626'}}>
               <h3 style={{color: '#991B1B', display: 'flex', alignItems: 'center', gap: '8px'}}>
@@ -308,7 +329,7 @@ function RecruitersManager({ user }) {
             </div>
 
             <div className="stat-card" style={{background: 'linear-gradient(135deg, #EFF6FF 0%, #DBEAFE 100%)', border: '2px solid #2563EB'}}>
-              <h3 style={{color: '#1e40af', display: 'flex', alignItems: 'center', gap: '8px'}}>
+              <h3 style={{color: '#1e40af', display: 'center', alignItems: 'center', gap: '8px'}}>
                  TOTAL RECRUITERS
               </h3>
               <div className="stat-value" style={{ color: '#2563EB', fontSize: '48px', fontWeight: 'bold' }}>
@@ -320,7 +341,6 @@ function RecruitersManager({ user }) {
             </div>
           </div>
 
-          {/* ADD RECRUITER SECTION */}
           <div className="dashboard-section" style={{marginBottom: '30px', background: '#F0FDF4', padding: '20px', borderRadius: '10px', border: '2px dashed #059669'}}>
             <h2 style={{fontSize: '20px', marginBottom: '20px', color: '#047857'}}> Add New Recruiter</h2>
             <form onSubmit={handleAddRecruiter} style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px'}}>
@@ -357,7 +377,6 @@ function RecruitersManager({ user }) {
             </form>
           </div>
 
-          {/* DELETE RECRUITER SECTION */}
           <div className="dashboard-section" style={{marginTop: '30px', background: '#FFF5F5', padding: '20px', borderRadius: '10px', border: '2px dashed #DC2626'}}>
             <h2 style={{fontSize: '20px', marginBottom: '20px', color: '#B91C1C'}}> Delete Recruiter from Database</h2>
             <form onSubmit={handleDeleteRecruiter} style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px'}}>
@@ -453,7 +472,6 @@ function RecruitersManager({ user }) {
                 </h2>
                 
                 <div style={{background: '#FEF2F2', border: '1px solid #FEE2E2', borderRadius: '12px', padding: '20px', marginBottom: '25px'}}>
-                    {/* ✅ Show what changed */}
                     {pendingPlanUpdate?.changesSummary && (
                       <div style={{background: '#FFF7ED', border: '1px solid #FDBA74', borderRadius: '8px', padding: '15px', marginBottom: '20px'}}>
                         <p style={{color: '#9A3412', fontWeight: '700', marginBottom: '10px', fontSize: '15px', whiteSpace: 'pre-line'}}>
