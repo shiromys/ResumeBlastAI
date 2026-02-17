@@ -4,21 +4,40 @@ import stripe
 from datetime import datetime
 import requests
 from dotenv import load_dotenv
+from pathlib import Path
 
-load_dotenv()
+# ✅ FIX: Load .env for local development only (Railway ignores this, uses its own env vars)
+_env_path = Path(__file__).resolve().parent.parent / '.env'
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path, override=False)
 
 payment_bp = Blueprint('payment', __name__)
 
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
-stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
-FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5173')
+# ✅ FIX: Helper functions to read env vars fresh at request time (not at import time)
+def _get_stripe_key():
+    return os.getenv('STRIPE_SECRET_KEY')
+
+def _get_supabase_url():
+    return os.getenv('SUPABASE_URL')
+
+def _get_supabase_key():
+    return os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+
+def _get_frontend_url():
+    return os.getenv('FRONTEND_URL', 'http://localhost:5173')
+
+# ✅ Debug print at startup to confirm keys are loaded
+_stripe_key = os.getenv('STRIPE_SECRET_KEY')
+_supabase_url = os.getenv('SUPABASE_URL')
+print(f"🔑 payment.py STRIPE_SECRET_KEY: {'✅ SET (' + _stripe_key[:15] + '...)' if _stripe_key else '❌ NOT SET'}")
+print(f"🔑 payment.py SUPABASE_URL: {'✅ SET' if _supabase_url else '❌ NOT SET'}")
 
 
 def _get_headers():
+    supabase_key = _get_supabase_key()
     return {
-        'apikey': SUPABASE_KEY,
-        'Authorization': f'Bearer {SUPABASE_KEY}',
+        'apikey': supabase_key,
+        'Authorization': f'Bearer {supabase_key}',
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates'
     }
@@ -27,12 +46,13 @@ def _get_headers():
 def get_public_plans():
     """Fetch active plans for the frontend"""
     try:
-        url = f"{SUPABASE_URL}/rest/v1/plans?is_active=eq.true&order=price_cents.asc"
+        supabase_url = _get_supabase_url()
+        url = f"{supabase_url}/rest/v1/plans?is_active=eq.true&order=price_cents.asc"
         resp = requests.get(url, headers=_get_headers())
         if resp.status_code == 200:
             return jsonify({'plans': resp.json()}), 200
         else:
-            return jsonify({'plans': []}), 200 
+            return jsonify({'plans': []}), 200
     except Exception as e:
         print(f"Error fetching plans: {e}")
         return jsonify({'error': str(e)}), 500
@@ -43,23 +63,33 @@ def get_public_plans():
 @payment_bp.route('/api/create-checkout-session', methods=['POST'])
 def create_checkout_session():
     try:
+        # ✅ FIX: Set stripe key fresh at every request (not at module load time)
+        stripe.api_key = _get_stripe_key()
+
+        if not stripe.api_key:
+            print("❌ STRIPE_SECRET_KEY is not set in environment!")
+            return jsonify({"success": False, "error": "Payment system not configured"}), 500
+
+        supabase_url = _get_supabase_url()
+        frontend_url = _get_frontend_url()
+
         data = request.get_json()
         user_email = data.get('email')
         user_id = data.get('user_id')
         plan_type = data.get('plan', 'basic').lower()
-        
-        # ✅ NEW: Capture disclaimer acceptance
+
+        # ✅ Capture disclaimer acceptance
         disclaimer_accepted = data.get('disclaimer_accepted', False)
 
         # 1. Fetch Plan details from Database
-        plan_amount = 999 
+        plan_amount = 999
         plan_display_name = 'Basic Plan'
         plan_limit = 250
 
         try:
-            url = f"{SUPABASE_URL}/rest/v1/plans?key_name=eq.{plan_type}&limit=1"
+            url = f"{supabase_url}/rest/v1/plans?key_name=eq.{plan_type}&limit=1"
             plan_resp = requests.get(url, headers=_get_headers())
-            
+
             if plan_resp.status_code == 200 and plan_resp.json():
                 db_plan = plan_resp.json()[0]
                 plan_amount = db_plan.get('price_cents', 999)
@@ -92,8 +122,8 @@ def create_checkout_session():
             customer_email=user_email,
             client_reference_id=str(user_id),
             metadata={'plan_name': plan_type},
-            success_url=f'{FRONTEND_URL}?payment=success&session_id={{CHECKOUT_SESSION_ID}}',
-            cancel_url=f'{FRONTEND_URL}?payment=cancelled',
+            success_url=f'{frontend_url}?payment=success&session_id={{CHECKOUT_SESSION_ID}}',
+            cancel_url=f'{frontend_url}?payment=cancelled',
         )
 
         payment_record = {
@@ -105,13 +135,13 @@ def create_checkout_session():
             "currency": "usd",
             "status": "initiated",
             "plan_name": plan_type,
-            # ✅ NEW: Store disclaimer status
+            # ✅ Store disclaimer status
             "disclaimer_accepted": disclaimer_accepted,
             "initiated_at": datetime.utcnow().isoformat()
         }
 
         requests.post(
-            f"{SUPABASE_URL}/rest/v1/payments",
+            f"{supabase_url}/rest/v1/payments",
             json=payment_record,
             headers=_get_headers()
         )
@@ -130,6 +160,12 @@ def create_checkout_session():
 @payment_bp.route('/api/payment/verify', methods=['POST'])
 def verify_payment():
     try:
+        # ✅ FIX: Set stripe key fresh at every request
+        stripe.api_key = _get_stripe_key()
+
+        if not stripe.api_key:
+            return jsonify({"error": "Payment system not configured"}), 500
+
         print("\n================ PAYMENT VERIFY =================")
         data = request.get_json()
         session_id = data.get('session_id')
@@ -179,8 +215,9 @@ def verify_payment():
 
         update_data = {k: v for k, v in update_data.items() if v is not None}
 
+        supabase_url = _get_supabase_url()
         resp = requests.patch(
-            f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}",
+            f"{supabase_url}/rest/v1/payments?stripe_session_id=eq.{session_id}",
             json=update_data,
             headers=_get_headers()
         )
