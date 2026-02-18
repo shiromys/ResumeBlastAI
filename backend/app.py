@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, redirect # Added request and redirect
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -58,15 +58,24 @@ from routes.support_ticket import support_ticket_bp
 from routes.user_management import user_management_bp
 from routes.payment_webhook import payment_webhook_bp
 from routes.user_activity import user_activity_bp
-# ✅ ADDED: Import webhooks blueprint for bounce handling
 from routes.webhooks import webhooks_bp
 
 app = Flask(__name__)
 
-# ✅ UPDATED CORS CONFIGURATION - CRITICAL FIX
+# ✅ NEW: FORCE REDIRECT FROM NAKED TO WWW
+# This ensures users always see the updated version at www.resumeblast.ai
+@app.before_request
+def ensure_www():
+    url_parts = request.host.split(':') # Handle port if present
+    host = url_parts[0]
+    if host == "resumeblast.ai":
+        target_url = request.url.replace("resumeblast.ai", "www.resumeblast.ai", 1)
+        return redirect(target_url, code=301)
+
+# ✅ UPDATED CORS CONFIGURATION
 CORS(app, 
      resources={
-         r"/*": {  # Changed from r"/api/*" to r"/*"
+         r"/*": {
              "origins": [
                  "http://localhost:5173",
                  "http://localhost:3000",
@@ -97,7 +106,6 @@ app.register_blueprint(support_ticket_bp)
 app.register_blueprint(user_management_bp)
 app.register_blueprint(payment_webhook_bp)
 app.register_blueprint(user_activity_bp)
-# ✅ ADDED: Register webhooks blueprint for bounce handling
 app.register_blueprint(webhooks_bp)
 
 @app.route('/')
@@ -117,11 +125,9 @@ def health():
         'supabase_configured': bool(os.getenv('SUPABASE_SERVICE_ROLE_KEY')),
         'anthropic_configured': bool(os.getenv('ANTHROPIC_API_KEY')),
         'stripe_webhook_configured': bool(os.getenv('STRIPE_WEBHOOK_SECRET')),
-        # ✅ ADDED: Bounce handling webhook status
         'bounce_webhooks_configured': True
     })
 
-# ✅ NEW: Debug route to verify CORS is working
 @app.route('/api/test-cors', methods=['GET', 'POST', 'PATCH', 'OPTIONS'])
 def test_cors():
     return jsonify({
@@ -143,7 +149,7 @@ if __name__ == '__main__':
     print(f'🎫 Support Tickets: CORS enabled with PATCH method')
     print(f'🔍 Analyze Endpoint: /api/analyze')
     print(f'📊 User Activity Tracking: /api/user-activity/log')
-    print(f'📧 Bounce Webhooks: /api/webhooks/brevo/bounce & /api/webhooks/resend/bounce')  # ✅ ADDED
+    print(f'📧 Bounce Webhooks: /api/webhooks/brevo/bounce & /api/webhooks/resend/bounce')
     print('='*70 + '\n')
     
     app.run(host='0.0.0.0', port=port, debug=debug)
