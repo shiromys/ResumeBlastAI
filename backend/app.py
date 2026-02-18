@@ -82,7 +82,7 @@ CORS(app,
                  "http://localhost:5000",
                  "https://resumeblast.ai",
                  "https://*.railway.app",
-                 "https://www.resumeblast.ai",
+                 
                  os.getenv('FRONTEND_URL', '*')
              ],
              "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
