@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, redirect # Added request and redirect
+from flask import Flask, jsonify, request, redirect 
 from flask_cors import CORS
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -81,8 +81,8 @@ CORS(app,
                  "http://localhost:3000",
                  "http://localhost:5000",
                  "https://resumeblast.ai",
-                 "https://*.railway.app",
-                 
+                 "https://www.resumeblast.ai", # ✅ ADDED: Explicitly allow the www subdomain
+                 "https://*.railway.app",      # ✅ ADDED: Allow all Railway subdomains for stability
                  os.getenv('FRONTEND_URL', '*')
              ],
              "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -150,6 +150,6 @@ if __name__ == '__main__':
     print(f'🔍 Analyze Endpoint: /api/analyze')
     print(f'📊 User Activity Tracking: /api/user-activity/log')
     print(f'📧 Bounce Webhooks: /api/webhooks/brevo/bounce & /api/webhooks/resend/bounce')
-    print('='*70 + '\n')
+    print('='*70 + "\n")
     
     app.run(host='0.0.0.0', port=port, debug=debug)
