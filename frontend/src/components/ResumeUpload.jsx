@@ -1,8 +1,10 @@
+// src/components/ResumeUpload.jsx
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { validateFile } from '../utils/fileValidator'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
-import { trackResumeUpload } from '../services/activityTrackingService'
+import { trackResumeUpload, getGuestId } from '../services/activityTrackingService'
+import { saveGuestResume } from '../services/guestTrackingService' // ✅ ADDED: Guest DB tracking
 import PropTypes from 'prop-types'
 import * as mammoth from 'mammoth' 
 import * as pdfjsLib from 'pdfjs-dist' 
@@ -11,16 +13,24 @@ import './ResumeUpload.css'
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
-function ResumeUpload({ user, onUploadSuccess }) {
+function ResumeUpload({ user, isGuest, onUploadSuccess }) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState(null)
   const [message, setMessage] = useState('')
   const [progress, setProgress] = useState(0)
   const [currentUser, setCurrentUser] = useState(user)
 
-  // ✅ NEW: Fetch current user if not passed as prop
+  // ✅ UPDATED: Fetch current user if not passed as prop, but skip if isGuest
   useEffect(() => {
     const getCurrentUser = async () => {
+      // ✅ FIX: If user is a guest, initialize with a placeholder guest identity
+      if (isGuest) {
+        // We use the persistent guest ID from the service
+        const guestId = getGuestId();
+        setCurrentUser({ id: guestId, email: `${guestId}@resumeblast.ai` })
+        return
+      }
+
       if (!user || !user.id) {
         console.log('⚠️ User not passed as prop, fetching from Supabase...')
         const { data: { user: authUser }, error } = await supabase.auth.getUser()
@@ -43,7 +53,7 @@ function ResumeUpload({ user, onUploadSuccess }) {
     }
     
     getCurrentUser()
-  }, [user])
+  }, [user, isGuest])
 
   const parsePDF = async (file) => {
     try {
@@ -55,19 +65,16 @@ function ResumeUpload({ user, onUploadSuccess }) {
         const page = await pdf.getPage(i)
         const textContent = await page.getTextContent()
         
-        // Group text items by Y position to preserve lines
         const lines = {}
         textContent.items.forEach((item) => {
-          const y = Math.round(item.transform[5]) // Y position
+          const y = Math.round(item.transform[5]) 
           if (!lines[y]) lines[y] = []
           lines[y].push(item)
         })
         
-        // Sort lines by Y position (top to bottom)
         const sortedLines = Object.keys(lines)
           .sort((a, b) => b - a)
           .map(y => {
-            // Sort items in each line by X position (left to right)
             return lines[y]
               .sort((a, b) => a.transform[4] - b.transform[4])
               .map(item => item.str)
@@ -87,10 +94,7 @@ function ResumeUpload({ user, onUploadSuccess }) {
   const parseWord = async (file) => {
     try {
       const arrayBuffer = await file.arrayBuffer()
-      
-      // Extract text with basic formatting preserved
       const result = await mammoth.extractRawText({ arrayBuffer })
-      
       return result.value
     } catch (err) {
       console.error('DOCX Parse Error:', err)
@@ -100,15 +104,12 @@ function ResumeUpload({ user, onUploadSuccess }) {
 
   const handleFileUpload = async (file) => {
     try {
-      // ✅ CRITICAL: Check if user exists before proceeding
-      if (!currentUser || !currentUser.id) {
-        setError('❌ Please log in to upload your resume')
-        console.error('❌ User not authenticated')
+      // ✅ FIX: Allow the process to proceed if it is a guest session
+      if (!currentUser && !isGuest) {
+        setError('❌ Please log in or select a plan to upload your resume')
+        console.error('❌ User/Guest not authenticated')
         return
       }
-
-      console.log('👤 Current User ID:', currentUser.id)
-      console.log('📧 Current User Email:', currentUser.email)
 
       const validation = validateFile(file)
       if (!validation.isValid) {
@@ -123,11 +124,13 @@ function ResumeUpload({ user, onUploadSuccess }) {
 
       const timestamp = Date.now()
       const sanitizedFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_')
-      const fileName = `${currentUser.id}/${timestamp}_${sanitizedFileName}`
+      
+      // ✅ FIX: Use 'guest_uploads' folder for guests, otherwise use the user's ID
+      const folderPrefix = isGuest ? 'guest_uploads' : (currentUser?.id || 'unknown')
+      const fileName = `${folderPrefix}/${timestamp}_${sanitizedFileName}`
 
       console.log('📁 Upload path:', fileName)
 
-      // ✅ Upload to resume bucket
       const { data: uploadData, error: uploadError } = await supabase.storage
         .from('resume')
         .upload(fileName, file, { cacheControl: '3600', upsert: false })
@@ -137,17 +140,12 @@ function ResumeUpload({ user, onUploadSuccess }) {
         throw new Error(`Upload failed: ${uploadError.message}`)
       }
       
-      console.log('✅ File uploaded:', uploadData)
-      
       setProgress(40)
       setMessage('📄 Extracting text content...')
 
-      // ✅ Get public URL
       const { data: urlData } = supabase.storage
         .from('resume')
         .getPublicUrl(fileName)
-
-      console.log('🔗 Public URL:', urlData.publicUrl)
 
       let extractedContent = ''
       const fileExtension = file.name.split('.').pop().toLowerCase()
@@ -164,13 +162,16 @@ function ResumeUpload({ user, onUploadSuccess }) {
         throw new Error('Could not extract content. File might be empty or corrupted.')
       }
 
-      console.log('✅ Text extracted, length:', extractedContent.length)
-
       setProgress(80)
       setMessage('💾 Saving to database...')
 
-      // ✅ TRACK RESUME UPLOAD
-      const trackingResult = await trackResumeUpload(currentUser.id, {
+      // ✅ MODIFIED: TRACK EVERY UPLOAD
+      // Logic adjusted to ensure trackResumeUpload is called for both types of users
+      const trackingUserId = isGuest ? getGuestId() : (currentUser?.id || 'unknown');
+      
+      let resumeId = isGuest ? `guest_${Date.now()}` : null;
+      
+      const trackingResult = await trackResumeUpload(trackingUserId, {
         file_name: file.name,
         file_url: urlData.publicUrl,
         file_size: file.size,
@@ -181,9 +182,21 @@ function ResumeUpload({ user, onUploadSuccess }) {
 
       if (!trackingResult.success) {
         console.error('⚠️ Failed to track resume upload:', trackingResult.error)
-        // Continue anyway - we still want to show success to user
-      } else {
-        console.log('✅ Resume tracked, ID:', trackingResult.resume_id)
+      } else if (trackingResult.resume_id) {
+        // Use the ID returned from the tracking service (database ID)
+        resumeId = trackingResult.resume_id;
+      }
+
+      // ✅ ADDED: Save resume data to guest_users table for guest users
+      // This is fire-and-forget — does NOT block or affect the upload flow
+      if (isGuest) {
+        saveGuestResume({
+          file_name: file.name,
+          file_url: urlData.publicUrl,
+          file_size: file.size,
+          file_type: fileExtension,
+          extracted_text: extractedContent
+        });
       }
 
       setProgress(100)
@@ -194,7 +207,7 @@ function ResumeUpload({ user, onUploadSuccess }) {
           text: extractedContent,
           url: urlData.publicUrl,
           name: file.name,
-          id: trackingResult.resume_id || `resume_${Date.now()}`
+          id: resumeId
         })
       }
       
@@ -212,8 +225,7 @@ function ResumeUpload({ user, onUploadSuccess }) {
     if (file) handleFileUpload(file)
   }
 
-  // ✅ Show loading state while fetching user
-  if (!currentUser) {
+  if (!currentUser && !isGuest) {
     return (
       <div className="resume-upload">
         <h3>📄 Upload Your Resume</h3>
@@ -227,7 +239,6 @@ function ResumeUpload({ user, onUploadSuccess }) {
       <h3>📄 Upload Your Resume</h3>
       <p className="upload-description">DOCX, PDF, or TXT (max 5MB)</p>
       
-      {/* ✅ ADDED: Helpful Note for Users */}
       <div style={{
         background: '#f0f9ff',
         border: '1px solid #bae6fd',
@@ -280,7 +291,8 @@ ResumeUpload.propTypes = {
     id: PropTypes.string,
     email: PropTypes.string 
   }),
+  isGuest: PropTypes.bool, 
   onUploadSuccess: PropTypes.func.isRequired
 }
 
-export default ResumeUpload
+export default ResumeUpload;

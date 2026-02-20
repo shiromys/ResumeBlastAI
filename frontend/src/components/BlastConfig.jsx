@@ -9,9 +9,10 @@ import {
   trackBlastCompleted, 
   trackBlastFailure 
 } from '../services/activityTrackingService'
+import { saveGuestBlastStart, saveGuestBlastComplete } from '../services/guestTrackingService' // ✅ ADDED: Guest DB tracking
 import './BlastConfig.css'
 
-function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastComplete, onCancel }) {
+function BlastConfig({ resumeId, resumeUrl, userData, isGuest, paymentVerified, onBlastComplete, onCancel }) {
   const [blastConfig, setBlastConfig] = useState({
     industry: 'Technology',
     recruiterCount: 50,
@@ -64,7 +65,9 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
   // 2. Check Freemium Eligibility
   useEffect(() => {
     const checkEligibility = async () => {
-      if (!userData?.id) {
+      // ✅ Guests are not eligible for Freemium
+      if (!userData?.id || isGuest) {
+        setIsFreemiumEligible(false)
         setCheckingEligibility(false)
         return
       }
@@ -94,7 +97,7 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
     }
     
     checkEligibility()
-  }, [userData])
+  }, [userData, isGuest])
 
   // 3. Trigger Auto Blast on Payment Success
   useEffect(() => {
@@ -232,14 +235,26 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
       const savedConfigStr = localStorage.getItem('pending_blast_config')
       const currentConfig = savedConfigStr ? JSON.parse(savedConfigStr) : blastConfig
       
-      const tracking = await trackBlastInitiated(userData.id, {
-        resume_id: resumeId,
-        industry: currentConfig.industry,
-        recipients_count: limit 
-      })
-      
-      if (tracking.success) {
-        campaignId = tracking.campaign_id
+      // ✅ Registered user blast tracking (unchanged)
+      if (!isGuest) {
+        const tracking = await trackBlastInitiated(userData.id, {
+          resume_id: resumeId,
+          industry: currentConfig.industry,
+          recipients_count: limit 
+        })
+        if (tracking.success) {
+          campaignId = tracking.campaign_id
+        }
+      }
+
+      // ✅ ADDED: Save blast start to guest_users table for guest users
+      // Fire-and-forget — does NOT affect the blast flow
+      if (isGuest) {
+        saveGuestBlastStart({
+          industry: currentConfig.industry,
+          recipients_count: limit,
+          plan_name: planType
+        });
       }
 
       const blastData = {
@@ -257,9 +272,24 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
       setStatus('success')
       setStatusMessage(`✅ Blast completed successfully! (${result.successful_sends} sent)`)
       
+      // ✅ ADDED: Save blast completion to guest_users table for guest users
+      if (isGuest) {
+        saveGuestBlastComplete({
+          success_rate: result.success_rate,
+          total_recipients: result.total_recipients,
+          successful_sends: result.successful_sends,
+          failed_sends: result.failed_sends
+        });
+      }
+
       localStorage.removeItem('pending_blast_config')
       localStorage.removeItem('pending_blast_resume_data')
       localStorage.removeItem('selected_plan_type')
+      
+      // ✅ Post-Blast registration prompt for non-registered users (unchanged)
+      if (isGuest) {
+        alert("🚀 Blast Complete! Your resume has been sent. To track future blasts and access your personal dashboard, please register an account.");
+      }
       
       setTimeout(() => {
         if (onBlastComplete) onBlastComplete(result)
@@ -270,7 +300,7 @@ function BlastConfig({ resumeId, resumeUrl, userData, paymentVerified, onBlastCo
       console.error('❌ Paid Blast Failed:', err)
       setError(err.message || 'Failed to send blast')
       setStatus('error')
-      if (campaignId) await trackBlastFailure(userData.id, campaignId, err.message)
+      if (!isGuest && campaignId) await trackBlastFailure(userData.id, campaignId, err.message)
     }
   }
 

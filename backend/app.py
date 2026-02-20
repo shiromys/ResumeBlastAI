@@ -59,6 +59,7 @@ from routes.user_management import user_management_bp
 from routes.payment_webhook import payment_webhook_bp
 from routes.user_activity import user_activity_bp
 from routes.webhooks import webhooks_bp
+from routes.guest_routes import guest_bp  # ✅ ADDED: Guest user tracking
 
 app = Flask(__name__)
 
@@ -107,6 +108,7 @@ app.register_blueprint(user_management_bp)
 app.register_blueprint(payment_webhook_bp)
 app.register_blueprint(user_activity_bp)
 app.register_blueprint(webhooks_bp)
+app.register_blueprint(guest_bp)  # ✅ ADDED: Guest user tracking routes
 
 @app.route('/')
 def home():
@@ -150,6 +152,7 @@ if __name__ == '__main__':
     print(f'🔍 Analyze Endpoint: /api/analyze')
     print(f'📊 User Activity Tracking: /api/user-activity/log')
     print(f'📧 Bounce Webhooks: /api/webhooks/brevo/bounce & /api/webhooks/resend/bounce')
+    print(f'👤 Guest Tracking: /api/guest/*')  # ✅ ADDED: Log line for guest routes
     print('='*70 + "\n")
     
     app.run(host='0.0.0.0', port=port, debug=debug)

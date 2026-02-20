@@ -59,7 +59,7 @@ function Footer({ onViewChange }) {
             Suite 575E, Addison TX 75001
           </div>
           <p style={{ marginTop: '15px', color: '#9CA3AF', fontSize: '14px' }}>
-            © 2025 ResumeBlast.ai - All rights reserved
+            © 2026 ResumeBlast.ai - All rights reserved
           </p>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { initiateCheckout } from '../services/paymentService' // ✅ Added for guest payment
 import './LandingPage.css'
 
 // --- INTERNAL COMPONENT: Live Counter ---
@@ -77,7 +78,7 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
   return <span>{currentText}</span>;
 };
 
-function LandingPage({ onGetStarted }) {
+function LandingPage({ onGetStarted, user }) { // ✅ Added user prop to check auth status
   // ✅ STATE: Store plans fetched from DB
   const [plans, setPlans] = useState({});
 
@@ -98,6 +99,29 @@ function LandingPage({ onGetStarted }) {
       })
       .catch(err => console.error("Failed to load plans:", err));
   }, []);
+
+  // ✅ NEW GUEST LOGIC: Handle plan selection based on auth status
+  const handlePlanSelection = async (planKey) => {
+    if (user || planKey === 'freemium') {
+      // If registered OR freemium, follow existing flow
+      onGetStarted();
+    } else {
+      // If NOT registered and paid plan, go to guest payment
+      try {
+        localStorage.setItem('is_guest_session', 'true');
+        localStorage.setItem('selected_plan_type', planKey);
+        
+        await initiateCheckout({ 
+          email: "guest@resumeblast.ai", 
+          id: "guest_" + Date.now(),
+          plan: planKey,
+          disclaimer_accepted: true 
+        });
+      } catch (err) {
+        console.error("Guest payment failed:", err);
+      }
+    }
+  };
 
   // ✅ HELPER: Format price parts (Whole . Decimal)
   const getPriceParts = (key, defaultCents) => {
@@ -234,7 +258,7 @@ function LandingPage({ onGetStarted }) {
               <button 
                 className="cta-button" 
                 style={{ background: '#DC2626', color: 'white', width: '100%', padding: '12px', fontSize: '14px', fontWeight: '700', border: 'none', borderRadius: '6px', cursor: 'pointer' }} 
-                onClick={onGetStarted}
+                onClick={() => handlePlanSelection('freemium')}
               >
                 Try for Free
               </button>
@@ -286,7 +310,7 @@ function LandingPage({ onGetStarted }) {
               <button 
                 className="cta-button" 
                 style={{ background: '#DC2626', color: 'white', width: '100%', padding: '12px', fontSize: '14px', fontWeight: '700', border: 'none', borderRadius: '6px', cursor: 'pointer' }} 
-                onClick={onGetStarted}
+                onClick={() => handlePlanSelection('basic')}
               >
                 Get Started
               </button>
@@ -339,7 +363,7 @@ function LandingPage({ onGetStarted }) {
               <button 
                 className="cta-button" 
                 style={{ background: '#DC2626', color: 'white', width: '100%', padding: '12px', fontSize: '14px', fontWeight: '700', border: 'none', borderRadius: '6px', cursor: 'pointer' }} 
-                onClick={onGetStarted}
+                onClick={() => handlePlanSelection('pro')}
               >
                 Get Pro Now
               </button>

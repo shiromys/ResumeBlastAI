@@ -12,7 +12,8 @@ function AdminDashboard({ user, onExit }) {
     stripe: null,
     health: null,
     support: null,
-    serverStatus: null
+    serverStatus: null,
+    brevoStats: null // ✅ NEW KEY
   })
   const [error, setError] = useState(null)
   
@@ -28,8 +29,7 @@ function AdminDashboard({ user, onExit }) {
       return
     }
     
-    // ✅ MODIFIED: Skip main data fetch for support AND recruiters tabs
-    // (RecruitersManager component handles its own data fetching)
+    // Support and Recruiters manage their own loading state internally
     if (activeTab !== 'support' && activeTab !== 'recruiters') {
       fetchData(activeTab)
     } else {
@@ -83,10 +83,16 @@ function AdminDashboard({ user, onExit }) {
       if (tab === 'stripe') {
         endpoint = '/api/admin/revenue'
         if (customStartDate && customEndDate) {
-          endpoint += `?start_date=${customStartDate}&end_date=${customEndDate}`
+          endpoint += `?start_date=${customStartDate}&date=${customEndDate}`
         }
       }
       if (tab === 'health') endpoint = '/api/admin/health'
+      
+      // ✅ NEW: Brevo stats endpoint mapping
+      if (tab === 'brevo') {
+        endpoint = '/api/admin/brevo-stats'
+        dataKey = 'brevoStats'
+      }
 
       if (endpoint) {
         console.log(`📡 Fetching: ${API_URL}${endpoint}`)
@@ -205,12 +211,25 @@ function AdminDashboard({ user, onExit }) {
              Monitoring
           </button>
           
-          {/* ✅ NEW TAB ADDED HERE */}
           <button
             className={`nav-item ${activeTab === 'recruiters' ? 'active' : ''}`}
             onClick={() => setActiveTab('recruiters')}
           >
              Recruiters & Plans
+          </button>
+
+          {/* ✅ Emails tab — badge shows when 70%+ credits used */}
+          <button
+            className={`nav-item ${activeTab === 'brevo' ? 'active' : ''}`}
+            onClick={() => setActiveTab('brevo')}
+            style={{ position: 'relative' }}
+          >
+             Emails (Credits)
+            {data.brevoStats?.plan_details?.trigger_alert && (
+              <span className="support-unread-badge" style={{ background: '#F59E0B', fontSize: '13px', minWidth: '26px' }}>
+                ⚠️
+              </span>
+            )}
           </button>
 
           <button
@@ -232,7 +251,6 @@ function AdminDashboard({ user, onExit }) {
              System Health
           </button>
           
-          {/* Support Tickets with Unread Badge */}
           <button
             className={`nav-item ${activeTab === 'support' ? 'active' : ''}`}
             onClick={() => setActiveTab('support')}
@@ -363,7 +381,273 @@ function AdminDashboard({ user, onExit }) {
               </div>
             )}
 
-            {/* ✅ UPDATED: Now passing the user object to RecruitersManager */}
+            {/* ✅ EMAILS SECTION — 100% real-time data from Brevo API */}
+            {activeTab === 'brevo' && data.brevoStats && data.brevoStats.success && (
+              <div>
+                <h2> Email Plan & Credits</h2>
+
+                {/* ── 70% Alert Banner ─────────────────────────────────────── */}
+                {data.brevoStats.plan_details.trigger_alert && (
+                  <div style={{
+                    backgroundColor: '#fffbeb',
+                    border: '2px solid #fbbf24',
+                    borderLeft: '6px solid #d97706',
+                    color: '#92400e',
+                    padding: '18px 22px',
+                    borderRadius: '12px',
+                    marginBottom: '28px',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '14px',
+                    boxShadow: '0 4px 14px rgba(251,191,36,0.2)'
+                  }}>
+                    <span style={{ fontSize: '26px', lineHeight: '1', flexShrink: 0 }}>⚠️</span>
+                    <div>
+                      <strong style={{ display: 'block', fontSize: '16px', marginBottom: '5px' }}>
+                        Email Credits Usage Alert — Action Required
+                      </strong>
+                      <span style={{ fontSize: '14px', lineHeight: '1.6' }}>
+                        <strong>{data.brevoStats.plan_details.usage_percent}%</strong> of your {data.brevoStats.plan_details.usage_label} has been consumed
+                        ({data.brevoStats.plan_details.credits_used.toLocaleString()} used
+                        out of {data.brevoStats.plan_details.total_limit.toLocaleString()} total).
+                        Please top up your Brevo plan to prevent email service interruption.
+                      </span>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Account info strip + Refresh ─────────────────────────── */}
+                <div style={{
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '12px',
+                  padding: '16px 22px',
+                  marginBottom: '28px',
+                  display: 'flex',
+                  gap: '36px',
+                  flexWrap: 'wrap',
+                  alignItems: 'center'
+                }}>
+                  {[
+                    { label: 'Account Holder', value: data.brevoStats.account_holder },
+                    { label: 'Account Email',  value: data.brevoStats.account_email  },
+                    { label: 'Company',         value: data.brevoStats.company        },
+                    { label: 'Data Fetched At', value: data.brevoStats.fetched_at     }
+                  ].map(({ label, value }) => (
+                    <div key={label}>
+                      <div style={{ fontSize: '11px', fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#0f172a', marginTop: '3px' }}>{value || 'N/A'}</div>
+                    </div>
+                  ))}
+                  <div style={{ marginLeft: 'auto' }}>
+                    <button onClick={() => fetchData('brevo')} className="btn-primary" style={{ padding: '9px 22px', fontSize: '13px' }}>
+                       Refresh
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Stat cards ───────────────────────────────────────────── */}
+                <div className="stats-grid">
+
+                  {/* Card 1 — Plan */}
+                  <div className="stat-card">
+                    <h3>Active Plan</h3>
+                    <div className="stat-value" style={{ fontSize: '26px', textTransform: 'capitalize' }}>
+                      {data.brevoStats.plan_details.type.replace('payAsYouGo', 'Pay As You Go')}
+                    </div>
+                    <p style={{ marginTop: '10px', fontSize: '13px' }}>
+                       Purchased:{' '}
+                      {data.brevoStats.plan_details.purchase_date && data.brevoStats.plan_details.purchase_date !== 'N/A'
+                        ? new Date(data.brevoStats.plan_details.purchase_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+                        : 'N/A'}
+                    </p>
+                    {data.brevoStats.plan_details.plan_end_date !== 'N/A' && (
+                      <p style={{ marginTop: '5px', fontSize: '13px' }}>
+                         Renews:{' '}
+                        {new Date(data.brevoStats.plan_details.plan_end_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Card 2 — Credits remaining */}
+                  <div className="stat-card">
+                    <h3>Credits Remaining</h3>
+                    <div className="stat-value" style={{ color: data.brevoStats.plan_details.trigger_alert ? '#DC2626' : '#059669' }}>
+                      {data.brevoStats.plan_details.credits_remaining.toLocaleString()}
+                    </div>
+                    <p style={{ marginTop: '10px', fontSize: '13px' }}>
+                      out of <strong>{data.brevoStats.plan_details.total_limit.toLocaleString()}</strong> total
+                    </p>
+                    <p style={{ marginTop: '5px', fontSize: '13px' }}>
+                      <strong>{data.brevoStats.plan_details.credits_used.toLocaleString()}</strong> used this cycle
+                    </p>
+                  </div>
+
+                  {/* Card 3 — Usage % with progress bar */}
+                  <div className="stat-card">
+                    <h3>Usage — {data.brevoStats.plan_details.usage_label}</h3>
+                    <div className="stat-value" style={{
+                      color: data.brevoStats.plan_details.usage_percent >= 70 ? '#DC2626'
+                           : data.brevoStats.plan_details.usage_percent >= 50 ? '#D97706'
+                           : '#059669'
+                    }}>
+                      {data.brevoStats.plan_details.usage_percent}%
+                    </div>
+
+                    {/* Progress bar */}
+                    <div style={{ marginTop: '14px', background: '#e5e7eb', borderRadius: '6px', height: '10px', overflow: 'hidden' }}>
+                      <div style={{
+                        width: `${Math.min(data.brevoStats.plan_details.usage_percent, 100)}%`,
+                        height: '100%',
+                        borderRadius: '6px',
+                        background: data.brevoStats.plan_details.usage_percent >= 70 ? '#DC2626'
+                                  : data.brevoStats.plan_details.usage_percent >= 50 ? '#F59E0B'
+                                  : '#10B981',
+                        transition: 'width 0.6s ease'
+                      }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '5px', fontSize: '11px', color: '#9ca3af' }}>
+                      <span>0%</span>
+                      <span style={{ color: '#F59E0B', fontWeight: 700 }}>⚠️ 70%</span>
+                      <span>100%</span>
+                    </div>
+                  </div>
+
+                  {/* Card 4 — Today's sent */}
+                  <div className="stat-card">
+                    <h3>Today's Emails Sent</h3>
+                    <div className="stat-value" style={{ color: '#1d4ed8' }}>
+                      {data.brevoStats.plan_details.daily_sent.toLocaleString()}
+                    </div>
+                    <p style={{ marginTop: '10px', fontSize: '13px' }}>
+                      emails sent today
+                    </p>
+                    {data.brevoStats.plan_details.type === 'free' && (
+                      <p style={{ marginTop: '5px', fontSize: '13px', color: '#059669', fontWeight: 600 }}>
+                        {Math.max(0, 300 - data.brevoStats.plan_details.daily_sent).toLocaleString()} left today (free cap: 300)
+                      </p>
+                    )}
+                    <p style={{ marginTop: '5px', fontSize: '13px', color: '#6b7280' }}>
+                      {data.brevoStats.plan_details.monthly_sent.toLocaleString()} sent this month
+                    </p>
+                  </div>
+                </div>
+
+                {/* ── Plan Features ─────────────────────────────────────────── */}
+                <div className="stat-card" style={{ marginTop: '4px' }}>
+                  <h3 style={{ marginBottom: '16px' }}>Plan Features</h3>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+                    {data.brevoStats.plan_details.features.map((feature, i) => (
+                      <span key={i} style={{
+                        background: '#f0fdf4',
+                        padding: '8px 16px',
+                        borderRadius: '20px',
+                        fontSize: '13px',
+                        color: '#166534',
+                        border: '1px solid #bbf7d0',
+                        fontWeight: 600
+                      }}>
+                        ✅ {feature}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── Detailed credit summary table ─────────────────────────── */}
+                <div className="stat-card" style={{ padding: '0', overflow: 'hidden', marginTop: '24px' }}>
+                  <div style={{ padding: '20px 24px', borderBottom: '1px solid #e5e7eb' }}>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}> Credit Usage Summary</h3>
+                  </div>
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Metric</th>
+                        <th>Value (Live)</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Plan Type</td>
+                        <td style={{ textTransform: 'capitalize' }}>
+                          {data.brevoStats.plan_details.type.replace('payAsYouGo', 'Pay As You Go')}
+                        </td>
+                        <td><span className="badge-success">Active</span></td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Total Sending Limit</td>
+                        <td>{data.brevoStats.plan_details.total_limit.toLocaleString()}</td>
+                        <td><span className="badge-success">Allocated</span></td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Credits Used (This Cycle)</td>
+                        <td>{data.brevoStats.plan_details.credits_used.toLocaleString()}</td>
+                        <td>
+                          <span className={data.brevoStats.plan_details.usage_percent >= 70 ? 'badge-warning' : 'badge-success'}>
+                            {data.brevoStats.plan_details.usage_percent}%
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Credits Remaining</td>
+                        <td style={{ fontWeight: 700, color: data.brevoStats.plan_details.trigger_alert ? '#DC2626' : '#059669' }}>
+                          {data.brevoStats.plan_details.credits_remaining.toLocaleString()}
+                        </td>
+                        <td>
+                          <span className={data.brevoStats.plan_details.trigger_alert ? 'badge-warning' : 'badge-success'}>
+                            {data.brevoStats.plan_details.trigger_alert ? 'Low — Top Up!' : 'Healthy'}
+                          </span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Emails Sent Today</td>
+                        <td>{data.brevoStats.plan_details.daily_sent.toLocaleString()}</td>
+                        <td><span className="badge-success">Today</span></td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Emails Sent This Month</td>
+                        <td>{data.brevoStats.plan_details.monthly_sent.toLocaleString()}</td>
+                        <td><span className="badge-success">Month-to-date</span></td>
+                      </tr>
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Plan Purchase / Start Date</td>
+                        <td>
+                          {data.brevoStats.plan_details.purchase_date && data.brevoStats.plan_details.purchase_date !== 'N/A'
+                            ? new Date(data.brevoStats.plan_details.purchase_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+                            : 'N/A'}
+                        </td>
+                        <td><span className="badge-success">Confirmed</span></td>
+                      </tr>
+                      {data.brevoStats.plan_details.plan_end_date !== 'N/A' && (
+                        <tr>
+                          <td style={{ fontWeight: 600 }}>Renewal Date</td>
+                          <td>
+                            {new Date(data.brevoStats.plan_details.plan_end_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                          </td>
+                          <td><span className="badge-success">Upcoming</span></td>
+                        </tr>
+                      )}
+                      <tr>
+                        <td style={{ fontWeight: 600 }}>Last Refreshed</td>
+                        <td style={{ fontSize: '13px', color: '#6b7280' }}>{data.brevoStats.fetched_at}</td>
+                        <td><span className="badge-success">Live</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Brevo tab: API error state */}
+            {activeTab === 'brevo' && data.brevoStats && !data.brevoStats.success && (
+              <div>
+                <h2> Email Plan & Credits</h2>
+                <div className="error-banner">
+                  ⚠️ {data.brevoStats.error || 'Unable to load Brevo data. Ensure BREVO_API_KEY is set correctly in your .env file.'}
+                </div>
+              </div>
+            )}
+
             {activeTab === 'recruiters' && (
               <RecruitersManager user={user} />
             )}
@@ -436,9 +720,7 @@ function AdminDashboard({ user, onExit }) {
 
             {activeTab === 'stripe' && (
               <div>
-                {/* ... existing stripe code ... */}
                 <h2> Revenue Analytics</h2>
-                
                 <div className="date-range-section">
                   <h3> Custom Date Range</h3>
                   <form onSubmit={handleDateRangeSubmit} className="date-range-form">

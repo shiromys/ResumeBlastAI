@@ -1,4 +1,12 @@
 # backend/services/recruiter_email_service.py
+# ============================================================
+# CHANGES IN THIS FILE:
+#   1. FIXED: Conditionally adding "tags" to email_payload.
+#      If campaign_id is missing/None, the "tags" key is NOT sent.
+#      This prevents the "Brevo API error (400): tags is blank" error.
+#   ALL OTHER LOGIC IS COMPLETELY UNTOUCHED
+# ============================================================
+
 import os
 import requests
 import base64
@@ -70,14 +78,8 @@ class RecruiterEmailService:
         
         job_role = candidate_data.get('job_role', 'Professional')
         
-        # NOTE: Email and Phone removed from visual display as per request
-        
         recruiter_name = recruiter_data.get('name', 'Hiring Manager')
         
-        # UPDATED TEMPLATE:
-        # 1. "your firm" is NOT bolded.
-        # 2. Key Qualifications section REMOVED.
-        # 3. Email and Phone display lines REMOVED.
         html_content = f"""
 <!DOCTYPE html>
 <html>
@@ -181,7 +183,7 @@ class RecruiterEmailService:
 """
         return html_content
     
-    def send_resume_to_recruiter(self, candidate_data, recruiter_data, resume_url, resume_name):
+    def send_resume_to_recruiter(self, candidate_data, recruiter_data, resume_url, resume_name, campaign_id=None):
         """
         Send resume email to a single recruiter with attachment
         """
@@ -204,7 +206,7 @@ class RecruiterEmailService:
             raw_name = candidate_data.get('candidate_name', 'Candidate')
             sender_name = raw_name.title() if raw_name else 'Candidate'
             
-            # Prepare email payload
+            # Prepare base email payload
             email_payload = {
                 "sender": {
                     "name": self.sender_name,
@@ -229,6 +231,12 @@ class RecruiterEmailService:
                     }
                 ]
             }
+
+            # ✅ FIX: Only add "tags" if campaign_id is not empty/None
+            # This prevents the "missing_parameter" error when campaign_id is blank
+            if campaign_id:
+                email_payload["tags"] = [str(campaign_id)]
+                print(f"   🏷️  Tagged with campaign_id: {campaign_id}")
             
             print(f"📤 Sending email via Brevo API...")
             
@@ -272,7 +280,7 @@ class RecruiterEmailService:
                 'error': error_msg
             }
     
-    def send_resume_blast(self, candidate_data, recruiters_list, resume_url, resume_name):
+    def send_resume_blast(self, candidate_data, recruiters_list, resume_url, resume_name, campaign_id=None):
         """
         Send resume to multiple recruiters
         """
@@ -282,6 +290,8 @@ class RecruiterEmailService:
         print(f"📊 Total Recipients: {len(recruiters_list)}")
         print(f"👤 Candidate: {candidate_data.get('candidate_name')}")
         print(f"📄 Resume: {resume_name}")
+        if campaign_id:
+            print(f"🏷️  Campaign ID (Brevo tag): {campaign_id}")
         print(f"{'='*70}\n")
         
         results = []
@@ -295,7 +305,8 @@ class RecruiterEmailService:
                 candidate_data=candidate_data,
                 recruiter_data=recruiter,
                 resume_url=resume_url,
-                resume_name=resume_name
+                resume_name=resume_name,
+                campaign_id=campaign_id
             )
             
             results.append(result)

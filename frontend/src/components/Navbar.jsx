@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import './Navbar.css'
 
-function Navbar({ user, isAdmin, onViewChange, onLoginClick, onLogout }) {
+function Navbar({ user, isGuest, isAdmin, onViewChange, onLoginClick, onLogout }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const handleNavClick = (view) => {
@@ -44,12 +44,14 @@ function Navbar({ user, isAdmin, onViewChange, onLoginClick, onLogout }) {
               </>
             ) : (
               <>
-                <li>
-                  {/* ✅ CHANGED: Removed red inline style so it is now black and bold like the other options */}
-                  <button className="nav-link" onClick={() => handleNavClick('dashboard')}>
-                    Dashboard
-                  </button>
-                </li>
+                {!isGuest && (
+                  <li>
+                    {/* ✅ CHANGED: Removed red inline style so it is now black and bold like the other options */}
+                    <button className="nav-link" onClick={() => handleNavClick('dashboard')}>
+                      Dashboard
+                    </button>
+                  </li>
+                )}
 
                 <li>
                   <button

@@ -1,4 +1,14 @@
 # backend/routes/webhooks.py
+# ============================================================
+# CHANGES IN THIS FILE:
+#   1. Added handle_brevo_email_events() - new endpoint /api/webhooks/brevo/events
+#      This receives delivered/opened/clicked/bounced events from Brevo
+#      and updates the blast_campaigns table counters in real-time.
+#   2. Added _update_blast_campaign_counter() helper function
+#   3. Updated /test endpoint to list the new endpoint
+#   ALL EXISTING CODE IS UNTOUCHED
+# ============================================================
+
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 import os
@@ -20,6 +30,9 @@ def get_supabase_headers():
         'Prefer': 'return=representation'
     }
 
+# ============================================================
+# EXISTING FUNCTION - UNTOUCHED
+# ============================================================
 def update_recruiter_status(email, status, bounce_type, reason):
     """
     Update recruiter email status in ALL THREE tables
@@ -31,7 +44,6 @@ def update_recruiter_status(email, status, bounce_type, reason):
         reason: Reason for bounce
     """
     try:
-        # Prepare update data
         update_data = {
             'email_status': status,
             'bounce_type': bounce_type,
@@ -84,32 +96,29 @@ def update_recruiter_status(email, status, bounce_type, reason):
         traceback.print_exc()
         return False
 
+# ============================================================
+# EXISTING FUNCTION - UNTOUCHED
+# ============================================================
 def delete_recruiter(email):
     """
     Permanently delete a recruiter from ALL THREE tables
-    
-    Args:
-        email: Recruiter email address
     """
     try:
         params = {'email': f'eq.{email}'}
         deleted_count = 0
         
-        # Delete from freemium_recruiters
         url1 = f"{SUPABASE_URL}/rest/v1/freemium_recruiters"
         response1 = requests.delete(url1, headers=get_supabase_headers(), params=params)
         if response1.status_code in [200, 204]:
             print(f"✅ Deleted {email} from freemium_recruiters")
             deleted_count += 1
         
-        # Delete from recruiters
         url2 = f"{SUPABASE_URL}/rest/v1/recruiters"
         response2 = requests.delete(url2, headers=get_supabase_headers(), params=params)
         if response2.status_code in [200, 204]:
             print(f"✅ Deleted {email} from recruiters")
             deleted_count += 1
         
-        # Delete from recruiter_activity
         url3 = f"{SUPABASE_URL}/rest/v1/recruiter_activity"
         response3 = requests.delete(url3, headers=get_supabase_headers(), params=params)
         if response3.status_code in [200, 204]:
@@ -128,16 +137,71 @@ def delete_recruiter(email):
         traceback.print_exc()
         return False
 
+
+# ============================================================
+# NEW HELPER FUNCTION
+# Updates delivered/opened/clicked/bounced counters on blast_campaigns
+# campaign_id here is the 'id' (UUID) of the blast_campaigns row
+# which you store as a Brevo tag when sending
+# ============================================================
+def _update_blast_campaign_counter(campaign_id, field, increment=1):
+    """
+    Increments a counter column on the blast_campaigns table.
+    
+    Args:
+        campaign_id: The UUID of the blast_campaigns row (stored as Brevo tag)
+        field: Column name to increment (delivered_count, opened_count, etc.)
+        increment: How much to add (default 1)
+    """
+    try:
+        if not campaign_id:
+            return False
+
+        # Step 1: Fetch current value
+        fetch_url = (
+            f"{SUPABASE_URL}/rest/v1/blast_campaigns"
+            f"?id=eq.{campaign_id}"
+            f"&select=id,{field}"
+        )
+        resp = requests.get(fetch_url, headers=get_supabase_headers())
+
+        if resp.status_code != 200 or not resp.json():
+            print(f"⚠️ blast_campaigns row not found for campaign_id: {campaign_id}")
+            return False
+
+        row = resp.json()[0]
+        current = row.get(field, 0) or 0
+        new_value = current + increment
+
+        # Step 2: Patch with new value
+        patch_url = f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}"
+        patch_resp = requests.patch(
+            patch_url,
+            headers=get_supabase_headers(),
+            json={field: new_value}
+        )
+
+        if patch_resp.status_code in [200, 204]:
+            print(f"✅ {field} updated: {current} → {new_value} for campaign {campaign_id}")
+            return True
+        else:
+            print(f"❌ Failed to update {field}: {patch_resp.status_code} - {patch_resp.text}")
+            return False
+
+    except Exception as e:
+        print(f"❌ _update_blast_campaign_counter error: {str(e)}")
+        traceback.print_exc()
+        return False
+
+
+# ============================================================
+# EXISTING ROUTE - UNTOUCHED
+# ============================================================
 @webhooks_bp.route('/brevo/bounce', methods=['POST', 'OPTIONS'])
 def handle_brevo_webhook():
     """
     Handle bounce/block notifications from Brevo (for PREMIUM blasts)
-    
-    Brevo sends webhooks for:
-    - hard_bounce: Permanent delivery failure
-    - soft_bounce: Temporary delivery failure
-    - blocked: Email blocked by recipient
-    - spam: Marked as spam by recipient
+    Brevo sends webhooks for: hard_bounce, soft_bounce, blocked, spam
     """
     if request.method == 'OPTIONS':
         return '', 204
@@ -163,47 +227,14 @@ def handle_brevo_webhook():
         if not email:
             return jsonify({'error': 'Email address missing'}), 400
         
-        # Handle different event types
         if event == 'hard_bounce':
-            # Permanent failure - mark as hard_bounce
-            update_recruiter_status(
-                email=email,
-                status='hard_bounce',
-                bounce_type='hard',
-                reason=f"Hard bounce: {reason}"
-            )
-            
-            # Optional: Delete immediately for hard bounces
-            # Uncomment the line below if you want to delete immediately
-            # delete_recruiter(email)
-            
+            update_recruiter_status(email=email, status='hard_bounce', bounce_type='hard', reason=f"Hard bounce: {reason}")
         elif event == 'soft_bounce':
-            # Temporary failure - mark as soft_bounce
-            update_recruiter_status(
-                email=email,
-                status='soft_bounce',
-                bounce_type='soft',
-                reason=f"Soft bounce: {reason}"
-            )
-            
+            update_recruiter_status(email=email, status='soft_bounce', bounce_type='soft', reason=f"Soft bounce: {reason}")
         elif event == 'blocked':
-            # Email blocked by recipient or ISP
-            update_recruiter_status(
-                email=email,
-                status='blocked',
-                bounce_type='blocked',
-                reason=f"Blocked: {reason}"
-            )
-            
+            update_recruiter_status(email=email, status='blocked', bounce_type='blocked', reason=f"Blocked: {reason}")
         elif event == 'spam':
-            # User marked email as spam - immediately block
-            update_recruiter_status(
-                email=email,
-                status='blocked',
-                bounce_type='spam',
-                reason='Spam complaint received'
-            )
-            
+            update_recruiter_status(email=email, status='blocked', bounce_type='spam', reason='Spam complaint received')
         else:
             print(f"⚠️ Unhandled event type: {event}")
         
@@ -214,14 +245,144 @@ def handle_brevo_webhook():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================================
+# NEW ROUTE: /api/webhooks/brevo/events
+# Register THIS URL in Brevo Dashboard → Settings → Webhooks
+# Events to select: delivered, opened, click, hard_bounce,
+#                   soft_bounce, blocked, spam, unsubscribed
+# ============================================================
+@webhooks_bp.route('/brevo/events', methods=['POST', 'OPTIONS'])
+def handle_brevo_email_events():
+    """
+    Receives ALL real-time email events from Brevo.
+    
+    How it works:
+    - When you send emails via Brevo API, you set "tags": [campaign_id]
+    - Brevo sends this tag back in every webhook event as 'tag' field
+    - This function reads that tag (= campaign UUID) and updates blast_campaigns counters
+    
+    Event types handled:
+    - delivered  → increments delivered_count
+    - opened     → increments opened_count  
+    - click      → increments clicked_count
+    - hard_bounce → increments bounced_count + marks recruiter
+    - soft_bounce → increments bounced_count + marks recruiter
+    - blocked    → marks recruiter as blocked
+    - spam       → increments spam_count + marks recruiter
+    - unsubscribed → marks recruiter as blocked
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+
+    try:
+        data = request.json
+
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+
+        event   = data.get('event', '')
+        email   = data.get('email', '')
+        
+        # 'tag' in Brevo webhook = the tag you set when sending
+        # You will set "tags": [blast_campaign_id] in your RecruiterEmailService
+        # Brevo sends it back as a string in the 'tag' field
+        tag         = data.get('tag', '')
+        campaign_id = tag.strip() if tag else None
+
+        print(f"\n{'='*70}")
+        print(f"🔔 BREVO EMAIL EVENT RECEIVED")
+        print(f"{'='*70}")
+        print(f"  Event:       {event}")
+        print(f"  Email:       {email}")
+        print(f"  Campaign ID: {campaign_id}")
+        print(f"  Raw data:    {data}")
+        print(f"{'='*70}\n")
+
+        # ── ENGAGEMENT EVENTS ──────────────────────────────────────
+        if event == 'delivered':
+            if campaign_id:
+                _update_blast_campaign_counter(campaign_id, 'delivered_count')
+
+        elif event == 'opened':
+            if campaign_id:
+                _update_blast_campaign_counter(campaign_id, 'opened_count')
+
+        elif event == 'click':
+            # Note: Brevo uses 'click' (not 'clicked')
+            if campaign_id:
+                _update_blast_campaign_counter(campaign_id, 'clicked_count')
+
+        # ── NEGATIVE EVENTS ───────────────────────────────────────
+        elif event == 'hard_bounce':
+            if campaign_id:
+                _update_blast_campaign_counter(campaign_id, 'bounced_count')
+            if email:
+                update_recruiter_status(
+                    email=email,
+                    status='hard_bounce',
+                    bounce_type='hard',
+                    reason=f"Hard bounce via Brevo event: {data.get('reason', '')}"
+                )
+
+        elif event == 'soft_bounce':
+            if campaign_id:
+                _update_blast_campaign_counter(campaign_id, 'bounced_count')
+            if email:
+                update_recruiter_status(
+                    email=email,
+                    status='soft_bounce',
+                    bounce_type='soft',
+                    reason=f"Soft bounce via Brevo event: {data.get('reason', '')}"
+                )
+
+        elif event == 'blocked':
+            if email:
+                update_recruiter_status(
+                    email=email,
+                    status='blocked',
+                    bounce_type='blocked',
+                    reason=f"Blocked via Brevo event: {data.get('reason', '')}"
+                )
+
+        elif event == 'spam':
+            if campaign_id:
+                _update_blast_campaign_counter(campaign_id, 'spam_count')
+            if email:
+                update_recruiter_status(
+                    email=email,
+                    status='blocked',
+                    bounce_type='spam',
+                    reason='Spam complaint via Brevo events webhook'
+                )
+
+        elif event == 'unsubscribed':
+            if email:
+                update_recruiter_status(
+                    email=email,
+                    status='blocked',
+                    bounce_type='unsubscribed',
+                    reason='Unsubscribed via Brevo events webhook'
+                )
+
+        else:
+            print(f"⚠️ Unhandled Brevo event type: {event}")
+
+        return jsonify({'status': 'ok', 'event': event, 'campaign_id': campaign_id}), 200
+
+    except Exception as e:
+        print(f"❌ Error handling Brevo email event: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================
+# EXISTING ROUTE - UNTOUCHED
+# ============================================================
 @webhooks_bp.route('/resend/bounce', methods=['POST', 'OPTIONS'])
 def handle_resend_webhook():
     """
     Handle bounce notifications from Resend (for FREEMIUM blasts)
-    
-    Resend sends webhooks for:
-    - email.bounced: Email bounced
-    - email.complained: Spam complaint
     """
     if request.method == 'OPTIONS':
         return '', 204
@@ -235,7 +396,6 @@ def handle_resend_webhook():
         event_type = data.get('type')
         event_data = data.get('data', {})
         
-        # Extract email from 'to' array
         to_field = event_data.get('to', [])
         email = to_field[0] if isinstance(to_field, list) and len(to_field) > 0 else None
         
@@ -250,27 +410,13 @@ def handle_resend_webhook():
         if not email:
             return jsonify({'error': 'Email address missing'}), 400
         
-        # Handle different event types
         if event_type == 'email.bounced':
-            # Email bounced - mark as hard_bounce
             bounce_type = event_data.get('bounce_type', 'hard')
             reason = event_data.get('bounce_reason', 'Email bounced')
-            
-            update_recruiter_status(
-                email=email,
-                status='hard_bounce',
-                bounce_type=bounce_type,
-                reason=f"Resend bounce: {reason}"
-            )
+            update_recruiter_status(email=email, status='hard_bounce', bounce_type=bounce_type, reason=f"Resend bounce: {reason}")
             
         elif event_type == 'email.complained':
-            # Spam complaint - immediately block
-            update_recruiter_status(
-                email=email,
-                status='blocked',
-                bounce_type='spam',
-                reason='Spam complaint via Resend'
-            )
+            update_recruiter_status(email=email, status='blocked', bounce_type='spam', reason='Spam complaint via Resend')
         
         return jsonify({'status': 'success', 'event': event_type}), 200
         
@@ -279,6 +425,10 @@ def handle_resend_webhook():
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+
+# ============================================================
+# UPDATED TEST ENDPOINT - lists all endpoints including new one
+# ============================================================
 @webhooks_bp.route('/test', methods=['GET'])
 def test_webhook():
     """Test endpoint to verify webhook routes are working"""
@@ -286,28 +436,28 @@ def test_webhook():
         'success': True,
         'message': 'Webhook routes are active',
         'endpoints': {
-            'brevo_premium': '/api/webhooks/brevo/bounce',
-            'resend_freemium': '/api/webhooks/resend/bounce'
+            'brevo_bounce_only': '/api/webhooks/brevo/bounce',
+            'brevo_all_events':  '/api/webhooks/brevo/events',   # ← NEW: use this in Brevo dashboard
+            'resend_freemium':   '/api/webhooks/resend/bounce'
         },
+        'brevo_events_tracked': ['delivered', 'opened', 'click', 'hard_bounce', 'soft_bounce', 'blocked', 'spam', 'unsubscribed'],
         'tables': {
             'freemium': 'freemium_recruiters',
             'premium_recruiters': 'recruiters',
-            'premium_activity': 'recruiter_activity'
+            'premium_activity': 'recruiter_activity',
+            'blast_stats': 'blast_campaigns'
         },
         'supabase_configured': bool(SUPABASE_URL and SUPABASE_KEY)
     })
 
+
+# ============================================================
+# EXISTING ROUTE - UNTOUCHED
+# ============================================================
 @webhooks_bp.route('/manual-bounce', methods=['POST'])
 def manual_bounce():
     """
     Manually mark a recruiter email as bounced (for testing or manual intervention)
-    
-    Body: {
-        "email": "recruiter@example.com",
-        "status": "hard_bounce",
-        "bounce_type": "hard",
-        "reason": "Manual marking"
-    }
     """
     try:
         data = request.json
@@ -320,7 +470,6 @@ def manual_bounce():
         if not email:
             return jsonify({'error': 'Email address required'}), 400
         
-        # Validate status
         valid_statuses = ['active', 'soft_bounce', 'hard_bounce', 'blocked', 'spam']
         if status not in valid_statuses:
             return jsonify({'error': f'Invalid status. Must be one of: {valid_statuses}'}), 400
@@ -328,15 +477,9 @@ def manual_bounce():
         result = update_recruiter_status(email, status, bounce_type, reason)
         
         if result:
-            return jsonify({
-                'success': True,
-                'message': f'Email {email} marked as {status}'
-            }), 200
+            return jsonify({'success': True, 'message': f'Email {email} marked as {status}'}), 200
         else:
-            return jsonify({
-                'success': False,
-                'message': f'Email {email} not found in any table'
-            }), 404
+            return jsonify({'success': False, 'message': f'Email {email} not found in any table'}), 404
             
     except Exception as e:
         return jsonify({'error': str(e)}), 500

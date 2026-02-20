@@ -4,15 +4,19 @@ import botAnimation from '../assets/bot-working.json'
 import BlastConfig from './BlastConfig'
 import { analyzeResumeForBlast, getSkillsByCategory, formatAllSkillsForDisplay } from '../utils/aiAnalyzer'
 import { trackResumeAnalysis } from '../services/activityTrackingService'
+import { saveGuestAnalysis } from '../services/guestTrackingService' // ✅ ADDED: Guest DB tracking
 import './ResumeAnalysis.css'
 
-function ResumeAnalysis({ user, resumeText, resumeUrl, resumeId, isPaymentSuccess }) {
+function ResumeAnalysis({ user, isGuest, resumeText, resumeUrl, resumeId, isPaymentSuccess }) {
   const [analyzing, setAnalyzing] = useState(false)
   const [analysis, setAnalysis] = useState(null)
   const [showBlastConfig, setShowBlastConfig] = useState(false)
   const [paymentVerified, setPaymentVerified] = useState(false)
   const [showAllSkills, setShowAllSkills] = useState(false) // Toggle for skills view
   
+  // ✅ Guest Disclaimer State
+  const [guestDisclaimerAccepted, setGuestDisclaimerAccepted] = useState(false)
+
   // State for the dummy progress bar
   const [progress, setProgress] = useState(0)
 
@@ -23,17 +27,29 @@ function ResumeAnalysis({ user, resumeText, resumeUrl, resumeId, isPaymentSucces
     }
   }, [resumeText]);
 
-  // 2. Check for payment success
+  // 2. Check for payment success - ✅ UPDATED LOGIC
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlSuccess = params.get('payment') === 'success';
 
     if (isPaymentSuccess || urlSuccess) {
-        console.log(" Payment success detected");
+        console.log("Payment success detected");
         setPaymentVerified(true);
-        setShowBlastConfig(true);
+        
+        // ✅ CHANGE: Only trigger automatic blast config if NOT a guest.
+        // If guest, they MUST see and accept the disclaimer modal first.
+        if (!isGuest) {
+            setShowBlastConfig(true);
+        }
     }
-  }, [isPaymentSuccess]); 
+  }, [isPaymentSuccess, isGuest]); 
+
+  // ✅ NEW: Trigger blast config for guests ONLY after disclaimer is accepted
+  useEffect(() => {
+    if (isGuest && guestDisclaimerAccepted && paymentVerified) {
+      setShowBlastConfig(true);
+    }
+  }, [guestDisclaimerAccepted, isGuest, paymentVerified]);
 
   // 3. Effect to simulate progress bar when analyzing
   useEffect(() => {
@@ -57,11 +73,19 @@ function ResumeAnalysis({ user, resumeText, resumeUrl, resumeId, isPaymentSucces
       const result = await analyzeResumeForBlast(resumeText);
       setAnalysis(result);
       
-      if (user && resumeId) {
+      // ✅ Registered user tracking (unchanged)
+      if (user && resumeId && !isGuest) {
         try {
           await trackResumeAnalysis(user.id, resumeId, result);
         } catch (e) { console.error(e) }
       }
+
+      // ✅ ADDED: Save analysis to guest_users table for guest users
+      // Fire-and-forget — does NOT affect the analysis display in any way
+      if (isGuest) {
+        saveGuestAnalysis(result);
+      }
+
     } catch (error) {
       console.error("Analysis failed", error);
     } finally {
@@ -149,7 +173,6 @@ function ResumeAnalysis({ user, resumeText, resumeUrl, resumeId, isPaymentSucces
             </div>
           )}
 
-          {/* Disclaimer Note Updated as per request */}
           <p style={{
             fontSize: '11px', 
             color: '#4b5563', 
@@ -187,20 +210,18 @@ function ResumeAnalysis({ user, resumeText, resumeUrl, resumeId, isPaymentSucces
           <div className="data-row">
             <span className="label">Experience:</span>
             <span className="value" style={{fontWeight: '700'}}>
-              {analysis.total_experience || 'N/A'}
-            </span>
-          </div>
-
-          <div className="data-row">
-            <span className="label">Education:</span>
-            <span className="value" style={{fontSize: '13px', textAlign: 'right', maxWidth: '160px', lineHeight: '1.2'}}>
-              {analysis.education_summary || 'Not Specified'}
+              {analysis.years_of_experience ? `${analysis.years_of_experience} Years` : 'Not Specified'}
             </span>
           </div>
 
           <div className="data-row">
             <span className="label">Industry:</span>
-            <span className="value highlight">{analysis.recommended_industry || 'Technology'}</span>
+            <span className="value">{analysis.recommended_industry || 'Technology'}</span>
+          </div>
+
+          <div className="data-row">
+            <span className="label">Education:</span>
+            <span className="value">{analysis.education_summary || 'Not Specified'}</span>
           </div>
         </div>
 
@@ -329,17 +350,52 @@ function ResumeAnalysis({ user, resumeText, resumeUrl, resumeId, isPaymentSucces
         </div>
       )}
 
+      {/* ✅ Guest User Disclaimer Modal - MANDATORY BEFORE BLASTING */}
+      {isGuest && !guestDisclaimerAccepted && (
+        <div className="guest-disclaimer-overlay" style={{
+          position: 'fixed', top: 0, left: 0, width: '100%', height: '100%',
+          background: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center',
+          alignItems: 'center', zIndex: 1000, padding: '20px'
+        }}>
+          <div className="guest-disclaimer-modal" style={{
+            background: 'white', padding: '40px', borderRadius: '16px', 
+            maxWidth: '550px', textAlign: 'center', boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+          }}>
+            <div style={{fontSize: '40px', marginBottom: '20px'}}>📢</div>
+            <h3 style={{ color: '#111827', marginBottom: '15px', fontSize: '22px' }}>Action Required: Accept Disclaimer</h3>
+            <p style={{ color: '#4b5563', fontSize: '15px', lineHeight: '1.7', marginBottom: '25px' }}>
+              By proceeding as a guest, you acknowledge that your resume will be distributed to our verified recruiter network. 
+              <br /><br />
+              <strong>Warning:</strong> As a non-registered user, you will <strong>not</strong> have access to the tracking dashboard to view your blast history or recruiter activity. 
+              If you wish to save the data  Please register.
+            </p>
+            <button 
+              className="blast-button-large" 
+              onClick={() => setGuestDisclaimerAccepted(true)}
+              style={{ width: '100%', padding: '16px' }}
+            >
+              I Accept & Proceed to Blast
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="action-section">
-        <button className="blast-button-large" onClick={handleBlastClick}>
+        <button 
+          className="blast-button-large" 
+          onClick={handleBlastClick}
+          disabled={isGuest && !guestDisclaimerAccepted}
+          style={{ opacity: (isGuest && !guestDisclaimerAccepted) ? 0.6 : 1 }}
+        >
            Blast to 500+ {analysis.recommended_industry || 'Tech'} Recruiters
         </button>
-        
       </div>
 
       {showBlastConfig && (
         <BlastConfig
           resumeId={resumeId}
           resumeUrl={resumeUrl}
+          isGuest={isGuest}
           paymentVerified={paymentVerified}
           userData={{
             id: user?.id,
