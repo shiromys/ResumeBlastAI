@@ -22,14 +22,40 @@ import LegalPage from './components/LegalPage'
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
 
-// ✅ FIX: Robust guest detection helper
-// Checks BOTH the is_guest_session flag AND the presence of a guest_id in localStorage.
-// This handles cases where is_guest_session was set but guest_id is the more reliable signal.
-const detectGuestSession = () => {
+// ✅ FIX: Detect guest session using URL params FIRST (most reliable),
+// then fall back to localStorage signals.
+// URL param is immune to cross-site localStorage clearing by browsers (Safari/Brave etc).
+const detectGuestSession = (params) => {
+  // PRIMARY: guest_id embedded in URL by the backend checkout endpoint
+  // This is set in payment.py success_url and ALWAYS survives a Stripe redirect
+  const urlGuestId = params.get('guest_id') || ''
+  if (urlGuestId.startsWith('guest_')) {
+    console.log('✅ Guest detected via URL param:', urlGuestId)
+    // Restore localStorage so the rest of the app (guestTrackingService) works normally
+    localStorage.setItem('guest_id', urlGuestId)
+    localStorage.setItem('guestId', urlGuestId)
+    localStorage.setItem('is_guest_session', 'true')
+    return urlGuestId
+  }
+
+  // FALLBACK 1: is_guest_session flag in localStorage
   const flagSet = localStorage.getItem('is_guest_session') === 'true'
-  const guestId = localStorage.getItem('guest_id') || localStorage.getItem('guestId') || ''
-  const hasGuestId = guestId.startsWith('guest_')
-  return flagSet || hasGuestId
+  // FALLBACK 2: guest_id key directly in localStorage  
+  const storedGuestId = localStorage.getItem('guest_id') || localStorage.getItem('guestId') || ''
+  if (flagSet || storedGuestId.startsWith('guest_')) {
+    console.log('✅ Guest detected via localStorage:', storedGuestId || 'flag only')
+    return storedGuestId || 'unknown_guest'
+  }
+
+  // FALLBACK 3: pending blast data = they were mid-checkout as guest
+  const pendingConfig = localStorage.getItem('pending_blast_config')
+  const pendingPlan = localStorage.getItem('selected_plan_type')
+  if (pendingConfig || pendingPlan) {
+    console.log('✅ Guest detected via pending blast data in localStorage')
+    return 'pending_guest'
+  }
+
+  return null
 }
 
 function App() {
@@ -70,28 +96,34 @@ function App() {
         const params = new URLSearchParams(window.location.search)
         const isPaymentReturn = params.get('payment') === 'success'
         const sessionId = params.get('session_id')
-        
-        // ✅ FIX: Use robust detection - checks both flag AND guest_id key
-        const isGuestReturning = detectGuestSession()
 
-        console.log('🔍 Session init:', { isPaymentReturn, isGuestReturning, sessionId: sessionId?.slice(0, 20) })
-        
-        const { data: { session }, error } = await supabase.auth.getSession()
-        
+        // ✅ FIX: Pass URL params so guest_id from URL is the primary check
+        const detectedGuestId = isPaymentReturn ? detectGuestSession(params) : null
+        const isGuestReturning = !!detectedGuestId
+
+        console.log('🔍 Session init:', { 
+          isPaymentReturn, 
+          isGuestReturning,
+          detectedGuestId,
+          sessionId: sessionId?.slice(0, 20) 
+        })
+
+        const { data: { session } } = await supabase.auth.getSession()
+
         if (session?.user) {
           // ── REGISTERED USER ──────────────────────────────────────────
           setUser(session.user)
           setIsGuest(false)
           localStorage.removeItem('is_guest_session')
           prevUserIdRef.current = session.user.id
-          
+
           const adminStatus = await checkAdminStatus(session.user.email)
           setIsAdmin(adminStatus)
-          
+
           if (isPaymentReturn) {
             setPaymentSuccess(true)
             setHasUploadedInSession(true)
-            setViewMode('upload-workbench') 
+            setViewMode('upload-workbench')
           } else if (adminStatus) {
             setViewMode('admin')
           } else if (session.user.user_metadata?.role === 'recruiter') {
@@ -102,35 +134,23 @@ function App() {
 
         } else if (isPaymentReturn && isGuestReturning) {
           // ── GUEST RETURNING FROM STRIPE PAYMENT ──────────────────────
-          // ✅ FIX: This block now reliably triggers because detectGuestSession()
-          // checks guest_id presence, not just the is_guest_session flag.
           console.log('✅ Guest returning from payment — routing to workbench')
           setIsGuest(true)
           setPaymentSuccess(true)
           setViewMode('upload-workbench')
-          setHasUploadedInSession(false) // Guest needs to upload resume now
+          setHasUploadedInSession(false)
+
+          // Clean URL: remove guest_id from address bar but keep session_id for PaymentSuccessHandler
+          const cleanUrl = `${window.location.pathname}?payment=success&session_id=${sessionId}`
+          window.history.replaceState({}, '', cleanUrl)
 
         } else if (isPaymentReturn && !isGuestReturning) {
-          // ── PAYMENT RETURN BUT NO GUEST SIGNAL ───────────────────────
-          // Could be a direct URL visit or expired session - check if we have
-          // a pending_blast_config as a final fallback signal
-          const pendingConfig = localStorage.getItem('pending_blast_config')
-          const pendingPlan = localStorage.getItem('selected_plan_type')
-          
-          if (pendingConfig || pendingPlan) {
-            // There's pending blast data - treat as guest
-            console.log('⚠️ Payment return with pending blast data — treating as guest')
-            setIsGuest(true)
-            setPaymentSuccess(true)
-            setViewMode('upload-workbench')
-            setHasUploadedInSession(false)
-          } else {
-            console.log('⚠️ Payment return but no guest session found — going home')
-            setViewMode('jobseeker-home')
-          }
+          // ── PAYMENT RETURN BUT NO GUEST SESSION FOUND ─────────────────
+          console.warn('⚠️ Payment return but no guest session detected — going home')
+          setViewMode('jobseeker-home')
 
         } else {
-          // ── NO SESSION, NOT A PAYMENT RETURN ─────────────────────────
+          // ── NORMAL PAGE LOAD, NO PAYMENT ─────────────────────────────
           if (!['privacy', 'terms', 'refund'].includes(viewMode)) {
             setViewMode('jobseeker-home')
           }
@@ -139,7 +159,7 @@ function App() {
         console.error('❌ Session init error:', error)
         setViewMode('jobseeker-home')
       } finally {
-        setIsRestoring(false) 
+        setIsRestoring(false)
       }
     }
 
@@ -147,35 +167,35 @@ function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-         setIsGuest(false)
-         localStorage.removeItem('is_guest_session')
-         if (prevUserIdRef.current === session.user.id) return 
-         prevUserIdRef.current = session.user.id
-         setUser(session.user)
-         const adminStatus = await checkAdminStatus(session.user.email)
-         setIsAdmin(adminStatus)
-         if (adminStatus) setViewMode('admin')
-         else {
-             const role = session?.user?.user_metadata?.role
-             if (role === 'recruiter') setViewMode('recruiter')
-             else setViewMode('upload-workbench')
-         }
+        setIsGuest(false)
+        localStorage.removeItem('is_guest_session')
+        if (prevUserIdRef.current === session.user.id) return
+        prevUserIdRef.current = session.user.id
+        setUser(session.user)
+        const adminStatus = await checkAdminStatus(session.user.email)
+        setIsAdmin(adminStatus)
+        if (adminStatus) setViewMode('admin')
+        else {
+          const role = session?.user?.user_metadata?.role
+          if (role === 'recruiter') setViewMode('recruiter')
+          else setViewMode('upload-workbench')
+        }
       } else if (event === 'SIGNED_OUT') {
-         prevUserIdRef.current = null
-         setUser(null)
-         setIsAdmin(false)
-         setIsGuest(false)
-         setViewMode('jobseeker-home')
-         setHasUploadedInSession(false)
+        prevUserIdRef.current = null
+        setUser(null)
+        setIsAdmin(false)
+        setIsGuest(false)
+        setViewMode('jobseeker-home')
+        setHasUploadedInSession(false)
       }
     })
     return () => subscription.unsubscribe()
-  }, []) 
+  }, [])
 
   const handleStartBlast = () => {
     if (!user && !isGuest) {
-      setShowSignup(true);
-      return;
+      setShowSignup(true)
+      return
     }
     setHasUploadedInSession(false)
     setResumeText('')
@@ -190,22 +210,21 @@ function App() {
       setViewMode(view)
       return
     }
-
-    switch(view) {
-      case 'home': setViewMode((user || isGuest) ? 'upload-workbench' : 'jobseeker-home'); break;
-      case 'recruiter': setViewMode('recruiter'); break;
-      case 'dashboard': setViewMode('dashboard'); break;
-      case 'contact': setViewMode('contact'); break;
+    switch (view) {
+      case 'home': setViewMode((user || isGuest) ? 'upload-workbench' : 'jobseeker-home'); break
+      case 'recruiter': setViewMode('recruiter'); break
+      case 'dashboard': setViewMode('dashboard'); break
+      case 'contact': setViewMode('contact'); break
       case 'admin':
-        if (isAdmin) setViewMode('admin');
-        else alert('You do not have admin privileges');
-        break;
+        if (isAdmin) setViewMode('admin')
+        else alert('You do not have admin privileges')
+        break
       case 'how-it-works':
       case 'pricing':
         setViewMode('jobseeker-home')
         setTimeout(() => document.getElementById(view)?.scrollIntoView({ behavior: 'smooth' }), 100)
-        break;
-      default: break;
+        break
+      default: break
     }
   }
 
@@ -247,44 +266,53 @@ function App() {
     }
 
     if (user || isGuest) {
-        if (viewMode === 'dashboard' && user) return <div className="container"><UserDashboard user={user} onStartBlast={handleStartBlast} /></div>
-        if (viewMode === 'jobseeker-home') return <LandingPage onGetStarted={handleStartBlast} user={user} />
+      if (viewMode === 'dashboard' && user) return <div className="container"><UserDashboard user={user} onStartBlast={handleStartBlast} /></div>
+      if (viewMode === 'jobseeker-home') return <LandingPage onGetStarted={handleStartBlast} user={user} />
 
-        return (
-            <div className="container dashboard-container">
-              <div style={{marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
-                 {user && <button className="btn-text" onClick={() => setViewMode('dashboard')}>← Back to Dashboard</button>}
-                 <h1 style={{fontSize: '24px', margin: 0}}>Resume Blast Workbench</h1>
+      return (
+        <div className="container dashboard-container">
+          <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            {user && <button className="btn-text" onClick={() => setViewMode('dashboard')}>← Back to Dashboard</button>}
+            <h1 style={{ fontSize: '24px', margin: 0 }}>Resume Blast Workbench</h1>
+          </div>
+          {hasUploadedInSession ? (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', padding: '15px', background: '#f3f4f6', borderRadius: '8px', alignItems: 'center' }}>
+                <div><h3 style={{ margin: 0, fontSize: '18px' }}>Current Resume Analysis</h3></div>
+                <button onClick={handleStartBlast} className="btn-outline">📄 Upload Different Resume</button>
               </div>
-              {hasUploadedInSession ? (
-                <>
-                   <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '20px', padding: '15px', background: '#f3f4f6', borderRadius: '8px', alignItems:'center'}}>
-                    <div><h3 style={{margin: 0, fontSize: '18px'}}>Current Resume Analysis</h3></div>
-                    <button onClick={handleStartBlast} className="btn-outline">📄 Upload Different Resume</button>
-                  </div>
-                  <ResumeAnalysis 
-                    user={user} 
-                    isGuest={isGuest}
-                    resumeText={resumeText} 
-                    resumeId={resumeId} 
-                    resumeUrl={resumeUrl} 
-                    isPaymentSuccess={paymentSuccess} 
-                  />
-                </>
-              ) : (
-                <ResumeUpload user={user} isGuest={isGuest} onUploadSuccess={({ text, url, id }) => { setResumeText(text); setResumeUrl(url); setResumeId(id); setHasUploadedInSession(true); }} />
-              )}
-            </div>
-          )
+              <ResumeAnalysis
+                user={user}
+                isGuest={isGuest}
+                resumeText={resumeText}
+                resumeId={resumeId}
+                resumeUrl={resumeUrl}
+                isPaymentSuccess={paymentSuccess}
+              />
+            </>
+          ) : (
+            <ResumeUpload
+              user={user}
+              isGuest={isGuest}
+              onUploadSuccess={({ text, url, id }) => {
+                setResumeText(text)
+                setResumeUrl(url)
+                setResumeId(id)
+                setHasUploadedInSession(true)
+              }}
+            />
+          )}
+        </div>
+      )
     }
+
     return <LandingPage onGetStarted={handleStartBlast} user={user} />
   }
 
   const isRecruiterDashboard = viewMode === 'recruiter' && user
   const isAdminPage = viewMode === 'admin' && user
-  const isContactPage = viewMode === 'contact' 
+  const isContactPage = viewMode === 'contact'
   const isLegalPage = ['privacy', 'terms', 'refund'].includes(viewMode)
-  
   const shouldShowFooter = !isAdminPage && !isContactPage
 
   return (
@@ -292,19 +320,37 @@ function App() {
       <GoogleAnalytics />
       <PaymentSuccessHandler />
       <PaymentBlastTrigger />
-      
+
       {!isRecruiterDashboard && !isAdminPage && !isContactPage && !isLegalPage && (
-        <Navbar user={user} isGuest={isGuest} isAdmin={isAdmin} onViewChange={handleViewChange} onLoginClick={() => setShowSignup(true)} onLogout={handleLogout} />
+        <Navbar
+          user={user}
+          isGuest={isGuest}
+          isAdmin={isAdmin}
+          onViewChange={handleViewChange}
+          onLoginClick={() => setShowSignup(true)}
+          onLogout={handleLogout}
+        />
       )}
-      
-      <main className="main-content" style={(isRecruiterDashboard || isAdminPage || isContactPage || isLegalPage) ? { paddingTop: 0 } : {}}>{renderContent()}</main>
-      
+
+      <main
+        className="main-content"
+        style={(isRecruiterDashboard || isAdminPage || isContactPage || isLegalPage) ? { paddingTop: 0 } : {}}
+      >
+        {renderContent()}
+      </main>
+
       {shouldShowFooter && <Footer onViewChange={handleViewChange} />}
-      
+
       {showSignup && (
-        viewMode === 'recruiter' 
-          ? <RecruiterAuth onClose={() => setShowSignup(false)} onSuccess={(u) => { setUser({...u, role: 'recruiter'}); setShowSignup(false); }} />
-          : <AuthModal onClose={() => setShowSignup(false)} onSuccess={(u) => { setUser(u); setShowSignup(false); setViewMode('upload-workbench'); }} />
+        viewMode === 'recruiter'
+          ? <RecruiterAuth
+              onClose={() => setShowSignup(false)}
+              onSuccess={(u) => { setUser({ ...u, role: 'recruiter' }); setShowSignup(false) }}
+            />
+          : <AuthModal
+              onClose={() => setShowSignup(false)}
+              onSuccess={(u) => { setUser(u); setShowSignup(false); setViewMode('upload-workbench') }}
+            />
       )}
     </div>
   )

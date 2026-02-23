@@ -6,17 +6,14 @@ import requests
 from dotenv import load_dotenv
 from pathlib import Path
 
-# ✅ FIX: Use absolute import to prevent ModuleNotFoundError when running from app.py
 from services.guest_service import GuestService
 
-# ✅ FIX: Load .env for local development only (Railway ignores this, uses its own env vars)
 _env_path = Path(__file__).resolve().parent.parent / '.env'
 if _env_path.exists():
     load_dotenv(dotenv_path=_env_path, override=False)
 
 payment_bp = Blueprint('payment', __name__)
 
-# ✅ FIX: Helper functions to read env vars fresh at request time (not at import time)
 def _get_stripe_key():
     return os.getenv('STRIPE_SECRET_KEY')
 
@@ -29,7 +26,6 @@ def _get_supabase_key():
 def _get_frontend_url():
     return os.getenv('FRONTEND_URL', 'http://localhost:5173')
 
-# ✅ Debug print at startup to confirm keys are loaded
 _stripe_key = os.getenv('STRIPE_SECRET_KEY')
 _supabase_url = os.getenv('SUPABASE_URL')
 print(f"🔑 payment.py STRIPE_SECRET_KEY: {'✅ SET (' + _stripe_key[:15] + '...)' if _stripe_key else '❌ NOT SET'}")
@@ -47,7 +43,6 @@ def _get_headers():
 
 @payment_bp.route('/api/plans/public', methods=['GET'])
 def get_public_plans():
-    """Fetch active plans for the frontend"""
     try:
         supabase_url = _get_supabase_url()
         url = f"{supabase_url}/rest/v1/plans?is_active=eq.true&order=price_cents.asc"
@@ -60,13 +55,10 @@ def get_public_plans():
         print(f"Error fetching plans: {e}")
         return jsonify({'error': str(e)}), 500
 
-# =========================================================
-# CREATE CHECKOUT SESSION
-# =========================================================
+
 @payment_bp.route('/api/create-checkout-session', methods=['POST'])
 def create_checkout_session():
     try:
-        # ✅ FIX: Set stripe key fresh at every request (not at module load time)
         stripe.api_key = _get_stripe_key()
 
         if not stripe.api_key:
@@ -80,8 +72,6 @@ def create_checkout_session():
         user_email = data.get('email')
         user_id = data.get('user_id')
         plan_type = data.get('plan', 'basic').lower()
-
-        # ✅ Capture disclaimer acceptance
         disclaimer_accepted = data.get('disclaimer_accepted', False)
 
         # 1. Fetch Plan details from Database
@@ -108,7 +98,22 @@ def create_checkout_session():
                 plan_amount = 1299
                 plan_limit = 500
 
-        # ✅ MODIFIED: Added user_id to metadata so verify_payment knows who to update
+        # ✅ FIX: Build success_url with guest_id embedded as a URL parameter.
+        # This ensures the guest identity survives the Stripe redirect regardless
+        # of whether localStorage is cleared by the browser during cross-site navigation.
+        is_guest = GuestService.is_guest(str(user_id))
+        
+        if is_guest:
+            # Embed guest_id directly in the success URL so App.jsx can read it from params
+            success_url = (
+                f'{frontend_url}?payment=success'
+                f'&session_id={{CHECKOUT_SESSION_ID}}'
+                f'&guest_id={user_id}'  # ✅ KEY FIX: guest_id in URL survives any redirect
+            )
+            print(f"[Payment] 🏷️ Guest checkout — embedding guest_id in success_url: {user_id}")
+        else:
+            success_url = f'{frontend_url}?payment=success&session_id={{CHECKOUT_SESSION_ID}}'
+
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -126,7 +131,7 @@ def create_checkout_session():
             customer_email=user_email,
             client_reference_id=str(user_id),
             metadata={'plan_name': plan_type, 'user_id': str(user_id)},
-            success_url=f'{frontend_url}?payment=success&session_id={{CHECKOUT_SESSION_ID}}',
+            success_url=success_url,
             cancel_url=f'{frontend_url}?payment=cancelled',
         )
 
@@ -139,7 +144,6 @@ def create_checkout_session():
             "currency": "usd",
             "status": "initiated",
             "plan_name": plan_type,
-            # ✅ Store disclaimer status
             "disclaimer_accepted": disclaimer_accepted,
             "initiated_at": datetime.utcnow().isoformat()
         }
@@ -164,7 +168,6 @@ def create_checkout_session():
 @payment_bp.route('/api/payment/verify', methods=['POST'])
 def verify_payment():
     try:
-        # ✅ FIX: Set stripe key fresh at every request
         stripe.api_key = _get_stripe_key()
 
         if not stripe.api_key:
@@ -202,7 +205,6 @@ def verify_payment():
             charge = stripe.Charge.retrieve(payment_intent.latest_charge)
             receipt_url = charge.receipt_url
 
-        # ✅ GET user_id and plan from metadata
         plan_name = session.metadata.get('plan_name', 'basic')
         user_id = session.metadata.get('user_id')
 
@@ -228,8 +230,6 @@ def verify_payment():
             headers=_get_headers()
         )
 
-        # ✅ MODIFIED: Specifically update the guest_users table if it's a guest session
-        # This ensures the guest's record moves from 'pending' to 'completed'
         if user_id and GuestService.is_guest(user_id):
             print(f"[Guest Payment] Updating guest status for: {user_id}")
             GuestService.save_payment(
