@@ -19,17 +19,17 @@ print("\n" + "="*70)
 print("🔒 ENVIRONMENT VARIABLES CHECK")
 print("="*70)
 
-supabase_url = os.getenv('SUPABASE_URL')
-supabase_key = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
-stripe_key = os.getenv('STRIPE_SECRET_KEY')
-anthropic_key = os.getenv('ANTHROPIC_API_KEY')
-stripe_webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+supabase_url    = os.getenv('SUPABASE_URL')
+supabase_key    = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+stripe_key      = os.getenv('STRIPE_SECRET_KEY')
+anthropic_key   = os.getenv('ANTHROPIC_API_KEY')
+stripe_webhook  = os.getenv('STRIPE_WEBHOOK_SECRET')
 
-print(f"SUPABASE_URL: {supabase_url if supabase_url else '❌ NOT SET'}")
-print(f"SUPABASE_KEY: {'✅ SET (' + (supabase_key[:20] if supabase_key else '') + '...)' if supabase_key else '❌ NOT SET'}")
-print(f"STRIPE_KEY: {'✅ SET (' + (stripe_key[:15] if stripe_key else '') + '...)' if stripe_key else '❌ NOT SET'}")
-print(f"ANTHROPIC_KEY: {'✅ SET (' + (anthropic_key[:15] if anthropic_key else '') + '...)' if anthropic_key else '❌ NOT SET'}")
-print(f"STRIPE_WEBHOOK_SECRET: {'✅ SET (' + (stripe_webhook_secret[:15] if stripe_webhook_secret else '') + '...)' if stripe_webhook_secret else '⚠️ NOT SET'}")
+print(f"SUPABASE_URL:          {supabase_url if supabase_url else '❌ NOT SET'}")
+print(f"SUPABASE_KEY:          {'✅ SET' if supabase_key else '❌ NOT SET'}")
+print(f"STRIPE_KEY:            {'✅ SET' if stripe_key else '❌ NOT SET'}")
+print(f"ANTHROPIC_KEY:         {'✅ SET' if anthropic_key else '❌ NOT SET'}")
+print(f"STRIPE_WEBHOOK_SECRET: {'✅ SET' if stripe_webhook else '⚠️ NOT SET'}")
 print("="*70 + "\n")
 
 if not supabase_url:
@@ -53,14 +53,14 @@ from routes.guest_routes import guest_bp
 
 app = Flask(__name__)
 
-# ✅ FIX: flask_cors does NOT support wildcard subdomains or function-based origins.
-# Solution: Use a MANUAL before_request CORS handler that runs regex matching,
-# then disable flask_cors origin checking by passing origins="*" (we control
-# which origins actually get headers via the manual handler below).
-# The manual handler sets headers precisely; flask_cors is kept only for
-# its response-phase header injection on non-OPTIONS requests.
+# ─────────────────────────────────────────────────────────────────────────────
+# CORS — fully manual implementation.
+# flask_cors does not support wildcard subdomains or callable origins,
+# so we handle everything ourselves via before_request + after_request.
+# flask_cors is imported but intentionally NOT used for origin matching.
+# ─────────────────────────────────────────────────────────────────────────────
 
-ALLOWED_ORIGINS_EXACT = {
+_EXACT_ORIGINS = {
     "http://localhost:5173",
     "http://localhost:3000",
     "http://localhost:5000",
@@ -71,78 +71,63 @@ ALLOWED_ORIGINS_EXACT = {
     "https://www.resumeblast.ai",
 }
 
-ALLOWED_ORIGINS_PATTERNS = [
-    re.compile(r'^https://[a-zA-Z0-9\-]+\.railway\.app$'),
-    re.compile(r'^https://[a-zA-Z0-9\-]+\.up\.railway\.app$'),
-    re.compile(r'^https://[a-zA-Z0-9\-]+\.netlify\.app$'),
+_ORIGIN_PATTERNS = [
+    re.compile(r'^https://[a-zA-Z0-9-]+\.railway\.app$'),
+    re.compile(r'^https://[a-zA-Z0-9-]+\.up\.railway\.app$'),
+    re.compile(r'^https://[a-zA-Z0-9-]+\.netlify\.app$'),
 ]
 
-def is_origin_allowed(origin: str) -> bool:
+def _is_allowed(origin: str) -> bool:
     if not origin:
         return False
-    if origin in ALLOWED_ORIGINS_EXACT:
+    if origin in _EXACT_ORIGINS:
         return True
-    # Check FRONTEND_URL env var (set in Railway to exact frontend URL)
     frontend_url = os.getenv('FRONTEND_URL', '').rstrip('/')
     if frontend_url and origin == frontend_url:
         return True
-    # Regex patterns for dynamic subdomains
-    for pattern in ALLOWED_ORIGINS_PATTERNS:
-        if pattern.match(origin):
-            return True
-    return False
+    return any(p.match(origin) for p in _ORIGIN_PATTERNS)
 
 
 @app.before_request
-def handle_cors():
-    """
-    ✅ Manually handle CORS for ALL requests.
-    This replaces flask_cors origin matching entirely.
-    """
+def cors_preflight():
+    """Return 204 immediately for all OPTIONS preflight requests."""
+    if request.method != 'OPTIONS':
+        return
     origin = request.headers.get('Origin', '')
-
-    if not origin:
-        return  # Same-origin or non-browser request — let it through
-
-    if not is_origin_allowed(origin):
-        print(f"[CORS] ❌ Blocked: {origin}")
-        return make_response(jsonify({'error': 'CORS blocked'}), 403)
-
-    # Handle OPTIONS preflight — respond immediately with correct headers
-    if request.method == 'OPTIONS':
-        response = make_response('', 204)
-        response.headers['Access-Control-Allow-Origin'] = origin
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Max-Age'] = '3600'
-        return response
+    if not _is_allowed(origin):
+        print(f"[CORS] ❌ Preflight blocked: {origin}")
+        return make_response('Forbidden', 403)
+    resp = make_response('', 204)
+    resp.headers['Access-Control-Allow-Origin']      = origin
+    resp.headers['Access-Control-Allow-Methods']     = 'GET, POST, PUT, PATCH, DELETE, OPTIONS'
+    resp.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization, Accept'
+    resp.headers['Access-Control-Allow-Credentials'] = 'true'
+    resp.headers['Access-Control-Max-Age']           = '3600'
+    return resp
 
 
 @app.after_request
-def add_cors_headers(response):
-    """
-    ✅ Add CORS headers to every non-OPTIONS response for allowed origins.
-    """
+def cors_headers(response):
+    """Attach CORS headers to every non-OPTIONS response."""
     origin = request.headers.get('Origin', '')
-    if origin and is_origin_allowed(origin):
-        response.headers['Access-Control-Allow-Origin'] = origin
+    if origin and _is_allowed(origin):
+        response.headers['Access-Control-Allow-Origin']      = origin
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Expose-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Expose-Headers']    = 'Content-Type'
     return response
 
 
 @app.before_request
 def ensure_www():
     if request.method == 'OPTIONS':
-        return  # Already handled above
-    host = request.host.split(':')[0]
-    if host == "resumeblast.ai":
-        target_url = request.url.replace("resumeblast.ai", "www.resumeblast.ai", 1)
-        return redirect(target_url, code=301)
+        return  # already handled by cors_preflight
+    if request.host.split(':')[0] == 'resumeblast.ai':
+        return redirect(request.url.replace('resumeblast.ai', 'www.resumeblast.ai', 1), 301)
 
 
-# Register Blueprints
+# ─────────────────────────────────────────────────────────────────────────────
+# Blueprints
+# ─────────────────────────────────────────────────────────────────────────────
 app.register_blueprint(payment_bp)
 app.register_blueprint(blast_bp)
 app.register_blueprint(auth_bp)
@@ -166,42 +151,31 @@ def home():
 @app.route('/api/health')
 def health():
     return jsonify({
-        'status': 'healthy',
-        'stripe_configured': bool(os.getenv('STRIPE_SECRET_KEY')),
-        
-        'supabase_configured': bool(os.getenv('SUPABASE_SERVICE_ROLE_KEY')),
-        'anthropic_configured': bool(os.getenv('ANTHROPIC_API_KEY')),
+        'status':                    'healthy',
+        'stripe_configured':         bool(os.getenv('STRIPE_SECRET_KEY')),
+        'supabase_configured':       bool(os.getenv('SUPABASE_SERVICE_ROLE_KEY')),
+        'anthropic_configured':      bool(os.getenv('ANTHROPIC_API_KEY')),
         'stripe_webhook_configured': bool(os.getenv('STRIPE_WEBHOOK_SECRET')),
-        'bounce_webhooks_configured': True
     })
 
 
 @app.route('/api/test-cors', methods=['GET', 'POST', 'PATCH', 'OPTIONS'])
 def test_cors():
     origin = request.headers.get('Origin', 'no-origin')
-    return jsonify({
-        'success': True,
-        'message': 'CORS is working correctly',
-        'origin': origin,
-        'is_allowed': is_origin_allowed(origin)
-    })
+    return jsonify({'success': True, 'origin': origin, 'allowed': _is_allowed(origin)})
 
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
+    port  = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_ENV') == 'development'
-
     print('\n' + '='*70)
     print('🚀 RESUMEBLAST API SERVER STARTING')
     print('='*70)
-    print(f'🌐 Port: {port}')
-    print(f'🔧 Debug Mode: {debug}')
-    print(f'💳 Stripe Webhook: /api/webhooks/stripe')
-    print(f'🎫 Support Tickets: CORS enabled with PATCH method')
-    print(f'🔍 Analyze Endpoint: /api/analyze')
-    print(f'📊 User Activity Tracking: /api/user-activity/log')
-    print(f'📧 Bounce Webhooks: /api/webhooks/brevo/bounce & /api/webhooks/resend/bounce')
-    print(f'👤 Guest Tracking: /api/guest/*')
+    print(f'🌐 Port:            {port}')
+    print(f'🔧 Debug Mode:      {debug}')
+    print(f'💳 Stripe Webhook:  /api/webhooks/stripe')
+    print(f'🔍 Analyze:         /api/analyze')
+    print(f'📊 User Activity:   /api/user-activity/log')
+    print(f'👤 Guest Tracking:  /api/guest/*')
     print('='*70 + "\n")
-
     app.run(host='0.0.0.0', port=port, debug=debug)
