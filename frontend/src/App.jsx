@@ -22,11 +22,21 @@ import LegalPage from './components/LegalPage'
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
 
+// ✅ FIX: Robust guest detection helper
+// Checks BOTH the is_guest_session flag AND the presence of a guest_id in localStorage.
+// This handles cases where is_guest_session was set but guest_id is the more reliable signal.
+const detectGuestSession = () => {
+  const flagSet = localStorage.getItem('is_guest_session') === 'true'
+  const guestId = localStorage.getItem('guest_id') || localStorage.getItem('guestId') || ''
+  const hasGuestId = guestId.startsWith('guest_')
+  return flagSet || hasGuestId
+}
+
 function App() {
   usePageTracking()
 
   const [user, setUser] = useState(null)
-  const [isGuest, setIsGuest] = useState(false) // Track non-registered status
+  const [isGuest, setIsGuest] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [showSignup, setShowSignup] = useState(false)
   const [viewMode, setViewMode] = useState('jobseeker-home') 
@@ -59,15 +69,19 @@ function App() {
       try {
         const params = new URLSearchParams(window.location.search)
         const isPaymentReturn = params.get('payment') === 'success'
+        const sessionId = params.get('session_id')
         
-        // ✅ GUEST LOGIC: Check for existing guest session flag
-        const guestSessionFlag = localStorage.getItem('is_guest_session') === 'true'
+        // ✅ FIX: Use robust detection - checks both flag AND guest_id key
+        const isGuestReturning = detectGuestSession()
+
+        console.log('🔍 Session init:', { isPaymentReturn, isGuestReturning, sessionId: sessionId?.slice(0, 20) })
         
         const { data: { session }, error } = await supabase.auth.getSession()
         
         if (session?.user) {
+          // ── REGISTERED USER ──────────────────────────────────────────
           setUser(session.user)
-          setIsGuest(false) // Logged in user is not a guest
+          setIsGuest(false)
           localStorage.removeItem('is_guest_session')
           prevUserIdRef.current = session.user.id
           
@@ -85,18 +99,44 @@ function App() {
           } else {
             setViewMode('dashboard')
           }
-        } else {
-          // ✅ GUEST REDIRECTION: If returning from payment as a guest, go to workbench
-          if (isPaymentReturn && guestSessionFlag) {
+
+        } else if (isPaymentReturn && isGuestReturning) {
+          // ── GUEST RETURNING FROM STRIPE PAYMENT ──────────────────────
+          // ✅ FIX: This block now reliably triggers because detectGuestSession()
+          // checks guest_id presence, not just the is_guest_session flag.
+          console.log('✅ Guest returning from payment — routing to workbench')
+          setIsGuest(true)
+          setPaymentSuccess(true)
+          setViewMode('upload-workbench')
+          setHasUploadedInSession(false) // Guest needs to upload resume now
+
+        } else if (isPaymentReturn && !isGuestReturning) {
+          // ── PAYMENT RETURN BUT NO GUEST SIGNAL ───────────────────────
+          // Could be a direct URL visit or expired session - check if we have
+          // a pending_blast_config as a final fallback signal
+          const pendingConfig = localStorage.getItem('pending_blast_config')
+          const pendingPlan = localStorage.getItem('selected_plan_type')
+          
+          if (pendingConfig || pendingPlan) {
+            // There's pending blast data - treat as guest
+            console.log('⚠️ Payment return with pending blast data — treating as guest')
             setIsGuest(true)
             setPaymentSuccess(true)
             setViewMode('upload-workbench')
-            setHasUploadedInSession(false) // User needs to upload now
-          } else if (!['privacy', 'terms', 'refund'].includes(viewMode)) {
-             setViewMode('jobseeker-home')
+            setHasUploadedInSession(false)
+          } else {
+            console.log('⚠️ Payment return but no guest session found — going home')
+            setViewMode('jobseeker-home')
+          }
+
+        } else {
+          // ── NO SESSION, NOT A PAYMENT RETURN ─────────────────────────
+          if (!['privacy', 'terms', 'refund'].includes(viewMode)) {
+            setViewMode('jobseeker-home')
           }
         }
       } catch (error) {
+        console.error('❌ Session init error:', error)
         setViewMode('jobseeker-home')
       } finally {
         setIsRestoring(false) 
@@ -133,7 +173,6 @@ function App() {
   }, []) 
 
   const handleStartBlast = () => {
-    // If no user AND not in a guest session, show login
     if (!user && !isGuest) {
       setShowSignup(true);
       return;
