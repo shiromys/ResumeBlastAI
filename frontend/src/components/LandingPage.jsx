@@ -108,12 +108,19 @@ function LandingPage({ onGetStarted, user }) { // ✅ Added user prop to check a
     } else {
       // If NOT registered and paid plan, go to guest payment
       try {
+        // ✅ FIX: Ensure the guest ID is established before leaving the site
+        let guestId = localStorage.getItem('rb_guest_tracker_id');
+        if (!guestId) {
+          guestId = "guest_" + Date.now();
+          localStorage.setItem('rb_guest_tracker_id', guestId);
+        }
+
         localStorage.setItem('is_guest_session', 'true');
         localStorage.setItem('selected_plan_type', planKey);
         
         await initiateCheckout({ 
           email: "guest@resumeblast.ai", 
-          id: "guest_" + Date.now(),
+          id: guestId, // ✅ Use the stabilized ID
           plan: planKey,
           disclaimer_accepted: true 
         });

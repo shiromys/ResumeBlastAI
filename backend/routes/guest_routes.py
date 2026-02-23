@@ -1,15 +1,15 @@
 # backend/routes/guest_routes.py
 from flask import Blueprint, request, jsonify
+# Use absolute import to ensure consistency with app.py
 from services.guest_service import GuestService
 
+# Ensure this line is at the top level (no spaces at the start) to be importable by app.py
 guest_bp = Blueprint('guest', __name__, url_prefix='/api/guest')
-
 
 def get_client_ip():
     """
     Extract the real client IP from request headers.
     Handles Railway / Nginx / Cloudflare proxy chains via X-Forwarded-For.
-    Frontend never sends IP — backend reads it here automatically.
     """
     forwarded_for = request.headers.get('X-Forwarded-For', '')
     if forwarded_for:
@@ -25,10 +25,7 @@ def get_client_ip():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROUTE: Session init
-# Called when a guest first lands on the app (before or at plan selection).
-# Creates a fresh row for a brand-new guest_id.
-# For returning guests (same localStorage ID) it increments visit_count only.
-# IP is captured here and stored — frontend never sends it.
+# Called when a guest first lands on the app.
 # ─────────────────────────────────────────────────────────────────────────────
 @guest_bp.route('/init', methods=['POST'])
 def init_session():
@@ -45,25 +42,24 @@ def init_session():
     return jsonify(result), 200 if result['success'] else 500
 
 
+# ✅ ADDED: ROUTE to log guest activity to fix database tracking issues
+@guest_bp.route('/log-activity', methods=['POST'])
+def log_guest_activity():
+    data = request.get_json() or {}
+    guest_id = data.get('guest_id', '')
+    event_type = data.get('event_type', 'unknown')
+    metadata = data.get('metadata', {})
+    
+    if not GuestService.is_guest(guest_id):
+        return jsonify({'success': False, 'error': 'Invalid guest_id'}), 400
+        
+    result = GuestService.log_activity(guest_id, event_type, metadata)
+    return jsonify(result), 200 if result['success'] else 500
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# ROUTE: Payment success  ← THIS WAS THE MISSING ROUTE
-#
-# Called by BlastConfig.jsx after Stripe redirects back with
-#   ?payment=success&session_id=cs_live_xxx
-#
-# Saves: plan_name, payment_status='completed',
-#        stripe_session_id, amount_paid
-# Also logs 'payment_completed' event to activity_log array.
-#
-# Payload expected:
-# {
-#   "guest_id": "guest_xxx",
-#   "payment_data": {
-#     "plan_name": "basic",
-#     "stripe_session_id": "cs_live_xxx",
-#     "amount_paid": 999          ← price in cents
-#   }
-# }
+# ROUTE: Payment success
+# Saves: plan_name, payment_status='completed', stripe_session_id, amount_paid
 # ─────────────────────────────────────────────────────────────────────────────
 @guest_bp.route('/payment', methods=['POST'])
 def save_payment():
@@ -96,11 +92,6 @@ def save_payment():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROUTE: Resume upload
-# Called after file upload + text extraction completes.
-# Saves: file_name, file_url, file_size, file_type, extracted_text,
-#        resume_status='uploaded'
-# Also appends a compact record to resume_history JSONB array
-# so every upload across all visits is preserved.
 # ─────────────────────────────────────────────────────────────────────────────
 @guest_bp.route('/resume', methods=['POST'])
 def save_resume():
@@ -111,8 +102,6 @@ def save_resume():
         return jsonify({'success': False, 'error': 'Invalid guest_id'}), 400
 
     ip = get_client_ip()
-    print(f"[GuestRoute] /resume  guest={guest_id}  ip={ip}")
-
     if GuestService._exists(guest_id):
         GuestService._update_ip(guest_id, ip)
 
@@ -122,12 +111,6 @@ def save_resume():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROUTE: Resume analysis
-# Called after AI analysis completes and result is displayed.
-# Saves full analysis_data JSONB blob + all extracted flat columns:
-#   ats_score, detected_role, seniority_level, years_of_experience,
-#   recommended_industry, education_summary, candidate_name,
-#   candidate_email, candidate_phone, location, linkedin_url,
-#   top_skills, total_skills_count, resume_status='analyzed'
 # ─────────────────────────────────────────────────────────────────────────────
 @guest_bp.route('/analysis', methods=['POST'])
 def save_analysis():
@@ -138,8 +121,6 @@ def save_analysis():
         return jsonify({'success': False, 'error': 'Invalid guest_id'}), 400
 
     ip = get_client_ip()
-    print(f"[GuestRoute] /analysis  guest={guest_id}  ip={ip}")
-
     if GuestService._exists(guest_id):
         GuestService._update_ip(guest_id, ip)
 
@@ -149,9 +130,6 @@ def save_analysis():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROUTE: Blast initiated
-# Called in BlastConfig just before triggerEmailBlast() is called.
-# Saves: blast_status='initiated', blast_industry,
-#        blast_recipients_count, blast_plan, blast_initiated_at
 # ─────────────────────────────────────────────────────────────────────────────
 @guest_bp.route('/blast/start', methods=['POST'])
 def blast_start():
@@ -162,8 +140,6 @@ def blast_start():
         return jsonify({'success': False, 'error': 'Invalid guest_id'}), 400
 
     ip = get_client_ip()
-    print(f"[GuestRoute] /blast/start  guest={guest_id}  ip={ip}")
-
     if GuestService._exists(guest_id):
         GuestService._update_ip(guest_id, ip)
 
@@ -173,8 +149,6 @@ def blast_start():
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROUTE: Blast completed
-# Called after triggerEmailBlast() returns results.
-# Saves: blast_status='completed', blast_results JSONB, blast_completed_at
 # ─────────────────────────────────────────────────────────────────────────────
 @guest_bp.route('/blast/complete', methods=['POST'])
 def blast_complete():
@@ -185,8 +159,6 @@ def blast_complete():
         return jsonify({'success': False, 'error': 'Invalid guest_id'}), 400
 
     ip = get_client_ip()
-    print(f"[GuestRoute] /blast/complete  guest={guest_id}  ip={ip}")
-
     if GuestService._exists(guest_id):
         GuestService._update_ip(guest_id, ip)
 
@@ -195,7 +167,7 @@ def blast_complete():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ROUTE: Read guest row (admin / debug use)
+# ROUTE: Read guest row
 # ─────────────────────────────────────────────────────────────────────────────
 @guest_bp.route('/<guest_id>', methods=['GET'])
 def get_session(guest_id):

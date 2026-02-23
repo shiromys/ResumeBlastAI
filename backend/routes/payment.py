@@ -6,6 +6,9 @@ import requests
 from dotenv import load_dotenv
 from pathlib import Path
 
+# ✅ FIX: Use absolute import to prevent ModuleNotFoundError when running from app.py
+from services.guest_service import GuestService
+
 # ✅ FIX: Load .env for local development only (Railway ignores this, uses its own env vars)
 _env_path = Path(__file__).resolve().parent.parent / '.env'
 if _env_path.exists():
@@ -105,6 +108,7 @@ def create_checkout_session():
                 plan_amount = 1299
                 plan_limit = 500
 
+        # ✅ MODIFIED: Added user_id to metadata so verify_payment knows who to update
         checkout_session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -121,7 +125,7 @@ def create_checkout_session():
             mode='payment',
             customer_email=user_email,
             client_reference_id=str(user_id),
-            metadata={'plan_name': plan_type},
+            metadata={'plan_name': plan_type, 'user_id': str(user_id)},
             success_url=f'{frontend_url}?payment=success&session_id={{CHECKOUT_SESSION_ID}}',
             cancel_url=f'{frontend_url}?payment=cancelled',
         )
@@ -198,7 +202,9 @@ def verify_payment():
             charge = stripe.Charge.retrieve(payment_intent.latest_charge)
             receipt_url = charge.receipt_url
 
+        # ✅ GET user_id and plan from metadata
         plan_name = session.metadata.get('plan_name', 'basic')
+        user_id = session.metadata.get('user_id')
 
         update_data = {
             "status": "completed",
@@ -222,7 +228,19 @@ def verify_payment():
             headers=_get_headers()
         )
 
-        if resp.status_code != 204:
+        # ✅ MODIFIED: Specifically update the guest_users table if it's a guest session
+        # This ensures the guest's record moves from 'pending' to 'completed'
+        if user_id and GuestService.is_guest(user_id):
+            print(f"[Guest Payment] Updating guest status for: {user_id}")
+            GuestService.save_payment(
+                guest_id=user_id,
+                plan_name=plan_name,
+                stripe_session_id=session_id,
+                amount=session.amount_total
+            )
+
+        if resp.status_code not in [200, 204]:
+            print(f"❌ Supabase payment update failed: {resp.status_code} {resp.text}")
             return jsonify({"error": "Supabase update failed"}), 500
 
         return jsonify({"success": True})

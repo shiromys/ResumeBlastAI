@@ -1,26 +1,21 @@
 from flask import Flask, jsonify, request, redirect 
 from flask_cors import CORS
 import os
-from dotenv import load_dotenv, find_dotenv
+from pathlib import Path
+from dotenv import load_dotenv
 from routes.contact import contact_bp
 
-# ✅ METHOD 1: Try to find .env automatically
-dotenv_path = find_dotenv()
-if dotenv_path:
-    print(f"✅ Found .env at: {dotenv_path}")
-    load_dotenv(dotenv_path=dotenv_path, override=True)
+# ✅ ROBUST LOCAL LOADING: Use absolute path to the backend directory
+BASE_DIR = Path(__file__).resolve().parent
+manual_env_path = BASE_DIR / '.env'
+
+if manual_env_path.exists():
+    # Force reload to ensure any changes in the file are picked up
+    load_dotenv(dotenv_path=manual_env_path, override=True)
+    print(f"✅ Success: Environment loaded from {manual_env_path}")
 else:
-    print("⚠️ .env file not found by find_dotenv(), trying manual path...")
-    # ✅ METHOD 2: Manual path as fallback
-    from pathlib import Path
-    backend_dir = Path(__file__).parent
-    manual_env_path = backend_dir / '.env'
-    print(f"🔍 Trying manual path: {manual_env_path}")
-    if manual_env_path.exists():
-        load_dotenv(dotenv_path=manual_env_path, override=True)
-        print(f"✅ Loaded .env from: {manual_env_path}")
-    else:
-        print(f"❌ .env not found at: {manual_env_path}")
+    print(f"❌ CRITICAL ERROR: .env not found at: {manual_env_path}")
+    print("Please ensure your .env file is inside the 'backend' folder.")
 
 # ✅ VERIFY ALL ENVIRONMENT VARIABLES
 print("\n" + "="*70)
@@ -34,10 +29,10 @@ anthropic_key = os.getenv('ANTHROPIC_API_KEY')
 stripe_webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 print(f"SUPABASE_URL: {supabase_url if supabase_url else '❌ NOT SET'}")
-print(f"SUPABASE_KEY: {'✅ SET (' + supabase_key[:20] + '...)' if supabase_key else '❌ NOT SET'}")
-print(f"STRIPE_KEY: {'✅ SET (' + stripe_key[:15] + '...)' if stripe_key else '❌ NOT SET'}")
-print(f"ANTHROPIC_KEY: {'✅ SET (' + anthropic_key[:15] + '...)' if anthropic_key else '❌ NOT SET'}")
-print(f"STRIPE_WEBHOOK_SECRET: {'✅ SET (' + stripe_webhook_secret[:15] + '...)' if stripe_webhook_secret else '⚠️ NOT SET (optional for webhooks)'}")
+print(f"SUPABASE_KEY: {'✅ SET (' + (supabase_key[:20] if supabase_key else '') + '...)' if supabase_key else '❌ NOT SET'}")
+print(f"STRIPE_KEY: {'✅ SET (' + (stripe_key[:15] if stripe_key else '') + '...)' if stripe_key else '❌ NOT SET'}")
+print(f"ANTHROPIC_KEY: {'✅ SET (' + (anthropic_key[:15] if anthropic_key else '') + '...)' if anthropic_key else '❌ NOT SET'}")
+print(f"STRIPE_WEBHOOK_SECRET: {'✅ SET (' + (stripe_webhook_secret[:15] if stripe_webhook_secret else '') + '...)' if stripe_webhook_secret else '⚠️ NOT SET (optional for webhooks)'}")
 print("="*70 + "\n")
 
 # ❌ STOP SERVER IF CRITICAL VARS MISSING
@@ -45,7 +40,8 @@ if not supabase_url:
     print("🚨 CRITICAL ERROR: SUPABASE_URL is not set!")
     print("   Please check your .env file in the backend folder")
     print("   Expected location: backend/.env")
-    exit(1)
+    import sys
+    sys.exit(1)
 
 # Import routes AFTER environment is loaded
 from routes.payment import payment_bp

@@ -180,6 +180,13 @@ function BlastConfig({ resumeId, resumeUrl, userData, isGuest, paymentVerified, 
       localStorage.setItem('pending_blast_config', JSON.stringify(blastConfig))
       localStorage.setItem('selected_plan_type', planType)
       
+      // ✅ FIX: Set guest session flag BEFORE Stripe redirect so App.jsx
+      // can detect this is a guest returning from payment and route to workbench.
+      if (isGuest) {
+        localStorage.setItem('is_guest_session', 'true')
+        console.log('🏷️ Guest session flag set before Stripe redirect')
+      }
+
       if (resumeId && resumeUrl) {
         localStorage.setItem('pending_blast_resume_data', JSON.stringify({
           id: resumeId, 
@@ -258,21 +265,29 @@ function BlastConfig({ resumeId, resumeUrl, userData, isGuest, paymentVerified, 
       }
 
       const blastData = {
-        candidate_name: userData.name || 'Professional Candidate',
+        user_id: userData.id,
+        resume_url: resumeUrl,
+        industry: currentConfig.industry,
+        plan: planType,
+        candidate_name: userData.name,
         candidate_email: userData.email,
         candidate_phone: userData.phone || '',
         job_role: userData.targetRole || 'Professional',
-        resume_url: resumeUrl,
-        plan_name: planType,
-        campaign_id: campaignId 
+        campaign_id: campaignId
       }
 
       const result = await triggerEmailBlast(blastData)
       
-      setStatus('success')
-      setStatusMessage(`✅ Blast completed successfully! (${result.successful_sends} sent)`)
-      
-      // ✅ ADDED: Save blast completion to guest_users table for guest users
+      // ✅ Registered user completion tracking (unchanged)
+      if (!isGuest && campaignId) {
+        await trackBlastCompleted(userData.id, campaignId, {
+          total_recipients: result.total_recipients || limit,
+          successful_sends: result.successful_sends || 0,
+          failed_sends: result.failed_sends || 0,
+        })
+      }
+
+      // ✅ ADDED: Save blast completion to guest_users table
       if (isGuest) {
         saveGuestBlastComplete({
           success_rate: result.success_rate,
@@ -282,131 +297,163 @@ function BlastConfig({ resumeId, resumeUrl, userData, isGuest, paymentVerified, 
         });
       }
 
+      // Clean up localStorage
       localStorage.removeItem('pending_blast_config')
-      localStorage.removeItem('pending_blast_resume_data')
       localStorage.removeItem('selected_plan_type')
-      
-      // ✅ Post-Blast registration prompt for non-registered users (unchanged)
-      if (isGuest) {
-        alert("🚀 Blast Complete! Your resume has been sent. To track future blasts and access your personal dashboard, please register an account.");
-      }
+      localStorage.removeItem('pending_blast_resume_data')
+
+      setStatus('success')
+      setStatusMessage(`✅ Blast Sent! ${result.successful_sends || limit} emails delivered to recruiters.`)
       
       setTimeout(() => {
         if (onBlastComplete) onBlastComplete(result)
       }, 2000)
 
     } catch (err) {
-      isBlasting.current = false; // Reset lock to allow retry
-      console.error('❌ Paid Blast Failed:', err)
-      setError(err.message || 'Failed to send blast')
+      isBlasting.current = false;
+      console.error('❌ Blast Failed:', err)
+
+      if (!isGuest && campaignId) {
+        await trackBlastFailure(userData.id, campaignId, err.message)
+      }
+      
+      setError(err.message || 'Blast failed. Please contact support.')
       setStatus('error')
-      if (!isGuest && campaignId) await trackBlastFailure(userData.id, campaignId, err.message)
+      setStatusMessage('')
     }
   }
 
-  const getPlanButtonText = (type, defaultText) => {
-    const plan = plans[type];
-    if (!plan) return defaultText;
-    
-    const price = (plan.price_cents / 100).toFixed(2);
-    return `${plan.display_name} ($${price} - ${plan.recruiter_limit} Recruiters)`;
+  const getPlanButtonText = (planKey, fallback) => {
+    if (loadingPlans) return 'Loading...';
+    if (plans[planKey]) {
+      const p = plans[planKey];
+      return `${p.name} ($${(p.price_cents / 100).toFixed(2)} - ${p.recruiter_limit} Recruiters)`;
+    }
+    return fallback;
   };
 
-  if (checkingEligibility || loadingPlans) {
+  // ─── RENDER ───────────────────────────────────────────────────────────────
+
+  if (status === 'blasting') {
     return (
-      <div className="blast-config-overlay">
-        <div className="blast-config-modal">
-          <div style={{padding:'40px', textAlign:'center'}}>
-            <div className="spinner" style={{width: '40px', height: '40px', margin: '0 auto 20px'}}></div>
-            <p style={{color: '#6b7280'}}>Loading configuration...</p>
-          </div>
+      <div className="blast-config">
+        <div className="blast-status sending">
+          <div className="blast-spinner"></div>
+          <h3>🚀 Blasting Your Resume!</h3>
+          <p>{statusMessage}</p>
+          <p style={{fontSize: '13px', color: '#6b7280', marginTop: '10px'}}>
+            This may take 1-2 minutes. Please don't close this tab.
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'success') {
+    return (
+      <div className="blast-config">
+        <div className="blast-status success">
+          <div style={{fontSize: '60px', marginBottom: '20px'}}>🎉</div>
+          <h3>Resume Blast Successful!</h3>
+          <p>{statusMessage}</p>
+          <p style={{fontSize: '13px', color: '#6b7280', marginTop: '10px'}}>
+            Recruiters have received your resume and may reach out soon. Check your email regularly!
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'error') {
+    return (
+      <div className="blast-config">
+        <div className="blast-status error">
+          <div style={{fontSize: '60px', marginBottom: '20px'}}>❌</div>
+          <h3>Blast Failed</h3>
+          <p>{error}</p>
+          <button onClick={() => { setStatus('idle'); setError(null); isBlasting.current = false; }} className="btn-blast" style={{marginTop: '20px'}}>
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (status === 'payment_processing') {
+    return (
+      <div className="blast-config">
+        <div className="blast-status sending">
+          <div className="blast-spinner"></div>
+          <h3>Redirecting to Payment...</h3>
+          <p>{statusMessage}</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="blast-config-overlay">
-      <div className="blast-config-modal">
-        <div className="modal-header">
-          <h2>
-            {status === 'success' ? '🎉 Blast Complete!' : 
-             isFreemiumEligible ? '🎁 Free Resume Blast' : ' Premium Resume Blast'}
-          </h2>
-          {status !== 'blasting' && status !== 'payment_processing' && (
-            <button className="close-btn" onClick={onCancel}>✕</button>
-          )}
+    <div className="blast-config">
+      <div className="blast-config-inner">
+        <div className="blast-config-header">
+          <h2>🚀 Configure Your Resume Blast</h2>
+          <p>Select your target industry and blast your resume to verified recruiters</p>
         </div>
 
-        <div className="modal-body">
-          {status === 'success' && (
-            <div className="success-message" style={{textAlign: 'center', padding: '40px'}}>
-              <span style={{fontSize: '64px', marginBottom: '20px', display: 'block'}}>✅</span>
-              <h3 style={{margin: '0 0 15px 0', color: '#10B981', fontSize: '24px'}}>Success!</h3>
-              <p style={{color: '#6b7280', margin: 0}}>{statusMessage}</p>
-            </div>
-          )}
-
-          {(status === 'blasting' || status === 'payment_processing') && (
+        <div className="blast-config-body">
+          {checkingEligibility ? (
             <div style={{textAlign: 'center', padding: '40px'}}>
-              <div className="spinner"></div>
-              <h3 style={{margin: '0 0 10px 0', color: '#374151'}}>
-                {status === 'payment_processing' ? 'Processing Payment...' : 'Sending Emails...'}
-              </h3>
-              <p style={{color: '#6b7280', margin: 0}}>{statusMessage}</p>
+              <div className="blast-spinner"></div>
+              <p>Checking eligibility...</p>
             </div>
-          )}
-
-          {status === 'error' && error && (
-            <div className="error-message">
-              <strong>⚠️ Error:</strong>
-              <p>{error}</p>
-            </div>
-          )}
-
-          {(status === 'idle' || status === 'error') && (
+          ) : (
             <>
+              <div className="config-section">
+                <label className="config-label">Target Industry</label>
+                <select 
+                  value={blastConfig.industry}
+                  onChange={(e) => setBlastConfig({...blastConfig, industry: e.target.value})}
+                  className="config-select"
+                >
+                  <option value="Technology">Technology</option>
+                  <option value="Finance">Finance</option>
+                  <option value="Healthcare">Healthcare</option>
+                  <option value="Marketing">Marketing</option>
+                  <option value="Sales">Sales</option>
+                  <option value="Engineering">Engineering</option>
+                  <option value="Design">Design</option>
+                  <option value="Operations">Operations</option>
+                  <option value="HR">Human Resources</option>
+                  <option value="Legal">Legal</option>
+                  <option value="Education">Education</option>
+                  <option value="Consulting">Consulting</option>
+                  <option value="Retail">Retail</option>
+                  <option value="Manufacturing">Manufacturing</option>
+                  <option value="Real Estate">Real Estate</option>
+                  <option value="Media">Media & Entertainment</option>
+                  <option value="Non-Profit">Non-Profit</option>
+                  <option value="Government">Government</option>
+                  <option value="Logistics">Logistics & Supply Chain</option>
+                  <option value="General">General (All Industries)</option>
+                </select>
+              </div>
+
               {isFreemiumEligible ? (
-                <div style={{textAlign: 'center', padding: '20px 0'}}>
-                  <div className="freemium-card" style={{
-                    background: 'linear-gradient(135deg, #ECFDF5 0%, #D1FAE5 100%)', 
-                    border: '2px solid #10B981', 
+                <div className="freemium-section">
+                  <div style={{
+                    background: 'linear-gradient(135deg, #10B981 0%, #059669 100%)',
                     borderRadius: '12px',
-                    padding: '30px',
-                    marginBottom: '25px'
+                    padding: '20px',
+                    color: 'white',
+                    marginBottom: '20px',
+                    textAlign: 'center'
                   }}>
-                    <div style={{fontSize: '48px', marginBottom: '15px'}}>🎁</div>
-                    <h3 style={{color: '#047857', fontSize: '24px', fontWeight: '700'}}>Free Blast</h3>
-                    <p style={{color: '#065F46', fontSize: '16px'}}>
-                      Send your resume to {plans['freemium']?.recruiter_limit || 11} Top Recruiters for free!
+                    <div style={{fontSize: '30px', marginBottom: '10px'}}>🎁</div>
+                    <h3 style={{margin: '0 0 8px 0', fontSize: '20px'}}>You're Eligible for a Free Blast!</h3>
+                    <p style={{margin: 0, fontSize: '14px', opacity: 0.9}}>
+                      Send your resume to {plans['freemium']?.recruiter_limit || 11} verified recruiters — completely free
                     </p>
                   </div>
 
-                  {/* ✅ Instructions for Freemium Disclaimer Acceptance */}
-                  {!freemiumDisclaimerAccepted && (
-                    <div style={{
-                      marginBottom: '15px',
-                      padding: '12px',
-                      background: '#FEF3C7',
-                      borderRadius: '6px',
-                      border: '1px solid #F59E0B',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px'
-                    }}>
-                      <span style={{fontSize: '20px'}}>ℹ️</span>
-                      <span style={{
-                        fontSize: '13px',
-                        color: '#92400E',
-                        fontWeight: '500',
-                        textAlign: 'left'
-                      }}>
-                        Please accept the disclaimer below to proceed with your resume blast
-                      </span>
-                    </div>
-                  )}
-
-                  {/* ✅ Freemium Disclaimer Section */}
                   <div className="disclaimer-section" style={{
                     marginBottom: '20px', 
                     padding: '15px', 
