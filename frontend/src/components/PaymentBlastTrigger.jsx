@@ -2,62 +2,72 @@ import { useEffect, useState, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import BlastConfig from './BlastConfig';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
 /**
- * PaymentBlastTrigger Component
- * * This component runs on every page load and checks if the user just completed
- * a payment. It fetches the resume data from the database and ensures 
- * the Candidate Name and Email are used (instead of Login details).
+ * PaymentBlastTrigger
+ * Works for BOTH registered and guest users after Stripe payment success.
+ * Freemium users do NOT go through here.
  */
 function PaymentBlastTrigger() {
-  const [showBlast, setShowBlast] = useState(false);
+  const [showBlast, setShowBlast]   = useState(false);
   const [resumeData, setResumeData] = useState(null);
-  const [userData, setUserData] = useState(null);
-
-  // ✅ IDEMPOTENCY CHECK: Ensures we don't process the same session multiple times
+  const [userData, setUserData]     = useState(null);
+  const [isGuestUser, setIsGuestUser] = useState(false);
   const processedSessionRef = useRef(null);
 
-  useEffect(() => {
-    checkForPaymentSuccess();
-  }, []);
+  useEffect(() => { checkForPaymentSuccess(); }, []);
 
   const checkForPaymentSuccess = async () => {
     try {
-      // 1. Check URL for payment success
-      const params = new URLSearchParams(window.location.search);
+      const params        = new URLSearchParams(window.location.search);
       const paymentSuccess = params.get('payment') === 'success';
-      const sessionId = params.get('session_id');
+      const sessionId      = params.get('session_id');
+      const guestIdFromUrl = params.get('guest_id');
 
-      // ✅ EXIT if not a successful payment return OR if this session was already processed
-      if (!paymentSuccess || !sessionId || processedSessionRef.current === sessionId) {
-        return;
-      }
-
-      // Mark this session as processed immediately
+      if (!paymentSuccess || !sessionId) return;
+      if (processedSessionRef.current === sessionId) return;
       processedSessionRef.current = sessionId;
 
-      console.log('');
-      console.log('=== 💳 PAYMENT BLAST TRIGGER ACTIVATED ===');
-      console.log('Session ID:', sessionId);
+      console.log('=== PAYMENT BLAST TRIGGER ===', sessionId);
 
-      // 2. Get current user
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
-        console.error('❌ No user found for payment blast trigger');
-        return;
-      }
+      // Resolve identity
+      const { data: { user } } = await supabase.auth.getUser();
+      const guestId = guestIdFromUrl
+        || localStorage.getItem('guest_id')
+        || localStorage.getItem('guestId')
+        || '';
+      const isGuest = !user && guestId.startsWith('guest_');
 
-      // 3. Get resume data from localStorage
-      const savedResumeData = localStorage.getItem('pending_blast_resume_data');
-      if (!savedResumeData) {
-        console.error('❌ No resume data found in localStorage');
-        // Clean up URL
+      if (!user && !isGuest) {
+        console.error('No user or guest session found');
         window.history.replaceState({}, '', window.location.pathname);
         return;
       }
 
+      const activeUserId = user ? user.id : guestId;
+      const activeEmail  = user
+        ? user.email
+        : (localStorage.getItem('guest_email') || guestId);
+
+      console.log('User type:', isGuest ? 'GUEST' : 'REGISTERED', '| ID:', activeUserId);
+      setIsGuestUser(isGuest);
+
+      // Restore guest_id if it came from URL (Stripe may have cleared localStorage)
+      if (isGuest && guestIdFromUrl) {
+        localStorage.setItem('guest_id', guestIdFromUrl);
+      }
+
+      // Get resume data from localStorage
+      const savedResumeData = localStorage.getItem('pending_blast_resume_data');
+      if (!savedResumeData) {
+        console.error('No resume data in localStorage');
+        window.history.replaceState({}, '', window.location.pathname);
+        return;
+      }
       const parsedResumeData = JSON.parse(savedResumeData);
 
-      // 4. Fetch the complete resume record from database
+      // Fetch full resume from Supabase
       const { data: resumeRecord, error: resumeError } = await supabase
         .from('resumes')
         .select('*')
@@ -65,115 +75,96 @@ function PaymentBlastTrigger() {
         .single();
 
       if (resumeError || !resumeRecord) {
-        console.error('❌ Could not fetch resume from database:', resumeError);
-        alert('Resume not found in database. Please upload again.');
+        alert('Resume not found. Please upload again.');
         localStorage.removeItem('pending_blast_resume_data');
         window.history.replaceState({}, '', window.location.pathname);
         return;
       }
 
-      console.log('✅ Resume fetched from database');
-
-      // --- CRITICAL FIX: Extract Candidate Info from Analysis Data ---
+      // Resolve candidate details
       const analysis = resumeRecord.analysis_data || {};
 
-      // 1. Resolve Name (Strict Priority: AI Analysis > DB Column > Filename > Login Name)
       let candidateName = analysis.candidate_name;
-      
-      // If AI failed to get name, try the root column
-      if (!candidateName || candidateName === 'Not Found' || candidateName === 'Candidate') {
-          candidateName = resumeRecord.candidate_name;
-      }
-      
-      // If still invalid, try to use the filename (better than login email)
-      if (!candidateName || candidateName === 'Not Found' || candidateName === 'Candidate') {
-          // Remove extension and underscores from filename
-          candidateName = resumeRecord.file_name?.split('.')[0].replace(/_/g, ' ') || '';
-      }
-
-      // Final fallback to login name only if absolutely nothing else exists
+      if (!candidateName || ['Not Found','Candidate',''].includes(candidateName))
+        candidateName = resumeRecord.candidate_name;
+      if (!candidateName || ['Not Found','Candidate',''].includes(candidateName))
+        candidateName = resumeRecord.file_name?.split('.')[0].replace(/_/g,' ') || '';
       if (!candidateName || candidateName.trim() === '') {
-          candidateName = user.user_metadata?.full_name || user.email.split('@')[0];
+        candidateName = user
+          ? (user.user_metadata?.full_name || user.email.split('@')[0])
+          : (activeEmail.includes('@') ? activeEmail.split('@')[0] : 'Candidate');
       }
 
-      // 2. Resolve Email
       let candidateEmail = analysis.candidate_email;
-      if (!candidateEmail || candidateEmail === 'Not Found') {
-          candidateEmail = resumeRecord.candidate_email;
-      }
-      if (!candidateEmail || candidateEmail === 'Not Found') {
-          candidateEmail = user.email; // Fallback to login email
-      }
+      if (!candidateEmail || candidateEmail === 'Not Found')
+        candidateEmail = resumeRecord.candidate_email;
+      if (!candidateEmail || candidateEmail === 'Not Found')
+        candidateEmail = activeEmail;
 
-      // 3. Resolve Phone
-      const candidatePhone = analysis.candidate_phone !== 'Not Found' 
-          ? analysis.candidate_phone 
-          : (resumeRecord.candidate_phone || '');
+      const candidatePhone = analysis.candidate_phone !== 'Not Found'
+        ? analysis.candidate_phone
+        : (resumeRecord.candidate_phone || '');
 
-      // 4. Resolve Role
-      const candidateRole = analysis.detected_role || 
-                            resumeRecord.detected_role || 
-                            'Professional';
+      const candidateRole = analysis.detected_role
+        || resumeRecord.detected_role
+        || 'Professional';
 
-      // 5. Prepare data for BlastConfig
-      const preparedResumeData = {
-        id: resumeRecord.id,
+      setResumeData({
+        id:  resumeRecord.id,
         url: resumeRecord.file_url || parsedResumeData.url,
         text: resumeRecord.extracted_text
-      };
+      });
 
-      const preparedUserData = {
-        id: user.id,
-        name: candidateName, // ✅ Now strictly prioritized
-        email: candidateEmail,
-        phone: candidatePhone,
-        targetRole: candidateRole,
-        skills: Array.isArray(analysis.top_skills) 
-          ? analysis.top_skills.join(', ') 
+      setUserData({
+        id:               activeUserId,
+        name:             candidateName,
+        email:            candidateEmail,
+        phone:            candidatePhone,
+        targetRole:       candidateRole,
+        skills: Array.isArray(analysis.top_skills)
+          ? analysis.top_skills.join(', ')
           : 'Professional Skills',
-        years_experience: analysis.seniority_level || 
-                         analysis.total_experience || 
-                         'Mid-Level'
-      };
+        years_experience: analysis.seniority_level || analysis.total_experience || 'Mid-Level'
+      });
 
-      console.log('✅ Data prepared for blast:');
-      console.log('   Candidate Name:', preparedUserData.name);
-      console.log('   Candidate Email:', preparedUserData.email);
-      console.log('   Target Role:', preparedUserData.targetRole);
-
-      // 6. Set state to show BlastConfig
-      setResumeData(preparedResumeData);
-      setUserData(preparedUserData);
       setShowBlast(true);
 
-    } catch (error) {
-      console.error('=== ❌ ERROR IN PAYMENT BLAST TRIGGER ===', error);
-      alert('Error preparing blast data. Please try again or contact support.');
+    } catch (err) {
+      console.error('Payment blast trigger error:', err);
+      alert('Error preparing blast. Please contact support.');
       localStorage.removeItem('pending_blast_resume_data');
       window.history.replaceState({}, '', window.location.pathname);
     }
   };
 
-  if (!showBlast || !resumeData || !userData) {
-    return null;
-  }
+  if (!showBlast || !resumeData || !userData) return null;
 
   return (
     <BlastConfig
       resumeId={resumeData.id}
       resumeUrl={resumeData.url}
       paymentVerified={true}
+      isGuest={isGuestUser}
       userData={userData}
       onBlastComplete={(result) => {
-        console.log('🎉 Blast completed successfully:', result);
         setShowBlast(false);
         localStorage.removeItem('pending_blast_resume_data');
         localStorage.removeItem('pending_blast_config');
-        alert('✅ Blast Successful!\n\nYour resume has been sent to recruiters. Check your email for responses!');
+        if (result?.drip_mode) {
+          alert(
+            'Day 1 Blast Sent!\n\n' +
+            `Resume sent to ${result.successful_sends || 0} recruiters.\n\n` +
+            'Follow-ups scheduled automatically:\n' +
+            '- Day 4: Follow-up email\n' +
+            '- Day 8: Final reminder\n\n' +
+            'Check your dashboard for campaign status.'
+          );
+        } else {
+          alert('Blast Successful! Your resume has been sent to recruiters.');
+        }
         window.location.href = '/dashboard';
       }}
       onCancel={() => {
-        console.log('❌ Blast cancelled by user');
         setShowBlast(false);
         window.history.replaceState({}, '', window.location.pathname);
       }}
