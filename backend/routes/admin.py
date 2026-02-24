@@ -532,15 +532,30 @@ def add_recruiter():
         data = request.json
         target_table = data.get('target_table')
         
-        if target_table not in ['recruiters', 'freemium_recruiters']:
+        # ✅ CHANGED: Added 'app_registered_recruiters' to the allowed tables list.
+        # This table stores unverified recruiters who self-register through the app.
+        # The 'recruiters' table remains exclusively for verified/paid recruiters.
+        if target_table not in ['recruiters', 'freemium_recruiters', 'app_registered_recruiters']:
             return jsonify({'error': 'Invalid target table'}), 400
 
-        recruiter_data = {
-            'email': data.get('email'),
-            'is_active': True,
-            'email_status': 'active',
-            'created_at': datetime.utcnow().isoformat()
-        }
+        # ✅ CHANGED: Base payload differs per table.
+        # - 'recruiters' and 'freemium_recruiters' use email_status (existing columns).
+        # - 'app_registered_recruiters' uses id (Supabase Auth UUID) as PK and
+        #   does NOT have an email_status column, so we exclude it.
+        if target_table == 'app_registered_recruiters':
+            recruiter_data = {
+                'id': data.get('id'),           # Supabase Auth UUID — required as PK
+                'email': data.get('email'),
+                'is_active': True,
+                'created_at': datetime.utcnow().isoformat()
+            }
+        else:
+            recruiter_data = {
+                'email': data.get('email'),
+                'is_active': True,
+                'email_status': 'active',
+                'created_at': datetime.utcnow().isoformat()
+            }
 
         if target_table == 'freemium_recruiters':
             recruiter_data.update({
