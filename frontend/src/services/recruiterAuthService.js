@@ -4,13 +4,9 @@ import { supabase } from '../lib/supabase'
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 /**
- * Logic to ensure a recruiter ID is valid for Foreign Key constraints.
- * 
- * CHANGE: New registrations (alreadyInDB = false) now go to 'app_registered_recruiters'
- *         instead of 'recruiters'. The 'recruiters' table is reserved for verified/paid
- *         recruiters that are manually added by the admin.
- * 
- * Existing verified recruiters (alreadyInDB = true) are NOT touched — no duplication.
+ * Syncs a newly registered recruiter into the app_registered_recruiters table.
+ * Only called for brand-new registrations (alreadyInDB = false).
+ * Verified/paid recruiters (alreadyInDB = true) are never touched.
  */
 const ensureRecruiterExistsForActivity = async (authId, email, alreadyInDB) => {
   if (alreadyInDB) {
@@ -19,14 +15,14 @@ const ensureRecruiterExistsForActivity = async (authId, email, alreadyInDB) => {
   }
 
   try {
-    // ✅ CHANGE: New app-registered (unverified) recruiters are stored in
-    // 'app_registered_recruiters' — NOT in the 'recruiters' table.
+    // ✅ FIXED: Routes new app registrations to 'app_registered_recruiters'
+    // instead of 'recruiters' (which is reserved for verified/paid recruiters).
     console.log('🔄 New app-registered recruiter detected, syncing to app_registered_recruiters table...');
     const response = await fetch(`${API_URL}/api/admin/recruiters/add`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        target_table: 'app_registered_recruiters', // ✅ CHANGED: was 'recruiters'
+        target_table: 'app_registered_recruiters', // ✅ FIXED: was 'recruiters'
         email: email,
         id: authId,
         is_active: true
@@ -40,28 +36,33 @@ const ensureRecruiterExistsForActivity = async (authId, email, alreadyInDB) => {
 };
 
 /**
- * Check if a recruiter exists in either verified table.
- * 
- * UNCHANGED: Still checks 'recruiters' (verified/paid) and 'freemium_recruiters'.
- * NOTE: app_registered_recruiters are NOT checked here intentionally —
- *       those recruiter logins would re-register through Supabase Auth on next visit.
- *       If you want app-registered recruiters to be able to log back in, add a
- *       third check below (see comment).
+ * Check if a recruiter exists across all three tables:
+ * 1. recruiters                  → verified/paid (manually added by admin)
+ * 2. freemium_recruiters         → freemium tier
+ * 3. app_registered_recruiters   → self-registered through the app (unverified)
  */
 export const checkRecruiterExists = async (email) => {
   try {
     const trimmedEmail = email.trim().toLowerCase();
-    
-    // Check primary verified table
-    const { data: paid } = await supabase.from('recruiters').select('id, email').eq('email', trimmedEmail).maybeSingle();
+
+    // Check verified/paid table
+    const { data: paid } = await supabase
+      .from('recruiters')
+      .select('id, email')
+      .eq('email', trimmedEmail)
+      .maybeSingle();
     if (paid) return { exists: true, recruiter: paid, source: 'paid' };
 
     // Check freemium table
-    const { data: free } = await supabase.from('freemium_recruiters').select('id, email').eq('email', trimmedEmail).maybeSingle();
+    const { data: free } = await supabase
+      .from('freemium_recruiters')
+      .select('id, email')
+      .eq('email', trimmedEmail)
+      .maybeSingle();
     if (free) return { exists: true, recruiter: free, source: 'freemium' };
 
-    // ✅ ADDED: Check app_registered_recruiters table so that previously
-    // registered (unverified) recruiters can log back in without re-registering.
+    // ✅ ADDED: Check app_registered_recruiters so previously self-registered
+    // recruiters can log back in without being forced to re-register.
     const { data: appReg } = await supabase
       .from('app_registered_recruiters')
       .select('id, email')
@@ -76,14 +77,13 @@ export const checkRecruiterExists = async (email) => {
 }
 
 /**
- * Grant direct access to an existing recruiter (verified or app-registered).
- * UNCHANGED in logic — relies on checkRecruiterExists which now also covers app_registered.
+ * Grant direct access to an existing recruiter (any table).
+ * Unchanged in logic — relies on checkRecruiterExists which covers all 3 tables.
  */
 export const grantDirectRecruiterAccess = async (email) => {
   try {
     const check = await checkRecruiterExists(email);
     if (check.exists) {
-      // alreadyInDB = true prevents any duplication attempt
       await ensureRecruiterExistsForActivity(check.recruiter.id, email, true);
       return { success: true, recruiter: check.recruiter };
     }
@@ -94,26 +94,65 @@ export const grantDirectRecruiterAccess = async (email) => {
 }
 
 /**
- * Register a brand new recruiter via the application.
- * 
- * CHANGE: Their profile record is now stored in 'app_registered_recruiters'
- *         (unverified) instead of 'recruiters' (verified).
- *         Supabase Auth signup is unchanged.
+ * Register a brand-new recruiter via the application.
+ *
+ * ✅ FIXED: Handles the case where the user already exists in Supabase Auth
+ * (e.g. registered on localhost but app_registered_recruiters record is missing).
+ * In that case we sign them in with their password instead of trying to sign up again,
+ * then ensure their record exists in app_registered_recruiters.
  */
 export const registerRecruiter = async (email, password) => {
   try {
+    const normalizedEmail = email.trim().toLowerCase();
+
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       password: password,
       options: { data: { role: 'recruiter' } }
     });
 
-    if (authError) throw authError;
+    // ✅ FIXED: Supabase returns 422 "User already registered" when the email
+    // already exists in Auth. We catch that and sign them in instead,
+    // then sync their record to app_registered_recruiters if it is missing.
+    if (authError) {
+      const alreadyExists =
+        authError.message?.toLowerCase().includes('user already registered') ||
+        authError.message?.toLowerCase().includes('already registered') ||
+        authError.status === 422;
 
-    // ✅ CHANGE: alreadyInDB = false → ensureRecruiterExistsForActivity will now
-    // insert into 'app_registered_recruiters' instead of 'recruiters'
-    await ensureRecruiterExistsForActivity(authData.user.id, email, false);
+      if (alreadyExists) {
+        console.log('⚠️ User already in Supabase Auth — attempting sign-in instead...');
+
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password: password,
+        });
+
+        if (signInError) {
+          return { success: false, error: 'This email is already registered. Please check your password and try again.' };
+        }
+
+        const user = signInData.user;
+
+        // Ensure the app_registered_recruiters record exists (may be missing
+        // if the previous registration attempt failed mid-way).
+        const check = await checkRecruiterExists(normalizedEmail);
+        if (!check.exists) {
+          console.log('🔄 Auth user found but no DB record — syncing to app_registered_recruiters...');
+          await ensureRecruiterExistsForActivity(user.id, normalizedEmail, false);
+        }
+
+        return { success: true, recruiter: user };
+      }
+
+      // Any other auth error — bubble it up
+      throw authError;
+    }
+
+    // Normal new registration path
+    await ensureRecruiterExistsForActivity(authData.user.id, normalizedEmail, false);
     return { success: true, recruiter: authData.user };
+
   } catch (err) {
     return { success: false, error: err.message };
   }
