@@ -1,21 +1,42 @@
 """
 Drip Email Scheduler
 Runs every 30 minutes via APScheduler.
-Checks blast_campaigns table for Day 1 (in-progress), Day 4, and Day 8 emails due.
+Checks blast_campaigns table for Wave 1, Wave 2, and Wave 3 emails due.
 Works for both registered and guest users.
 
-✅ FIXED: Batch progress tracking — emails never repeat to the same recruiters.
+DAILY QUOTA ENFORCED: Max 50 emails per campaign per wave per calendar day.
 
-HOW BATCHING WORKS (example: Starter plan = 250 recruiters, batch=50):
+HOW DAILY BATCHING WORKS (example: Starter = 250 recruiters, 50/day):
 
-  Tick 1  → already_sent=0,   fetches rows 1–100,   sends 100,  saves delivered=100
-  Tick 2  → already_sent=100, fetches rows 101–200,  sends 100,  saves delivered=200
-  Tick 3  → already_sent=200, fetches rows 201–250,  sends 50,   saves delivered=250
-             wave_complete=True → drip_day1_sent_at set → Day 4 can now be scheduled
+  Day 1  (payment day) --> sends recruiters   1-50   immediately after payment
+  Day 2  (next day)    --> sends recruiters  51-100
+  Day 3                --> sends recruiters 101-150
+  Day 4                --> sends recruiters 151-200
+  Day 5                --> sends recruiters 201-250  --> Wave 1 complete --> Wave 2 unlocked
 
-KEY: drip_dayX_sent_at is only set when ALL recruiters for the wave are sent.
-     While in progress it stays NULL so scheduler keeps picking it up each tick.
-     drip_dayX_delivered stores the cumulative sent count = the offset for next batch.
+  Wave 2 (follow-up): same 50/day logic, starts day after Wave 1 finishes
+  Wave 3 (reminder):  same 50/day logic, starts day after Wave 2 finishes
+
+PLAN TIMELINE (50 emails/day, no gaps between waves):
+  Starter      250 recruiters -->  5 days/wave -->  15 days total -->   750 total emails
+  Basic        500 recruiters --> 10 days/wave -->  30 days total --> 1,500 total emails
+  Professional 750 recruiters --> 15 days/wave -->  45 days total --> 2,250 total emails
+  Growth      1000 recruiters --> 20 days/wave -->  60 days total --> 3,000 total emails
+  Advanced    1250 recruiters --> 25 days/wave -->  75 days total --> 3,750 total emails
+  Premium     1500 recruiters --> 30 days/wave -->  90 days total --> 4,500 total emails
+
+KEY COLUMNS IN blast_campaigns:
+  drip_dayX_delivered  = cumulative offset (total recruiters sent across all days so far)
+  drip_dayX_last_date  = UTC date (YYYY-MM-DD) of the last batch send for this wave
+  drip_dayX_sent_at    = only stamped when the ENTIRE wave is fully complete
+
+  Daily quota gate: if last_date == today --> quota used --> skip until tomorrow.
+                    if last_date < today (or NULL) --> send next 50.
+
+REQUIRED NEW DB COLUMNS (run once in Supabase SQL editor):
+  ALTER TABLE blast_campaigns ADD COLUMN IF NOT EXISTS drip_day1_last_date TEXT;
+  ALTER TABLE blast_campaigns ADD COLUMN IF NOT EXISTS drip_day2_last_date TEXT;
+  ALTER TABLE blast_campaigns ADD COLUMN IF NOT EXISTS drip_day3_last_date TEXT;
 """
 import os, time, requests
 from datetime import datetime
@@ -34,9 +55,10 @@ BREVO_TEMPLATE_DAY1 = int(os.getenv("BREVO_TEMPLATE_DAY1", "3"))
 BREVO_TEMPLATE_DAY4 = int(os.getenv("BREVO_TEMPLATE_DAY4", "4"))
 BREVO_TEMPLATE_DAY8 = int(os.getenv("BREVO_TEMPLATE_DAY8", "5"))
 
-MAX_EMAILS_PER_BATCH = int(os.getenv("MAX_EMAILS_PER_BATCH", "50"))
+# Hard daily limit: 50 emails per campaign per wave per calendar day
+DAILY_EMAIL_LIMIT = int(os.getenv("DAILY_EMAIL_LIMIT", "50"))
 
-# Plan-based delays (seconds between each email) — unchanged
+# Seconds to wait between each individual email send (protects deliverability)
 PLAN_SEND_DELAYS = {
     "starter":      2.0,
     "basic":        2.5,
@@ -46,7 +68,7 @@ PLAN_SEND_DELAYS = {
     "premium":      4.5
 }
 
-# Plan recruiter limits — unchanged
+# Total recruiters per plan
 PLAN_LIMIT_MAP = {
     "starter":      250,
     "basic":        500,
@@ -56,32 +78,35 @@ PLAN_LIMIT_MAP = {
     "premium":      1500
 }
 
-# Maps drip_day → column names in blast_campaigns table
-# These column names must match exactly what exists in your Supabase schema
+# Maps drip wave number --> blast_campaigns column names
+# drip_dayX_last_date is the NEW column added to enforce the daily quota gate
 WAVE_FIELDS = {
     1: {
-        "sent_at":   "drip_day1_sent_at",    # set only when wave fully complete
-        "status":    "drip_day1_status",      # 'sending' while in progress, 'sent' when done
-        "delivered": "drip_day1_delivered",   # cumulative count — used as offset for next batch
-        "count":     "day1_sent_count"        # same as delivered, kept for compatibility
+        "sent_at":   "drip_day1_sent_at",    # stamped only when wave fully complete
+        "status":    "drip_day1_status",      # 'sending' in progress / 'sent' when done
+        "delivered": "drip_day1_delivered",   # cumulative recruiter offset
+        "count":     "day1_sent_count",       # kept for compatibility
+        "last_date": "drip_day1_last_date",   # NEW: UTC date of last batch
     },
     4: {
         "sent_at":   "drip_day2_sent_at",
         "status":    "drip_day2_status",
         "delivered": "drip_day2_delivered",
-        "count":     "day4_sent_count"
+        "count":     "day4_sent_count",
+        "last_date": "drip_day2_last_date",   # NEW
     },
     8: {
         "sent_at":   "drip_day3_sent_at",
         "status":    "drip_day3_status",
         "delivered": "drip_day3_delivered",
-        "count":     "day8_sent_count"
+        "count":     "day8_sent_count",
+        "last_date": "drip_day3_last_date",   # NEW
     }
 }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Helpers — unchanged from original
+# Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _get_supabase_url(): return os.getenv("SUPABASE_URL")
@@ -90,10 +115,10 @@ def _get_supabase_key(): return os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 def _headers():
     key = _get_supabase_key()
     return {
-        "apikey": key,
+        "apikey":        key,
         "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
+        "Content-Type":  "application/json",
+        "Prefer":        "return=representation"
     }
 
 def _get_delay_for_plan(plan_name: str) -> float:
@@ -112,48 +137,66 @@ def _is_business_hours() -> bool:
     in_afternoon = (hour == 17 and minute >= 30) or (hour == 18)
     return in_morning or in_afternoon
 
+def _today_utc_str() -> str:
+    """Today's UTC date as YYYY-MM-DD for daily quota comparison."""
+    return datetime.utcnow().strftime("%Y-%m-%d")
+
+def _already_sent_today(campaign: dict, drip_day: int) -> bool:
+    """
+    Returns True  --> today's 50-email quota already used for this campaign+wave.
+                      Skip and come back tomorrow.
+    Returns False --> no batch sent today, proceed with sending.
+
+    Works by comparing drip_dayX_last_date against today's UTC date string.
+    """
+    fields    = WAVE_FIELDS[drip_day]
+    last_date = campaign.get(fields["last_date"])
+
+    if not last_date:
+        return False  # never sent before for this wave
+
+    # Normalize: value may be full ISO datetime or just a date string
+    last_date_str = str(last_date)[:10]   # grab YYYY-MM-DD portion only
+    today         = _today_utc_str()
+    quota_used    = (last_date_str == today)
+
+    if quota_used:
+        print(f"[Scheduler] Daily quota used — campaign={campaign['id']} "
+              f"wave={drip_day} last_date={last_date_str} today={today} "
+              f"-- will resume tomorrow")
+    return quota_used
+
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ✅ FIXED: _fetch_recruiters_for_plan now accepts offset and batch_size
-#
-# OLD behaviour (bug):
-#   Always fetched recruiter rows 1..plan_limit, e.g. rows 1–250 for starter
-#   _send_drip_wave would take first 100, then stop. Next tick same 100 again.
-#
-# NEW behaviour (fixed):
-#   Uses Supabase &offset=N to skip already-sent rows, &limit=M to take next slice
-#   Tick 1: offset=0   → fetches rows 1–100
-#   Tick 2: offset=100 → fetches rows 101–200
-#   Tick 3: offset=200 → fetches rows 201–250
-#
-# The offset value comes from drip_dayX_delivered stored in blast_campaigns.
+# _fetch_recruiters_for_plan
+# Fetches the next slice of recruiters using offset-based pagination.
+# offset = drip_dayX_delivered = total already sent across all previous days.
 # ─────────────────────────────────────────────────────────────────────────────
 def _fetch_recruiters_for_plan(plan_name: str, offset: int = 0, batch_size: int = None) -> list:
     """
-    Fetch the next slice of recruiters for this plan.
+    Fetch the next batch of recruiters for this plan starting from offset.
 
     Args:
-        plan_name:  Plan key (starter, basic, etc.)
-        offset:     Number of recruiters to skip (already sent in previous batches)
-        batch_size: Max to fetch this batch (defaults to MAX_EMAILS_PER_BATCH)
+        plan_name:  e.g. 'starter', 'basic', 'professional'
+        offset:     how many recruiters to skip (already sent in previous days)
+        batch_size: max to fetch this batch (defaults to DAILY_EMAIL_LIMIT = 50)
 
     Returns:
-        List of recruiter dicts [{email, name, company}, ...]
+        List of dicts: [{email, name, company}, ...]
     """
     supabase_url = _get_supabase_url()
     plan_limit   = _get_limit_for_plan(plan_name)
 
     if batch_size is None:
-        batch_size = MAX_EMAILS_PER_BATCH
+        batch_size = DAILY_EMAIL_LIMIT
 
-    # How many are still left to send for this plan
     remaining = plan_limit - offset
     if remaining <= 0:
-        print(f"[Scheduler] No remaining recruiters: plan={plan_name} offset={offset} limit={plan_limit}")
+        print(f"[Scheduler] No remaining recruiters: plan={plan_name} "
+              f"offset={offset} limit={plan_limit}")
         return []
 
-    # Fetch exactly what we need, plus a small buffer for deduplication
-    fetch_limit = min(batch_size, remaining) + 10
+    fetch_limit = min(batch_size, remaining) + 10  # +10 buffer for dedup
 
     url = (
         f"{supabase_url}/rest/v1/recruiters"
@@ -210,152 +253,143 @@ def _send_brevo_email(to_email, to_name, template_id, params):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ✅ FIXED: _send_drip_wave — reads progress offset, sends NEXT batch only
+# _send_drip_wave
 #
-# OLD behaviour (bug):
-#   Always fetched all recruiters from row 1, sent first 100, stopped.
-#   Next tick would send the same first 100 again.
+# Core sending function. Two guards run before any email is sent:
+#   Guard 1: wave already 100% complete? Skip.
+#   Guard 2: today's 50-email quota already used? Skip until tomorrow.
 #
-# NEW behaviour (fixed):
-#   1. Reads already_sent from campaign's drip_dayX_delivered column
-#   2. Passes already_sent as offset to _fetch_recruiters_for_plan
-#   3. Only fetches the NEXT batch of up to MAX_EMAILS_PER_BATCH
-#   4. Returns cumulative total so _update_campaign_after_wave can save correctly
+# If both guards pass, fetches next 50 recruiters starting from
+# drip_dayX_delivered offset and sends them one by one.
 #
-# Example — Basic plan (500 recruiters):
-#   Tick 1: already_sent=0   → fetches 1–50,    sends 50,  cumulative=50
-#   Tick 2: already_sent=50  → fetches 51–100,  sends 50,  cumulative=100
-#   Tick 3: already_sent=100 → fetches 101–150, sends 50,  cumulative=150
-#   ...
-#   Tick 10: already_sent=450 → fetches 451–500, sends 50, cumulative=500
-#            wave_complete=True → drip_day1_sent_at stamped → Day 4 unlocked
+# HOW IT WORKS DAY BY DAY (Starter = 250 recruiters):
+#   Day 1: offset=0,   sends  1-50,  delivered=50,  last_date=today
+#   Day 2: offset=50,  sends 51-100, delivered=100, last_date=today
+#   Day 3: offset=100, sends 101-150, delivered=150, last_date=today
+#   Day 4: offset=150, sends 151-200, delivered=200, last_date=today
+#   Day 5: offset=200, sends 201-250, delivered=250, wave_complete=True
+#          --> drip_day1_sent_at stamped --> Wave 2 unlocked
 # ─────────────────────────────────────────────────────────────────────────────
 def _send_drip_wave(campaign: dict, drip_day: int) -> dict:
     """
-    Send the next batch of emails for a drip wave.
-    Continues from where the last batch stopped.
+    Send today's batch of 50 emails for a drip wave.
+    Enforces hard daily limit of DAILY_EMAIL_LIMIT (50) per campaign per wave.
     """
-    template_map = {
-        1: BREVO_TEMPLATE_DAY1,
-        4: BREVO_TEMPLATE_DAY4,
-        8: BREVO_TEMPLATE_DAY8
-    }
-    template_id = template_map[drip_day]
-    campaign_id = campaign["id"]
-    plan_name   = campaign.get("plan_name", "starter")
-    plan_limit  = _get_limit_for_plan(plan_name)
-    delay       = _get_delay_for_plan(plan_name)
-    fields      = WAVE_FIELDS[drip_day]
+    template_map = {1: BREVO_TEMPLATE_DAY1, 4: BREVO_TEMPLATE_DAY4, 8: BREVO_TEMPLATE_DAY8}
+    template_id  = template_map[drip_day]
+    campaign_id  = campaign["id"]
+    plan_name    = campaign.get("plan_name", "starter")
+    plan_limit   = _get_limit_for_plan(plan_name)
+    delay        = _get_delay_for_plan(plan_name)
+    fields       = WAVE_FIELDS[drip_day]
 
-    # ── Read how many were already sent in previous batches ────────────────
     already_sent = int(campaign.get(fields["delivered"]) or 0)
 
     print(f"[Scheduler] {'='*55}")
     print(f"[Scheduler] Campaign : {campaign_id}")
-    print(f"[Scheduler] Day {drip_day} wave  : plan={plan_name} "
-          f"limit={plan_limit} already_sent={already_sent}")
+    print(f"[Scheduler] Wave {drip_day}    : plan={plan_name} "
+          f"sent_so_far={already_sent}/{plan_limit} daily_limit={DAILY_EMAIL_LIMIT}")
 
-    # ── Guard: wave already fully complete ─────────────────────────────────
+    # Guard 1: entire wave already complete
     if already_sent >= plan_limit:
-        print(f"[Scheduler] ✅ Wave already complete ({already_sent}/{plan_limit}) — skip")
+        print(f"[Scheduler] Wave already complete ({already_sent}/{plan_limit}) -- skip")
         return {"sent": 0, "failed": 0, "total": plan_limit,
-                "cumulative": already_sent, "wave_complete": True}
+                "cumulative": already_sent, "wave_complete": True, "quota_exceeded": False}
 
-    # ── Fetch ONLY the next batch starting from already_sent offset ────────
+    # Guard 2: today's daily quota already used for this wave
+    if _already_sent_today(campaign, drip_day):
+        return {"sent": 0, "failed": 0, "total": plan_limit,
+                "cumulative": already_sent, "wave_complete": False, "quota_exceeded": True}
+
+    # Fetch today's batch of up to 50 recruiters from offset
     recruiters = _fetch_recruiters_for_plan(
         plan_name  = plan_name,
         offset     = already_sent,
-        batch_size = MAX_EMAILS_PER_BATCH
+        batch_size = DAILY_EMAIL_LIMIT
     )
 
     if not recruiters:
-        print(f"[Scheduler] ⚠️ No recruiters returned at offset={already_sent}")
+        print(f"[Scheduler] No recruiters returned at offset={already_sent}")
         return {"sent": 0, "failed": 0, "total": plan_limit,
-                "cumulative": already_sent, "wave_complete": False}
+                "cumulative": already_sent, "wave_complete": False, "quota_exceeded": False}
 
-    # ── Build email params from campaign record ────────────────────────────
+    # Build email params from campaign record
     email_params = {
         "candidate_name":   campaign.get("candidate_name",  "Professional Candidate"),
         "candidate_email":  campaign.get("candidate_email", ""),
         "candidate_phone":  campaign.get("candidate_phone", ""),
-        "job_role":         campaign.get("job_role",         "Professional"),
-        "years_experience": campaign.get("years_experience", ""),
-        "key_skills":       campaign.get("key_skills",       ""),
-        "location":         campaign.get("location",         "Remote"),
-        "resume_url":       campaign.get("resume_url",       ""),
-        "resume_name":      campaign.get("resume_name",      "Resume.pdf"),
+        "job_role":         campaign.get("job_role",        "Professional"),
+        "years_experience": campaign.get("years_experience",""),
+        "key_skills":       campaign.get("key_skills",      ""),
+        "location":         campaign.get("location",        "Remote"),
+        "resume_url":       campaign.get("resume_url",      ""),
+        "resume_name":      campaign.get("resume_name",     "Resume.pdf"),
         "drip_day":         drip_day
     }
 
-    # ── Send this batch ────────────────────────────────────────────────────
-    sent_this_batch  = 0
+    # Send today's batch
+    sent_this_batch   = 0
     failed_this_batch = 0
+    batch_start       = already_sent + 1
+    batch_end         = already_sent + len(recruiters)
 
-    batch_start = already_sent + 1
-    batch_end   = already_sent + len(recruiters)
-    print(f"[Scheduler] Sending recruiters {batch_start}–{batch_end} of {plan_limit} "
+    print(f"[Scheduler] Sending recruiters {batch_start}-{batch_end} of {plan_limit} "
           f"(delay={delay}s each)")
 
     for recruiter in recruiters:
         result = _send_brevo_email(
-            recruiter["email"],
-            recruiter["name"],
-            template_id,
-            email_params
+            recruiter["email"], recruiter["name"], template_id, email_params
         )
         if result["success"]:
             sent_this_batch += 1
         else:
             failed_this_batch += 1
-            print(f"[Scheduler] ❌ Failed: {recruiter['email']} — "
+            print(f"[Scheduler] Failed: {recruiter['email']} -- "
                   f"{result.get('error','')[:80]}")
         time.sleep(delay)
 
-    # ── Calculate cumulative totals ────────────────────────────────────────
     cumulative_sent = already_sent + sent_this_batch
     wave_complete   = cumulative_sent >= plan_limit
 
-    print(f"[Scheduler] Batch done — "
-          f"this_batch={sent_this_batch} failed={failed_this_batch} "
-          f"cumulative={cumulative_sent}/{plan_limit} complete={wave_complete}")
+    print(f"[Scheduler] Batch done -- sent_today={sent_this_batch} "
+          f"failed={failed_this_batch} cumulative={cumulative_sent}/{plan_limit} "
+          f"wave_complete={wave_complete}")
 
     return {
-        "sent":          sent_this_batch,
-        "failed":        failed_this_batch,
-        "total":         plan_limit,
-        "cumulative":    cumulative_sent,
-        "wave_complete": wave_complete
+        "sent":           sent_this_batch,
+        "failed":         failed_this_batch,
+        "total":          plan_limit,
+        "cumulative":     cumulative_sent,
+        "wave_complete":  wave_complete,
+        "quota_exceeded": False
     }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ✅ FIXED: _update_campaign_after_wave — two behaviours based on wave_complete
+# _update_campaign_after_wave
 #
-# OLD behaviour (bug):
-#   Always set drip_dayX_sent_at = NOW and drip_dayX_delivered = sent_this_batch
-#   This marked the wave as done after only the first 100 emails.
-#   Next tick would see sent_at is set and skip the rest entirely.
+# Saves progress after every daily batch.
+# Always saves drip_dayX_last_date = today so the quota gate works on next tick.
 #
-# NEW behaviour (fixed):
-#   wave_complete=False (still more recruiters to send):
-#     → saves cumulative delivered count as the offset for next batch
-#     → does NOT set sent_at → scheduler picks campaign up again next tick
-#     → sets status='sending' to show it is in progress
-#
-#   wave_complete=True (all recruiters for this wave have been sent):
-#     → saves final delivered count
-#     → sets sent_at=NOW → signals wave is truly done
-#     → sets status='sent'
-#     → for Day 8 also sets campaign status='completed'
+# quota_exceeded=True  --> nothing changed, return immediately
+# wave_complete=False  --> save offset + last_date. Do NOT set sent_at.
+#                          Scheduler picks up again tomorrow.
+# wave_complete=True   --> save offset + last_date + stamp sent_at.
+#                          Unlocks next wave. Wave 3 completion sets status=completed.
 # ─────────────────────────────────────────────────────────────────────────────
 def _update_campaign_after_wave(campaign_id: str, drip_day: int, stats: dict):
     """
-    Save batch progress to blast_campaigns.
-    Only marks wave complete (sets sent_at) when ALL recruiters have been sent.
+    Persist today's batch results to blast_campaigns.
+    Saves last_date so the daily quota gate prevents re-sending today.
+    Only stamps sent_at when the ENTIRE wave is finished.
     """
+    if stats.get("quota_exceeded"):
+        return   # nothing was sent, nothing to write
+
     supabase_url  = _get_supabase_url()
     fields        = WAVE_FIELDS[drip_day]
     now           = datetime.utcnow().isoformat()
+    today_str     = _today_utc_str()
     cumulative    = stats.get("cumulative", stats.get("sent", 0))
     wave_complete = stats.get("wave_complete", False)
 
@@ -363,22 +397,19 @@ def _update_campaign_after_wave(campaign_id: str, drip_day: int, stats: dict):
         fields["delivered"]: cumulative,
         fields["count"]:     cumulative,
         fields["status"]:    "sent" if wave_complete else "sending",
+        fields["last_date"]: today_str,   # quota gate: prevents second send today
         "updated_at":        now
     }
 
     if wave_complete:
-        # Wave is fully done — stamp sent_at so scheduler won't process it again
-        update[fields["sent_at"]] = now
+        update[fields["sent_at"]] = now   # unlock next wave
         if drip_day == 8:
             update["status"] = "completed"
-        print(f"[Scheduler] ✅ Day {drip_day} wave COMPLETE — "
-              f"sent_at stamped for campaign {campaign_id}")
+        print(f"[Scheduler] Wave {drip_day} COMPLETE -- sent_at stamped "
+              f"campaign={campaign_id}")
     else:
-        # Still more to send — do NOT set sent_at
-        # Scheduler will pick this campaign up again next tick automatically
-        # because drip_dayX_sent_at is still NULL
-        print(f"[Scheduler] 🔄 Day {drip_day} IN PROGRESS — "
-              f"{cumulative} sent, resuming next tick for campaign {campaign_id}")
+        print(f"[Scheduler] Wave {drip_day} IN PROGRESS -- {cumulative} sent total, "
+              f"next batch tomorrow -- campaign={campaign_id}")
 
     resp = requests.patch(
         f"{supabase_url}/rest/v1/blast_campaigns?id=eq.{campaign_id}",
@@ -386,31 +417,23 @@ def _update_campaign_after_wave(campaign_id: str, drip_day: int, stats: dict):
         headers=_headers()
     )
     if resp.status_code in [200, 204]:
-        print(f"[Scheduler] ✅ Progress saved for {campaign_id}")
+        print(f"[Scheduler] Progress saved -- campaign={campaign_id}")
     else:
-        print(f"[Scheduler] ❌ Failed to save progress: {resp.status_code} {resp.text}")
+        print(f"[Scheduler] Failed to save progress: {resp.status_code} {resp.text}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ✅ FIXED: run_day1_blast — handles both fresh start and batch resume
+# run_day1_blast
 #
-# OLD behaviour (bug):
-#   Checked drip_day1_sent_at — if set, skipped.
-#   But sent_at was being set after only first 100 emails, so rest were never sent.
-#
-# NEW behaviour (fixed):
-#   Checks drip_day1_delivered to see how many already sent.
-#   If 0 → fresh start, sends first batch.
-#   If >0 and < plan_limit → resumes from where it left off.
-#   If >= plan_limit → truly complete, skips.
-#   drip_day1_sent_at is only set by _update_campaign_after_wave when fully done.
+# Called immediately after payment verification.
+# Sends the FIRST 50 emails of Wave 1 right now (no business hours restriction).
+# Sets drip_day1_last_date = today so the scheduler won't re-send today.
+# All remaining daily batches (Day 2, 3, 4 ...) are handled by run_scheduler_tick.
 # ─────────────────────────────────────────────────────────────────────────────
 def run_day1_blast(campaign_id: str) -> dict:
     """
-    Called immediately after payment.
-    Sends the first (or next) batch of Day 1 emails.
-    Remaining batches are handled by run_scheduler_tick on future ticks.
-    Day 1 fires immediately — no business hours restriction.
+    Called immediately after payment. Sends first 50 Wave 1 emails right now.
+    Remaining daily batches handled automatically by the scheduler each day.
     """
     supabase_url = _get_supabase_url()
 
@@ -419,7 +442,7 @@ def run_day1_blast(campaign_id: str) -> dict:
         headers=_headers()
     )
     if resp.status_code != 200 or not resp.json():
-        print(f"[Drip] ❌ Campaign not found: {campaign_id}")
+        print(f"[Drip] Campaign not found: {campaign_id}")
         return {"success": False}
 
     campaign     = resp.json()[0]
@@ -427,13 +450,19 @@ def run_day1_blast(campaign_id: str) -> dict:
     plan_limit   = _get_limit_for_plan(plan_name)
     already_sent = int(campaign.get("drip_day1_delivered") or 0)
 
-    # Guard: wave truly complete (sent_at set AND all recruiters sent)
+    # Guard: wave fully complete already
     if campaign.get("drip_day1_sent_at") and already_sent >= plan_limit:
-        print(f"[Drip] ⏭️ Day 1 fully complete for {campaign_id} ({already_sent}/{plan_limit})")
+        print(f"[Drip] Wave 1 fully complete for {campaign_id} ({already_sent}/{plan_limit})")
         return {"success": True, "skipped": True}
 
-    print(f"[Drip] 🚀 Day 1 blast — campaign={campaign_id} "
-          f"plan={plan_name} already_sent={already_sent}/{plan_limit}")
+    # Guard: duplicate call on same day (e.g. webhook retry)
+    if _already_sent_today(campaign, drip_day=1):
+        print(f"[Drip] Wave 1 daily quota already used for {campaign_id} -- resumes tomorrow")
+        return {"success": True, "skipped": True, "reason": "daily_quota_used"}
+
+    total_days = (plan_limit + DAILY_EMAIL_LIMIT - 1) // DAILY_EMAIL_LIMIT
+    print(f"[Drip] Wave 1 blast -- campaign={campaign_id} plan={plan_name} "
+          f"sending_today={DAILY_EMAIL_LIMIT} total_wave_days={total_days}")
 
     stats = _send_drip_wave(campaign, drip_day=1)
     _update_campaign_after_wave(campaign_id, drip_day=1, stats=stats)
@@ -442,72 +471,71 @@ def run_day1_blast(campaign_id: str) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ✅ FIXED: run_scheduler_tick — now handles 3 campaign types per tick
+# run_scheduler_tick
 #
-# TYPE A — Day 1 in-progress (plan_limit > batch_size, Day 1 not fully sent yet)
-#   Query: status=active, drip_day1_sent_at IS NULL, drip_day1_delivered > 0
-#   Action: Continue sending next batch for Day 1 (no business hours check)
-#   Why no hours check: Day 1 fires right after payment, we don't want to delay
-#                       the remaining batches to next day
+# Called every 30 minutes by APScheduler.
+# Processes three types of campaign work each tick:
 #
-# TYPE B — Day 4 due (Day 1 fully complete, Day 4 not started or in-progress)
-#   Query: status=active, drip_day1_sent_at NOT NULL,
-#          drip_day2_sent_at IS NULL, day4_scheduled_for <= NOW
-#   Action: Send next batch for Day 4 (business hours only)
-#   Note: This also picks up in-progress Day 4 batches automatically
-#         because drip_day2_sent_at stays NULL until fully complete
+# TYPE A -- Wave 1 daily batches (no business hours restriction)
+#   Picks up all campaigns where Wave 1 is not complete (sent_at IS NULL).
+#   The daily quota gate inside _send_drip_wave ensures only ONE batch of 50
+#   fires per calendar day per campaign, no matter how many ticks run today.
 #
-# TYPE C — Day 8 due (Day 4 fully complete, Day 8 not started or in-progress)
-#   Query: status=active, drip_day2_sent_at NOT NULL,
-#          drip_day3_sent_at IS NULL, day8_scheduled_for <= NOW
-#   Action: Send next batch for Day 8 (business hours only)
+# TYPE B -- Wave 2 follow-up daily batches (business hours only)
+#   Starts only after Wave 1 is 100% complete (drip_day1_sent_at is set).
+#   day4_scheduled_for controls when Wave 2 is first eligible to start.
+#   Sends 50/day until all recruiters for this plan are covered.
+#
+# TYPE C -- Wave 3 reminder daily batches (business hours only)
+#   Starts only after Wave 2 is 100% complete (drip_day2_sent_at is set).
+#   day8_scheduled_for controls when Wave 3 is first eligible to start.
+#   Sends 50/day until all recruiters for this plan are covered.
 # ─────────────────────────────────────────────────────────────────────────────
 def run_scheduler_tick():
-    """Called every 30 minutes by APScheduler. Processes all pending drip batches."""
+    """Called every 30 minutes by APScheduler. Sends at most 50 emails/campaign/wave/day."""
     now_utc      = datetime.utcnow()
     now_iso      = now_utc.isoformat()
     in_biz_hours = _is_business_hours()
+    today_str    = _today_utc_str()
 
     print(f"\n[Scheduler] {'='*55}")
-    print(f"[Scheduler] Tick at {now_utc.strftime('%Y-%m-%d %H:%M UTC')}")
-    print(f"[Scheduler] Business hours: {'✅ YES' if in_biz_hours else '⏰ NO'}")
+    print(f"[Scheduler] Tick at        : {now_utc.strftime('%Y-%m-%d %H:%M UTC')}")
+    print(f"[Scheduler] Today          : {today_str}")
+    print(f"[Scheduler] Business hours : {'YES' if in_biz_hours else 'NO'}")
+    print(f"[Scheduler] Daily limit    : {DAILY_EMAIL_LIMIT} emails/campaign/wave/day")
     print(f"[Scheduler] {'='*55}")
 
     supabase_url = _get_supabase_url()
 
-    # ── TYPE A: Day 1 in-progress batches ─────────────────────────────────
-    # Campaigns where Day 1 started but hasn't finished all batches yet.
-    # drip_day1_sent_at IS NULL = not fully complete
-    # drip_day1_delivered > 0   = at least one batch already sent
-    # No business hours check — continue Day 1 immediately
+    # ── TYPE A: Wave 1 -- continuing daily batches (no business hours gate) ──
+    # Fetches ALL active campaigns where Wave 1 is not yet complete.
+    # The _already_sent_today() check inside _send_drip_wave handles campaigns
+    # that already sent today -- they are silently skipped.
     resp_a = requests.get(
         f"{supabase_url}/rest/v1/blast_campaigns"
         f"?status=eq.active"
-        f"&drip_day1_sent_at=is.null"
-        f"&drip_day1_delivered=gt.0",
+        f"&drip_day1_sent_at=is.null",
         headers=_headers()
     )
-    day1_inprogress = resp_a.json() if resp_a.status_code == 200 else []
+    wave1_campaigns = resp_a.json() if resp_a.status_code == 200 else []
+    print(f"[Scheduler] Wave 1 active campaigns : {len(wave1_campaigns)}")
 
-    if day1_inprogress:
-        print(f"[Scheduler] Day 1 in-progress campaigns: {len(day1_inprogress)}")
-        for campaign in day1_inprogress:
-            cid         = campaign["id"]
-            already     = int(campaign.get("drip_day1_delivered") or 0)
-            plan        = campaign.get("plan_name", "starter")
-            plan_limit  = _get_limit_for_plan(plan)
-            print(f"[Scheduler] Resuming Day 1 for {cid}: {already}/{plan_limit} sent")
-            stats = _send_drip_wave(campaign, drip_day=1)
-            _update_campaign_after_wave(cid, drip_day=1, stats=stats)
-    else:
-        print("[Scheduler] No Day 1 in-progress campaigns")
+    for campaign in wave1_campaigns:
+        cid        = campaign["id"]
+        already    = int(campaign.get("drip_day1_delivered") or 0)
+        plan       = campaign.get("plan_name", "starter")
+        plan_limit = _get_limit_for_plan(plan)
+        last_date  = campaign.get("drip_day1_last_date", "never")
+        print(f"[Scheduler] --> Wave 1 | campaign={cid} | "
+              f"{already}/{plan_limit} sent | last_batch={last_date}")
+        stats = _send_drip_wave(campaign, drip_day=1)
+        _update_campaign_after_wave(cid, drip_day=1, stats=stats)
 
-    # ── TYPE B: Day 4 due (business hours only) ────────────────────────────
-    # drip_day1_sent_at NOT NULL = Day 1 fully complete (all batches done)
-    # drip_day2_sent_at IS NULL  = Day 4 not fully complete yet
-    # day4_scheduled_for <= NOW  = it's time to send
-    # This query automatically picks up both fresh Day 4 starts AND
-    # in-progress Day 4 batches because sent_at stays NULL while in progress
+    # ── TYPE B: Wave 2 follow-up -- business hours only ──────────────────────
+    # Conditions to qualify:
+    #   drip_day1_sent_at IS NOT NULL  --> Wave 1 fully complete
+    #   drip_day2_sent_at IS NULL      --> Wave 2 not yet complete
+    #   day4_scheduled_for <= NOW      --> scheduled start date has arrived
     if in_biz_hours:
         resp4 = requests.get(
             f"{supabase_url}/rest/v1/blast_campaigns"
@@ -517,22 +545,27 @@ def run_scheduler_tick():
             f"&day4_scheduled_for=lte.{now_iso}",
             headers=_headers()
         )
-        day4_campaigns = resp4.json() if resp4.status_code == 200 else []
-        print(f"[Scheduler] Day 4 campaigns due: {len(day4_campaigns)}")
+        wave2_campaigns = resp4.json() if resp4.status_code == 200 else []
+        print(f"[Scheduler] Wave 2 campaigns due    : {len(wave2_campaigns)}")
 
-        for campaign in day4_campaigns:
+        for campaign in wave2_campaigns:
             cid        = campaign["id"]
             already    = int(campaign.get("drip_day2_delivered") or 0)
             plan       = campaign.get("plan_name", "starter")
             plan_limit = _get_limit_for_plan(plan)
-            print(f"[Scheduler] Processing Day 4 for {cid}: {already}/{plan_limit} sent")
+            last_date  = campaign.get("drip_day2_last_date", "never")
+            print(f"[Scheduler] --> Wave 2 | campaign={cid} | "
+                  f"{already}/{plan_limit} sent | last_batch={last_date}")
             stats = _send_drip_wave(campaign, drip_day=4)
             _update_campaign_after_wave(cid, drip_day=4, stats=stats)
+    else:
+        print("[Scheduler] Outside business hours -- Wave 2 skipped this tick")
 
-    # ── TYPE C: Day 8 due (business hours only) ────────────────────────────
-    # drip_day2_sent_at NOT NULL = Day 4 fully complete
-    # drip_day3_sent_at IS NULL  = Day 8 not fully complete yet
-    # day8_scheduled_for <= NOW  = it's time to send
+    # ── TYPE C: Wave 3 reminder -- business hours only ────────────────────────
+    # Conditions to qualify:
+    #   drip_day2_sent_at IS NOT NULL  --> Wave 2 fully complete
+    #   drip_day3_sent_at IS NULL      --> Wave 3 not yet complete
+    #   day8_scheduled_for <= NOW      --> scheduled start date has arrived
     if in_biz_hours:
         resp8 = requests.get(
             f"{supabase_url}/rest/v1/blast_campaigns"
@@ -542,19 +575,23 @@ def run_scheduler_tick():
             f"&day8_scheduled_for=lte.{now_iso}",
             headers=_headers()
         )
-        day8_campaigns = resp8.json() if resp8.status_code == 200 else []
-        print(f"[Scheduler] Day 8 campaigns due: {len(day8_campaigns)}")
+        wave3_campaigns = resp8.json() if resp8.status_code == 200 else []
+        print(f"[Scheduler] Wave 3 campaigns due    : {len(wave3_campaigns)}")
 
-        for campaign in day8_campaigns:
+        for campaign in wave3_campaigns:
             cid        = campaign["id"]
             already    = int(campaign.get("drip_day3_delivered") or 0)
             plan       = campaign.get("plan_name", "starter")
             plan_limit = _get_limit_for_plan(plan)
-            print(f"[Scheduler] Processing Day 8 for {cid}: {already}/{plan_limit} sent")
+            last_date  = campaign.get("drip_day3_last_date", "never")
+            print(f"[Scheduler] --> Wave 3 | campaign={cid} | "
+                  f"{already}/{plan_limit} sent | last_batch={last_date}")
             stats = _send_drip_wave(campaign, drip_day=8)
             _update_campaign_after_wave(cid, drip_day=8, stats=stats)
+    else:
+        print("[Scheduler] Outside business hours -- Wave 3 skipped this tick")
 
     if not in_biz_hours:
-        print("[Scheduler] Outside business hours — Day 4 & Day 8 skipped")
+        print("[Scheduler] Wave 2 & Wave 3 resume at next business hours window")
 
     print(f"[Scheduler] Tick complete\n")

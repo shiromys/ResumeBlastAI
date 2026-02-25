@@ -72,8 +72,7 @@ const PLAN_CONFIG = {
 const PAID_KEYS = ['starter', 'basic', 'professional', 'growth', 'advanced', 'premium']
 
 function LandingPage({ onGetStarted, user }) {
-  const [plans, setPlans]               = useState({})
-  const [activeTab, setActiveTab]       = useState('basic')
+  const [plans, setPlans] = useState({})
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -91,7 +90,8 @@ function LandingPage({ onGetStarted, user }) {
   }, [])
 
   const handlePlanSelection = async (planKey) => {
-    if (PLAN_CONFIG[planKey]?.comingSoon) return
+    const isDisabled = planKey !== 'starter' && planKey !== 'basic' && planKey !== 'free'
+    if (isDisabled) return
     if (planKey === 'free' || user) { onGetStarted(); return }
     try {
       let guestId = localStorage.getItem('rb_guest_tracker_id')
@@ -110,9 +110,6 @@ function LandingPage({ onGetStarted, user }) {
   }
 
   const getLimit = (key) => plans[key]?.recruiter_limit || PLAN_CONFIG[key]?.defaultLimit || 0
-
-  const activeConfig = PLAN_CONFIG[activeTab]
-  const activePrice  = getPriceParts(activeTab)
 
   return (
     <div className="landing-page">
@@ -159,254 +156,184 @@ function LandingPage({ onGetStarted, user }) {
       {/* ── PRICING ── */}
       <section id="pricing" className="pricing">
         <h2>Choose Your Plan</h2>
-        <p className="section-subtitle">Start free. Upgrade for maximum exposure with our 3-wave drip system.</p>
+        <p className="section-subtitle">Flexible plans that scale with your job search</p>
 
-        <div style={{maxWidth:'1100px',margin:'50px auto 0',padding:'0 20px'}}>
+        <div style={{ maxWidth: '1200px', margin: '50px auto 0', padding: '0 20px' }}>
 
-          {/* Free card — same style as existing cards */}
-          <div style={{display:'flex',justifyContent:'center',marginBottom:'32px'}}>
-            <div className="pricing-card" style={{
-              width:'300px',minWidth:'280px',position:'relative',
-              border:'2px solid #DC2626',padding:'0'
-            }}>
-              <div className="price-header" style={{padding:'20px 20px 10px',borderBottom:'1px solid #F3F4F6'}}>
-                <h3 style={{fontSize:'20px',fontWeight:'700',margin:'0 0 5px',color:'#1F2937'}}>Free Plan</h3>
-                <div className="price-tag" style={{margin:'5px 0',display:'flex',alignItems:'flex-start',justifyContent:'center'}}>
-                  <span className="currency" style={{fontSize:'20px',fontWeight:'600',color:'#374151',marginTop:'4px'}}>$</span>
-                  <span className="amount" style={{fontSize:'48px',fontWeight:'800',color:'#1F2937',lineHeight:'1'}}>0</span>
-                </div>
-                <p className="price-description" style={{fontSize:'12px',color:'#6B7280',margin:'5px 0'}}>One-time send • No drip follow-ups</p>
-              </div>
-              <ul className="features-list" style={{listStyle:'none',padding:'15px 25px',margin:'0'}}>
-                {[
-                  <><strong>{getLimit('free')} Verified Recruiters</strong></>,
-                  'Resume Analysis',
-                  'Guaranteed Email Delivery',
-                  'Professional Template',
-                  'Email support'
-                ].map((item, i, arr) => (
-                  <li key={i} style={{padding:'5px 0',borderBottom:i<arr.length-1?'1px solid #F3F4F6':'none',fontSize:'13px',color:'#374151',display:'flex',alignItems:'center'}}>
-                    <span style={{color:'#DC2626',marginRight:'8px',fontSize:'14px',fontWeight:'700'}}>✓</span>
-                    {item}
-                  </li>
-                ))}
-              </ul>
-              <div style={{padding:'0 20px 20px'}}>
-                <button className="cta-button" onClick={() => handlePlanSelection('free')}
-                  style={{background:'white',color:'#DC2626',width:'100%',padding:'12px',fontSize:'14px',fontWeight:'700',border:'2px solid #DC2626',borderRadius:'6px',cursor:'pointer'}}>
-                  Try for Free
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* Drip plans header */}
-          <div style={{textAlign:'center',marginBottom:'24px'}}>
-            <div style={{
-              display:'inline-flex',alignItems:'center',gap:'10px',
-              background:'linear-gradient(135deg,#DC2626,#991B1B)',
-              color:'white',padding:'8px 24px',borderRadius:'24px',
-              fontSize:'13px',fontWeight:'700',letterSpacing:'0.5px',
-              boxShadow:'0 4px 12px rgba(220,38,38,0.3)'
-            }}>
-              📧 3-WAVE DRIP CAMPAIGN PLANS — Day 1 → Day 4 → Day 8 📧
-            </div>
-          </div>
-
-          {/* Plan tab selector */}
-          <div style={{display:'flex',gap:'8px',justifyContent:'center',flexWrap:'wrap',marginBottom:'28px'}}>
+          {/* MAIN PAID TIERS GRID */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: '24px',
+            alignItems: 'stretch',
+            marginBottom: '40px'
+          }}>
             {PAID_KEYS.map(key => {
               const c = PLAN_CONFIG[key]
-              const isActive = activeTab === key
+              const p = getPriceParts(key)
+              const limit = getLimit(key)
+              
+              // Only Starter and Basic are enabled
+              const isDisabled = key !== 'starter' && key !== 'basic'
+              
               return (
-                <button key={key} onClick={() => { if(!c.comingSoon) setActiveTab(key) }}
-                  style={{
-                    padding:'8px 16px',borderRadius:'8px',
-                    border: isActive ? '2px solid #DC2626' : c.comingSoon ? '2px solid #D1D5DB' : '2px solid #E5E7EB',
-                    background: isActive ? '#DC2626' : c.comingSoon ? '#F3F4F6' : 'white',
-                    color: isActive ? 'white' : c.comingSoon ? '#9CA3AF' : '#374151',
-                    fontWeight:'600',fontSize:'13px',cursor:c.comingSoon?'not-allowed':'pointer',
-                    transition:'all 0.2s',position:'relative',opacity:c.comingSoon?0.75:1
-                  }}>
-                  {c.label}
-                  {c.comingSoon && (
-                    <span style={{
-                      position:'absolute',top:'-10px',left:'50%',transform:'translateX(-50%)',
-                      background:'#6B7280',color:'white',fontSize:'9px',
-                      fontWeight:'800',padding:'2px 7px',borderRadius:'10px',whiteSpace:'nowrap'
-                    }}>COMING SOON</span>
+                <div key={key} style={{
+                  background: 'white',
+                  padding: '32px 24px',
+                  borderRadius: '16px',
+                  border: '2px solid #DC2626',
+                  boxShadow: '0 12px 24px -8px rgba(220,38,38,0.15)',
+                  position: 'relative',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  textAlign: 'left',
+                  transition: 'transform 0.2s, box-shadow 0.2s'
+                }}>
+                  {c.badge && (
+                    <div style={{
+                      position: 'absolute', top: '-12px', left: '24px',
+                      background: '#DC2626',
+                      color: 'white',
+                      padding: '4px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '700', whiteSpace: 'nowrap'
+                    }}>
+                      {c.badge}
+                    </div>
                   )}
-                  {!c.comingSoon && c.badge && (
-                    <span style={{
-                      position:'absolute',top:'-10px',right:'-4px',
-                      background:'#FBBF24',color:'#000',fontSize:'9px',
-                      fontWeight:'800',padding:'2px 6px',borderRadius:'10px',whiteSpace:'nowrap'
-                    }}>{c.badge}</span>
+                  {isDisabled && !c.badge && (
+                    <div style={{
+                      position: 'absolute', top: '-12px', left: '24px',
+                      background: '#6B7280', color: 'white',
+                      padding: '4px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: '700', whiteSpace: 'nowrap'
+                    }}>
+                      COMING SOON
+                    </div>
                   )}
-                </button>
+
+                  <h3 style={{ fontSize: '20px', fontWeight: '700', color: '#111827', margin: '0 0 16px' }}>
+                    {c.label}
+                  </h3>
+                  
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '36px', fontWeight: '800', color: '#111827', lineHeight: '1' }}>
+                      {p.full === '$0.00' ? '$0' : p.full}
+                    </span>
+                    <span style={{ fontSize: '14px', color: '#6B7280', fontWeight: '500' }}>
+                      / one-time
+                    </span>
+                  </div>
+                  
+                  <p style={{ fontSize: '14px', color: '#4B5563', margin: '0 0 24px', minHeight: '42px', lineHeight: '1.5' }}>
+                    Maximum exposure with automated drip follow-ups.
+                  </p>
+                  
+                  <button 
+                    onClick={() => handlePlanSelection(key)}
+                    disabled={isDisabled}
+                    style={{
+                      width: '100%',
+                      padding: '12px',
+                      borderRadius: '8px',
+                      fontSize: '14px',
+                      fontWeight: '600',
+                      cursor: isDisabled ? 'not-allowed' : 'pointer',
+                      background: '#DC2626',
+                      color: 'white',
+                      border: '1px solid #DC2626',
+                      marginBottom: '32px',
+                      transition: 'all 0.2s',
+                      opacity: isDisabled ? 0.6 : 1
+                    }}
+                  >
+                    {isDisabled ? 'Coming Soon' : 'Get started'}
+                  </button>
+
+                  <div style={{ flexGrow: 1 }}>
+                    <div style={{ fontSize: '14px', fontWeight: '700', color: '#111827', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ color: '#111827' }}>●</span> {limit.toLocaleString()} verified recruiters
+                    </div>
+                    {c.drip && (
+                      <div style={{ fontSize: '14px', fontWeight: '700', color: '#111827', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ color: '#111827' }}>●</span> 3-wave drip campaign
+                      </div>
+                    )}
+                    
+                    <div style={{ height: '1px', background: '#E5E7EB', margin: '16px 0' }}></div>
+                    
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {c.features
+                        .filter(f => !f.toLowerCase().includes('verified recruiters') && !f.toLowerCase().includes('3-wave drip') && !f.toLowerCase().includes('day 1 → day 4 → day 8'))
+                        .map((feature, idx) => (
+                        <li key={idx} style={{ 
+                          display: 'flex', alignItems: 'flex-start', gap: '10px', 
+                          fontSize: '14px', color: '#4B5563', marginBottom: '12px', lineHeight: '1.4'
+                        }}>
+                          <span style={{ color: '#059669', flexShrink: 0, fontWeight: 'bold' }}>✓</span>
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
               )
             })}
           </div>
 
-          {/* Active plan card — matches existing card style exactly */}
-          <div className="pricing-card featured"
-            style={{
-              maxWidth:'680px',margin:'0 auto',
-              position:'relative',border:'2px solid #DC2626',padding:'0',
-              boxShadow:'0 8px 32px rgba(220,38,38,0.12)',
-              transition:'all 0.3s ease'
-            }}>
-            {activeConfig.badge && (
-              <div className="popular-badge" style={{
-                background:'#DC2626',position:'absolute',top:'-12px',left:'50%',
-                transform:'translateX(-50%)',padding:'3px 14px',borderRadius:'20px',
-                fontSize:'11px',fontWeight:'700',color:'white',whiteSpace:'nowrap'
-              }}>
-                {activeConfig.badge}
-              </div>
-            )}
-
-            <div className="price-header" style={{padding:'28px 28px 16px',borderBottom:'1px solid #F3F4F6'}}>
-              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:'16px'}}>
-                <div>
-                  <h3 style={{fontSize:'22px',fontWeight:'700',margin:'0 0 6px',color:'#1F2937'}}>{activeConfig.label} Plan</h3>
-                  <div className="price-tag" style={{display:'flex',alignItems:'flex-start'}}>
-                    <span className="currency" style={{fontSize:'20px',fontWeight:'600',color:'#374151',marginTop:'6px'}}>$</span>
-                    <span className="amount" style={{fontSize:'52px',fontWeight:'800',color:'#1F2937',lineHeight:'1'}}>
-                      {activePrice.whole}
-                    </span>
-                    <span style={{fontSize:'24px',fontWeight:'700',color:'#374151',marginTop:'14px'}}>.{activePrice.fraction}</span>
-                  </div>
-                  <p className="price-description" style={{fontSize:'12px',color:'#6B7280',margin:'4px 0 0'}}>One payment • Drip campaign runs automatically</p>
-                </div>
-                <div style={{
-                  background:'linear-gradient(135deg,#FEF2F2,#FEE2E2)',
-                  border:'1px solid #FECACA',borderRadius:'12px',
-                  padding:'12px 20px',textAlign:'center'
-                }}>
-                  <div style={{fontSize:'36px',fontWeight:'900',color:'#DC2626',lineHeight:'1'}}>
-                    {getLimit(activeTab).toLocaleString()}
-                  </div>
-                  <div style={{fontSize:'11px',color:'#991B1B',fontWeight:'700',textTransform:'uppercase',letterSpacing:'0.5px',marginTop:'2px'}}>
-                    Recruiters
-                  </div>
-                </div>
-              </div>
-
-              {/* Drip wave badges */}
-              <div style={{display:'flex',gap:'8px',marginTop:'16px',flexWrap:'wrap'}}>
-                {['Day 1 — Introduction','Day 4 — Follow-up','Day 8 — Final Reminder'].map((label,i) => (
-                  <div key={i} style={{
-                    background:'#F0FDF4',border:'1px solid #BBF7D0',
-                    borderRadius:'20px',padding:'4px 12px',
-                    fontSize:'12px',color:'#166534',fontWeight:'600'
-                  }}>✓ {label}</div>
-                ))}
-              </div>
-            </div>
-
-            <ul className="features-list" style={{listStyle:'none',padding:'16px 28px',margin:'0'}}>
-              {activeConfig.features.map((f,i,arr) => (
-                <li key={i} style={{
-                  padding:'6px 0',
-                  borderBottom:i<arr.length-1?'1px solid #F3F4F6':'none',
-                  fontSize:'13px',color:'#374151',
-                  display:'flex',alignItems:'center'
-                }}>
-                  <span style={{color:'#DC2626',marginRight:'8px',fontSize:'14px',fontWeight:'700'}}>✓</span>
-                  {f}
-                </li>
-              ))}
-            </ul>
-
-            <div style={{padding:'0 28px 28px'}}>
-              {activeConfig.comingSoon ? (
-                <>
-                  <div style={{
-                    width:'100%',padding:'14px',boxSizing:'border-box',
-                    background:'#F3F4F6',border:'2px dashed #D1D5DB',
-                    borderRadius:'6px',textAlign:'center',
-                    color:'#6B7280',fontWeight:'700',fontSize:'15px'
-                  }}>
-                    &#x1F51C; Coming Soon — Available Shortly
-                  </div>
-                  <p style={{textAlign:'center',fontSize:'12px',color:'#9CA3AF',margin:'10px 0 0'}}>
-                    Try Starter or Basic while this plan is being prepared.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <button className="cta-button"
-                    onClick={() => handlePlanSelection(activeTab)}
-                    style={{
-                      background:'#DC2626',color:'white',width:'100%',
-                      padding:'14px',fontSize:'15px',fontWeight:'700',
-                      border:'none',borderRadius:'6px',cursor:'pointer',
-                      boxShadow:'0 4px 14px rgba(220,38,38,0.35)',
-                      transition:'all 0.2s'
-                    }}>
-                    Get {activeConfig.label} Plan
-                  </button>
-                  <p style={{textAlign:'center',fontSize:'12px',color:'#9CA3AF',margin:'10px 0 0'}}>
-                    &#x1F512; Secure checkout via Stripe
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Quick compare table */}
-          <div style={{marginTop:'36px',overflowX:'auto'}}>
-            <table style={{width:'100%',borderCollapse:'collapse',fontSize:'13px'}}>
-              <thead>
-                <tr style={{background:'#F9FAFB'}}>
-                  {['Plan','Price','Recruiters','Drip'].map(h => (
-                    <th key={h} style={{padding:'12px 16px',textAlign:h==='Plan'?'left':'center',fontWeight:'700',color:'#374151',borderBottom:'2px solid #E5E7EB'}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {['free',...PAID_KEYS].map((key, i) => {
-                  const c   = PLAN_CONFIG[key]
-                  const p   = getPriceParts(key)
-                  const isA = key === activeTab
-                  return (
-                    <tr key={key}
-                      onClick={() => { if(key !== 'free') setActiveTab(key) }}
-                      style={{
-                        background: isA ? '#FEF2F2' : i%2===0?'white':'#F9FAFB',
-                        cursor: (key !== 'free' && !c.comingSoon) ? 'pointer' : 'not-allowed',
-                        borderLeft: isA ? '3px solid #DC2626' : '3px solid transparent',
-                        transition:'all 0.15s'
-                      }}>
-                      <td style={{padding:'10px 16px',fontWeight:isA?'700':'500',color:isA?'#DC2626':c.comingSoon?'#9CA3AF':'#374151'}}>
-                        {c.label}
-                        {c.comingSoon && <span style={{fontSize:'10px',background:'#6B7280',color:'white',padding:'1px 6px',borderRadius:'8px',marginLeft:'6px'}}>Soon</span>}
-                        {!c.comingSoon && c.badge && <span style={{fontSize:'10px',background:'#FBBF24',padding:'1px 6px',borderRadius:'8px',marginLeft:'6px',color:'#000'}}>{c.badge}</span>}
-                      </td>
-                      <td style={{padding:'10px 16px',textAlign:'center',fontWeight:'700',color:c.comingSoon?'#9CA3AF':'#1F2937'}}>{p.full === '$0.00' ? '$0' : p.full}</td>
-                      <td style={{padding:'10px 16px',textAlign:'center',color:'#374151'}}>{getLimit(key).toLocaleString()}</td>
-                      <td style={{padding:'10px 16px',textAlign:'center'}}>
-                        {c.drip
-                          ? <span style={{color:'#059669',fontWeight:'700'}}>✓ 3-wave</span>
-                          : <span style={{color:'#9CA3AF'}}>1× only</span>}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Info note */}
+          {/* FREE PLAN WIDE CARD */}
           <div style={{
-            marginTop:'32px',textAlign:'center',padding:'20px',
-            background:'#F9FAFB',borderRadius:'12px'
+            background: 'white',
+            padding: '40px',
+            borderRadius: '16px',
+            border: '1px solid #E5E7EB',
+            boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '40px',
+            marginBottom: '40px',
+            flexWrap: 'wrap',
+            textAlign: 'left'
           }}>
-            <p style={{color:'#374151',fontSize:'14px',lineHeight:'1.6',margin:0}}>
-              New to ResumeBlast.ai? Start with our <strong>Free Plan</strong> to {getLimit('free')} top recruiters.{' '}
-              Ready for more? Upgrade to reach up to <strong>{getLimit('premium').toLocaleString()} hiring managers</strong> with our 3-wave drip system.
-            </p>
+            <div style={{ flex: '1 1 300px' }}>
+              <h3 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 8px' }}>
+                {PLAN_CONFIG.free.label}
+              </h3>
+              <p style={{ fontSize: '15px', color: '#4B5563', margin: '0 0 24px', lineHeight: '1.5' }}>
+                $0 free forever – the perfect plan to get your job search started with basic delivery.
+              </p>
+              <button 
+                onClick={() => handlePlanSelection('free')}
+                style={{
+                  padding: '12px 24px',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  background: 'white',
+                  color: '#374151',
+                  border: '1px solid #D1D5DB',
+                  transition: 'all 0.2s',
+                }}
+                onMouseOver={(e) => { e.currentTarget.style.background = '#F9FAFB' }}
+                onMouseOut={(e) => { e.currentTarget.style.background = 'white' }}
+              >
+                Start for free
+              </button>
+            </div>
+
+            <div style={{ flex: '2 1 400px' }}>
+               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+                 {PLAN_CONFIG.free.features.map((feature, idx) => (
+                   <li key={idx} style={{ 
+                     display: 'flex', alignItems: 'center', gap: '10px', 
+                     fontSize: '14px', color: '#4B5563', lineHeight: '1.4'
+                   }}>
+                     <span style={{ color: '#059669', flexShrink: 0, fontWeight: 'bold' }}>✓</span>
+                     <span>{feature}</span>
+                   </li>
+                 ))}
+               </ul>
+            </div>
           </div>
         </div>
       </section>

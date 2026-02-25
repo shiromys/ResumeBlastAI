@@ -210,9 +210,9 @@ IMPORTANT:
 
         print("🤖 Sending request to Claude AI...")
         
-        # Call Claude API
+        # ✅ FIXED: Updated to a valid, currently available Claude model
         message = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-haiku-4-5",
             max_tokens=4000,
             temperature=0.3,
             messages=[{
