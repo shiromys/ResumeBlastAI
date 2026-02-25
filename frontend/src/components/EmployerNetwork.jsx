@@ -1,10 +1,4 @@
 // src/components/EmployerNetwork.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// Full employer landing page rendered when viewMode === 'employer-network'
-// No react-router — works entirely with App.jsx's viewMode/prop system.
-// onLogin prop → opens RecruiterAuth modal (same as clicking "Register or Log In")
-// onViewChange prop → to navigate back if needed
-// ─────────────────────────────────────────────────────────────────────────────
 import { useState, useEffect, useRef } from 'react'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
@@ -93,7 +87,7 @@ function EmployerNetwork({ onLogin, onViewChange }) {
         setFormState('error')
       }
     } catch {
-      setFormState('success') // Fallback: show success if endpoint not yet deployed
+      setFormState('success') 
     }
   }
 
@@ -144,94 +138,18 @@ function EmployerNetwork({ onLogin, onViewChange }) {
   return (
     <div style={{ background: t.white, color: t.gray900, fontFamily: 'Inter, -apple-system, sans-serif', fontSize: '16px', lineHeight: '1.6', overflowX: 'hidden' }}>
 
-      {/* ── HERO ── */}
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '5rem 2rem 4rem' }}>
-
-        {/* Back link */}
-        <button
-          onClick={() => onViewChange && onViewChange('recruiter')}
-          style={{ background: 'none', border: 'none', color: t.gray500, fontSize: '0.875rem', cursor: 'pointer', marginBottom: '2rem', padding: 0, display: 'flex', alignItems: 'center', gap: '4px' }}
-        >
-          ← Back to Recruiters
-        </button>
-
-        <div style={{
-          display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
-          background: t.redLight, color: t.red, fontSize: '0.73rem', fontWeight: '600',
-          letterSpacing: '0.07em', textTransform: 'uppercase',
-          padding: '0.35rem 0.85rem', borderRadius: '100px', marginBottom: '1.75rem',
-          animation: 'enFadeUp 0.5s ease both',
-        }}>
-          <span style={{ width: '6px', height: '6px', background: t.red, borderRadius: '50%', animation: 'enPulse 2s infinite', display: 'inline-block' }} />
-          Employer Network — Now Accepting Applications
-        </div>
-
-        <h1 style={{
-          fontSize: 'clamp(2.4rem, 5.5vw, 4.5rem)', fontWeight: '800',
-          letterSpacing: '-0.04em', lineHeight: 1.06, color: t.black,
-          maxWidth: '16ch', marginBottom: '1.5rem',
-          animation: 'enFadeUp 0.5s 0.08s ease both',
-        }}>
-          Hire <span style={{ color: t.red }}>Pre-Screened</span> Candidates. No Job Board Noise.
-        </h1>
-
-        <p style={{ fontSize: '1.05rem', color: t.gray500, maxWidth: '54ch', lineHeight: 1.75, marginBottom: '2.5rem', animation: 'enFadeUp 0.5s 0.15s ease both' }}>
-          Access AI-analyzed resumes from motivated job seekers actively distributing their profiles.
-          Skip crowded job boards and connect directly with verified tech talent — ready to interview.
-        </p>
-
-        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', animation: 'enFadeUp 0.5s 0.22s ease both' }}>
-          <a href="#employer-access" style={{
-            background: t.red, color: '#fff', padding: '0.75rem 1.75rem', borderRadius: '8px',
-            fontWeight: '600', fontSize: '0.95rem', textDecoration: 'none',
-            display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
-            boxShadow: '0 1px 2px rgba(220,38,38,0.3)', transition: 'background 0.15s',
-          }}
-            onMouseOver={(e) => e.currentTarget.style.background = t.redDark}
-            onMouseOut={(e) => e.currentTarget.style.background = t.red}
-          >
-            Request Employer Access →
-          </a>
-          <button
-            onClick={() => onLogin && onLogin()}
-            style={{
-              background: t.white, color: t.gray700, padding: '0.75rem 1.75rem',
-              borderRadius: '8px', border: `1px solid ${t.gray300}`,
-              fontWeight: '600', fontSize: '0.95rem', cursor: 'pointer',
-              fontFamily: 'Inter, sans-serif', transition: 'border-color 0.15s, background 0.15s',
-            }}
-            onMouseOver={(e) => { e.currentTarget.style.background = t.gray50; e.currentTarget.style.borderColor = t.gray500 }}
-            onMouseOut={(e) => { e.currentTarget.style.background = t.white; e.currentTarget.style.borderColor = t.gray300 }}
-          >
-            Recruiter Login / Register
-          </button>
-        </div>
-
-        {/* Stats row */}
-        <div style={{
-          display: 'flex', gap: '2.5rem', flexWrap: 'wrap',
-          marginTop: '4rem', paddingTop: '2.5rem', borderTop: `1px solid ${t.gray200}`,
-          animation: 'enFadeUp 0.5s 0.3s ease both',
-        }}>
-          {[
-            { num: 'AI', suffix: '-Scored', label: 'Every resume analyzed & structured' },
-            { num: '0', suffix: 'x', label: 'Job board friction' },
-            { num: '10', suffix: '+', label: 'Industries covered' },
-            { num: '24', suffix: 'h', label: 'Access review turnaround' },
-          ].map((s, i) => (
-            <div key={i}>
-              <div style={{ fontSize: '1.75rem', fontWeight: '800', color: t.black, letterSpacing: '-0.03em', lineHeight: 1 }}>
-                {s.num}<span style={{ color: t.red }}>{s.suffix}</span>
-              </div>
-              <div style={{ fontSize: '0.78rem', color: t.gray500, marginTop: '0.2rem' }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── FORM (moved to top) ── */}
-      <div id="employer-access" style={{ background: t.gray50, borderTop: `1px solid ${t.gray200}`, padding: '6rem 2rem' }}>
+      {/* ✅ MOVED TO TOP: FORM SECTION */}
+      <div id="employer-access" style={{ background: t.gray50, borderBottom: `1px solid ${t.gray200}`, padding: '2rem 2rem 4rem' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+          
+          {/* Back link moved into the Form section header so it remains at the top */}
+          <button
+            onClick={() => onViewChange && onViewChange('recruiter')}
+            style={{ background: 'none', border: 'none', color: t.gray500, fontSize: '0.875rem', cursor: 'pointer', marginBottom: '2rem', padding: 0, display: 'flex', alignItems: 'center', gap: '4px' }}
+          >
+            ← Back to Recruiters
+          </button>
+
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '4rem', alignItems: 'start' }}>
 
             {/* Left */}
@@ -441,6 +359,82 @@ function EmployerNetwork({ onLogin, onViewChange }) {
               )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ── HERO SECTION MOVED BELOW FORM ── */}
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '5rem 2rem 4rem' }}>
+        <div style={{
+          display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+          background: t.redLight, color: t.red, fontSize: '0.73rem', fontWeight: '600',
+          letterSpacing: '0.07em', textTransform: 'uppercase',
+          padding: '0.35rem 0.85rem', borderRadius: '100px', marginBottom: '1.75rem',
+          animation: 'enFadeUp 0.5s ease both',
+        }}>
+          <span style={{ width: '6px', height: '6px', background: t.red, borderRadius: '50%', animation: 'enPulse 2s infinite', display: 'inline-block' }} />
+          Employer Network — Now Accepting Applications
+        </div>
+
+        <h1 style={{
+          fontSize: 'clamp(2.4rem, 5.5vw, 4.5rem)', fontWeight: '800',
+          letterSpacing: '-0.04em', lineHeight: 1.06, color: t.black,
+          maxWidth: '16ch', marginBottom: '1.5rem',
+          animation: 'enFadeUp 0.5s 0.08s ease both',
+        }}>
+          Hire <span style={{ color: t.red }}>Pre-Screened</span> Candidates. No Job Board Noise.
+        </h1>
+
+        <p style={{ fontSize: '1.05rem', color: t.gray500, maxWidth: '54ch', lineHeight: 1.75, marginBottom: '2.5rem', animation: 'enFadeUp 0.5s 0.15s ease both' }}>
+          Access AI-analyzed resumes from motivated job seekers actively distributing their profiles.
+          Skip crowded job boards and connect directly with verified tech talent — ready to interview.
+        </p>
+
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', animation: 'enFadeUp 0.5s 0.22s ease both' }}>
+          <a href="#employer-access" style={{
+            background: t.red, color: '#fff', padding: '0.75rem 1.75rem', borderRadius: '8px',
+            fontWeight: '600', fontSize: '0.95rem', textDecoration: 'none',
+            display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+            boxShadow: '0 1px 2px rgba(220,38,38,0.3)', transition: 'background 0.15s',
+          }}
+            onMouseOver={(e) => e.currentTarget.style.background = t.redDark}
+            onMouseOut={(e) => e.currentTarget.style.background = t.red}
+          >
+            Request Employer Access →
+          </a>
+          <button
+            onClick={() => onLogin && onLogin()}
+            style={{
+              background: t.white, color: t.gray700, padding: '0.75rem 1.75rem',
+              borderRadius: '8px', border: `1px solid ${t.gray300}`,
+              fontWeight: '600', fontSize: '0.95rem', cursor: 'pointer',
+              fontFamily: 'Inter, sans-serif', transition: 'border-color 0.15s, background 0.15s',
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.background = t.gray50; e.currentTarget.style.borderColor = t.gray500 }}
+            onMouseOut={(e) => { e.currentTarget.style.background = t.white; e.currentTarget.style.borderColor = t.gray300 }}
+          >
+            Recruiter Login / Register
+          </button>
+        </div>
+
+        {/* Stats row */}
+        <div style={{
+          display: 'flex', gap: '2.5rem', flexWrap: 'wrap',
+          marginTop: '4rem', paddingTop: '2.5rem', borderTop: `1px solid ${t.gray200}`,
+          animation: 'enFadeUp 0.5s 0.3s ease both',
+        }}>
+          {[
+            { num: 'AI', suffix: '-Scored', label: 'Every resume analyzed & structured' },
+            { num: '0', suffix: 'x', label: 'Job board friction' },
+            { num: '10', suffix: '+', label: 'Industries covered' },
+            { num: '24', suffix: 'h', label: 'Access review turnaround' },
+          ].map((s, i) => (
+            <div key={i}>
+              <div style={{ fontSize: '1.75rem', fontWeight: '800', color: t.black, letterSpacing: '-0.03em', lineHeight: 1 }}>
+                {s.num}<span style={{ color: t.red }}>{s.suffix}</span>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: t.gray500, marginTop: '0.2rem' }}>{s.label}</div>
+            </div>
+          ))}
         </div>
       </div>
 
