@@ -115,7 +115,7 @@ function EmployerNetworkBanner({ onNavigateToEmployerNetwork }) {
             color: '#fff', letterSpacing: '-0.03em', lineHeight: 1.15,
             margin: 0, textShadow: '0 1px 4px rgba(0,0,0,0.25)',
           }}>
-            🎯 Join the Recruiter Network
+             Join the Recruiter Network
           </h3>
           <p style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.82)', margin: '6px 0 0', lineHeight: 1.5 }}>
             AI-screened resumes · No job board noise · Hire direct

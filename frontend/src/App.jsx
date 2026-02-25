@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom'
 import { supabase } from './lib/supabase'
 
 // Components
@@ -55,11 +56,13 @@ const detectGuestSession = (params) => {
 function App() {
   usePageTracking()
 
+  const navigate = useNavigate()
+  const location = useLocation()
+
   const [user, setUser] = useState(null)
   const [isGuest, setIsGuest] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [showSignup, setShowSignup] = useState(false)
-  const [viewMode, setViewMode] = useState('jobseeker-home') 
   const [isRestoring, setIsRestoring] = useState(true) 
   const [paymentSuccess, setPaymentSuccess] = useState(false) 
   const [hasUploadedInSession, setHasUploadedInSession] = useState(false)
@@ -115,20 +118,23 @@ function App() {
           if (isPaymentReturn) {
             setPaymentSuccess(true)
             setHasUploadedInSession(true)
-            setViewMode('upload-workbench')
-          } else if (adminStatus) {
-            setViewMode('admin')
-          } else if (session.user.user_metadata?.role === 'recruiter') {
-            setViewMode('recruiter')
-          } else {
-            setViewMode('dashboard')
+            navigate('/workbench', { replace: true })
+          } else if (window.location.pathname === '/') {
+             // Only force navigation if landing on root
+             if (adminStatus) {
+                navigate('/admin', { replace: true })
+             } else if (session.user.user_metadata?.role === 'recruiter') {
+                navigate('/recruiter', { replace: true })
+             } else {
+                navigate('/dashboard', { replace: true })
+             }
           }
 
         } else if (isPaymentReturn && isGuestReturning) {
           console.log('✅ Guest returning from payment — routing to workbench')
           setIsGuest(true)
           setPaymentSuccess(true)
-          setViewMode('upload-workbench')
+          navigate('/workbench', { replace: true })
           setHasUploadedInSession(false)
 
           const cleanUrl = `${window.location.pathname}?payment=success&session_id=${sessionId}`
@@ -136,16 +142,11 @@ function App() {
 
         } else if (isPaymentReturn && !isGuestReturning) {
           console.warn('⚠️ Payment return but no guest session detected — going home')
-          setViewMode('jobseeker-home')
-
-        } else {
-          if (!['privacy', 'terms', 'refund'].includes(viewMode)) {
-            setViewMode('jobseeker-home')
-          }
+          navigate('/', { replace: true })
         }
       } catch (error) {
         console.error('❌ Session init error:', error)
-        setViewMode('jobseeker-home')
+        navigate('/', { replace: true })
       } finally {
         setIsRestoring(false)
       }
@@ -162,23 +163,23 @@ function App() {
         setUser(session.user)
         const adminStatus = await checkAdminStatus(session.user.email)
         setIsAdmin(adminStatus)
-        if (adminStatus) setViewMode('admin')
+        if (adminStatus) navigate('/admin')
         else {
           const role = session?.user?.user_metadata?.role
-          if (role === 'recruiter') setViewMode('recruiter')
-          else setViewMode('upload-workbench')
+          if (role === 'recruiter') navigate('/recruiter')
+          else navigate('/workbench')
         }
       } else if (event === 'SIGNED_OUT') {
         prevUserIdRef.current = null
         setUser(null)
         setIsAdmin(false)
         setIsGuest(false)
-        setViewMode('jobseeker-home')
+        navigate('/')
         setHasUploadedInSession(false)
       }
     })
     return () => subscription.unsubscribe()
-  }, [])
+  }, [navigate])
 
   const handleStartBlast = () => {
     if (!user && !isGuest) {
@@ -189,28 +190,28 @@ function App() {
     setResumeText('')
     setResumeUrl('')
     setResumeId('')
-    setViewMode('upload-workbench')
+    navigate('/workbench')
   }
 
   const handleViewChange = (view) => {
     window.scrollTo(0, 0)
     if (['privacy', 'terms', 'refund'].includes(view)) {
-      setViewMode(view)
+      navigate(`/${view}`)
       return
     }
     switch (view) {
-      case 'home': setViewMode((user || isGuest) ? 'upload-workbench' : 'jobseeker-home'); break
-      case 'recruiter': setViewMode('recruiter'); break
-      case 'employer-network': setViewMode('employer-network'); break // ✅ NEW
-      case 'dashboard': setViewMode('dashboard'); break
-      case 'contact': setViewMode('contact'); break
+      case 'home': navigate((user || isGuest) ? '/workbench' : '/'); break
+      case 'recruiter': navigate('/recruiter'); break
+      case 'employer-network': navigate('/employer-network'); break // ✅ NEW
+      case 'dashboard': navigate('/dashboard'); break
+      case 'contact': navigate('/contact'); break
       case 'admin':
-        if (isAdmin) setViewMode('admin')
+        if (isAdmin) navigate('/admin')
         else alert('You do not have admin privileges')
         break
       case 'how-it-works':
       case 'pricing':
-        setViewMode('jobseeker-home')
+        navigate('/')
         setTimeout(() => document.getElementById(view)?.scrollIntoView({ behavior: 'smooth' }), 100)
         break
       default: break
@@ -223,101 +224,22 @@ function App() {
     setIsAdmin(false)
     setIsGuest(false)
     setHasUploadedInSession(false)
-    setViewMode('jobseeker-home')
-    window.location.href = '/'
+    navigate('/')
   }
 
-  const renderContent = () => {
-    if (isRestoring) {
-      return (
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
-          <div className="spinner" style={{ width: '50px', height: '50px' }}></div>
-        </div>
-      )
-    }
-
-    if (viewMode === 'privacy' || viewMode === 'terms' || viewMode === 'refund') {
-      return <LegalPage type={viewMode} onBack={() => setViewMode(user ? 'dashboard' : 'jobseeker-home')} />
-    }
-
-    if (viewMode === 'contact') {
-      return <ContactPage onBack={() => setViewMode(user ? 'dashboard' : 'jobseeker-home')} />
-    }
-
-    if (viewMode === 'admin') {
-      if (!user || !isAdmin) return <LandingPage onGetStarted={handleStartBlast} user={user} />
-      return <AdminDashboard user={user} onExit={() => setViewMode('dashboard')} />
-    }
-
-    // ✅ NEW: Employer Network page
-    if (viewMode === 'employer-network') {
-      return (
-        <EmployerNetwork
-          onLogin={() => setShowSignup(true)}
-          onViewChange={handleViewChange}
-        />
-      )
-    }
-
-    if (viewMode === 'recruiter') {
-      if (user) return <div className="container"><RecruiterOnboarding user={user} /></div>
-      return (
-        <RecruiterLanding
-          onBackToJobSeeker={() => setViewMode('jobseeker-home')}
-          onLogin={() => setShowSignup(true)}
-          onViewChange={handleViewChange} // ✅ NEW: pass down so banner can navigate
-        />
-      )
-    }
-
-    if (user || isGuest) {
-      if (viewMode === 'dashboard' && user) return <div className="container"><UserDashboard user={user} onStartBlast={handleStartBlast} /></div>
-      if (viewMode === 'jobseeker-home') return <LandingPage onGetStarted={handleStartBlast} user={user} />
-
-      return (
-        <div className="container dashboard-container">
-          <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            {user && <button className="btn-text" onClick={() => setViewMode('dashboard')}>← Back to Dashboard</button>}
-            <h1 style={{ fontSize: '24px', margin: 0 }}>Resume Blast Workbench</h1>
-          </div>
-          {hasUploadedInSession ? (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', padding: '15px', background: '#f3f4f6', borderRadius: '8px', alignItems: 'center' }}>
-                <div><h3 style={{ margin: 0, fontSize: '18px' }}>Current Resume Analysis</h3></div>
-                <button onClick={handleStartBlast} className="btn-outline">📄 Upload Different Resume</button>
-              </div>
-              <ResumeAnalysis
-                user={user}
-                isGuest={isGuest}
-                resumeText={resumeText}
-                resumeId={resumeId}
-                resumeUrl={resumeUrl}
-                isPaymentSuccess={paymentSuccess}
-              />
-            </>
-          ) : (
-            <ResumeUpload
-              user={user}
-              isGuest={isGuest}
-              onUploadSuccess={({ text, url, id }) => {
-                setResumeText(text)
-                setResumeUrl(url)
-                setResumeId(id)
-                setHasUploadedInSession(true)
-              }}
-            />
-          )}
-        </div>
-      )
-    }
-
-    return <LandingPage onGetStarted={handleStartBlast} user={user} />
+  if (isRestoring) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+        <div className="spinner" style={{ width: '50px', height: '50px' }}></div>
+      </div>
+    )
   }
 
-  const isRecruiterDashboard = viewMode === 'recruiter' && user
-  const isAdminPage = viewMode === 'admin' && user
-  const isContactPage = viewMode === 'contact'
-  const isLegalPage = ['privacy', 'terms', 'refund'].includes(viewMode)
+  const currentPath = location.pathname
+  const isRecruiterDashboard = currentPath === '/recruiter' && user
+  const isAdminPage = currentPath === '/admin' && user
+  const isContactPage = currentPath === '/contact'
+  const isLegalPage = ['/privacy', '/terms', '/refund'].includes(currentPath)
   const shouldShowFooter = !isAdminPage && !isContactPage
 
   return (
@@ -341,20 +263,92 @@ function App() {
         className="main-content"
         style={(isRecruiterDashboard || isAdminPage || isContactPage || isLegalPage) ? { paddingTop: 0 } : {}}
       >
-        {renderContent()}
+        <Routes>
+          <Route path="/" element={<LandingPage onGetStarted={handleStartBlast} user={user} />} />
+          
+          <Route path="/workbench" element={
+            (user || isGuest) ? (
+              <div className="container dashboard-container">
+                <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  {user && <button className="btn-text" onClick={() => navigate('/dashboard')}>← Back to Dashboard</button>}
+                  <h1 style={{ fontSize: '24px', margin: 0 }}>Resume Blast Workbench</h1>
+                </div>
+                {hasUploadedInSession ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px', padding: '15px', background: '#f3f4f6', borderRadius: '8px', alignItems: 'center' }}>
+                      <div><h3 style={{ margin: 0, fontSize: '18px' }}>Current Resume Analysis</h3></div>
+                      <button onClick={handleStartBlast} className="btn-outline">📄 Upload Different Resume</button>
+                    </div>
+                    <ResumeAnalysis
+                      user={user}
+                      isGuest={isGuest}
+                      resumeText={resumeText}
+                      resumeId={resumeId}
+                      resumeUrl={resumeUrl}
+                      isPaymentSuccess={paymentSuccess}
+                    />
+                  </>
+                ) : (
+                  <ResumeUpload
+                    user={user}
+                    isGuest={isGuest}
+                    onUploadSuccess={({ text, url, id }) => {
+                      setResumeText(text)
+                      setResumeUrl(url)
+                      setResumeId(id)
+                      setHasUploadedInSession(true)
+                    }}
+                  />
+                )}
+              </div>
+            ) : <Navigate to="/" replace />
+          } />
+
+          <Route path="/dashboard" element={
+            user ? <div className="container"><UserDashboard user={user} onStartBlast={handleStartBlast} /></div> : <Navigate to="/" replace />
+          } />
+
+          <Route path="/admin" element={
+            (user && isAdmin) ? <AdminDashboard user={user} onExit={() => navigate('/dashboard')} /> : <LandingPage onGetStarted={handleStartBlast} user={user} />
+          } />
+
+          <Route path="/employer-network" element={
+            <EmployerNetwork onLogin={() => setShowSignup(true)} onViewChange={handleViewChange} />
+          } />
+
+          <Route path="/recruiter" element={
+            user ? (
+              <div className="container"><RecruiterOnboarding user={user} /></div>
+            ) : (
+              <RecruiterLanding
+                onBackToJobSeeker={() => navigate('/')}
+                onLogin={() => setShowSignup(true)}
+                onViewChange={handleViewChange}
+              />
+            )
+          } />
+
+          <Route path="/contact" element={<ContactPage onBack={() => navigate(user ? '/dashboard' : '/')} />} />
+          <Route path="/privacy" element={<LegalPage type="privacy" onBack={() => navigate(user ? '/dashboard' : '/')} />} />
+          <Route path="/terms" element={<LegalPage type="terms" onBack={() => navigate(user ? '/dashboard' : '/')} />} />
+          <Route path="/refund" element={<LegalPage type="refund" onBack={() => navigate(user ? '/dashboard' : '/')} />} />
+
+          {/* Catch-all fallback route */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
       </main>
 
       {shouldShowFooter && <Footer onViewChange={handleViewChange} />}
 
       {showSignup && (
-        viewMode === 'recruiter' || viewMode === 'employer-network'  // ✅ NEW: also show RecruiterAuth on employer page
+        currentPath === '/recruiter' || currentPath === '/employer-network'
           ? <RecruiterAuth
               onClose={() => setShowSignup(false)}
               onSuccess={(u) => { setUser({ ...u, role: 'recruiter' }); setShowSignup(false) }}
             />
           : <AuthModal
               onClose={() => setShowSignup(false)}
-              onSuccess={(u) => { setUser(u); setShowSignup(false); setViewMode('upload-workbench') }}
+              onSuccess={(u) => { setUser(u); setShowSignup(false); navigate('/workbench') }}
             />
       )}
     </div>
