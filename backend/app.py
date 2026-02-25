@@ -53,6 +53,7 @@ from routes.user_activity import user_activity_bp
 from routes.webhooks import webhooks_bp
 from routes.guest_routes import guest_bp
 from routes.drip_campaign import drip_campaign_bp  # ✅ NEW
+from routes.employer_lead import employer_lead_bp  # ✅ NEW: Employer Network lead capture
 
 app = Flask(__name__)
 
@@ -138,7 +139,8 @@ app.register_blueprint(payment_webhook_bp)
 app.register_blueprint(user_activity_bp)
 app.register_blueprint(webhooks_bp)
 app.register_blueprint(guest_bp)
-app.register_blueprint(drip_campaign_bp)  # ✅ NEW
+app.register_blueprint(drip_campaign_bp)   # ✅ existing
+app.register_blueprint(employer_lead_bp)   # ✅ NEW: /api/employer-lead
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -217,6 +219,7 @@ if __name__ == '__main__':
     print(f'📊 User Activity:   /api/user-activity/log')
     print(f'👤 Guest Tracking:  /api/guest/*')
     print(f'📧 Drip Campaigns:  /api/drip/*')
+    print(f'🏢 Employer Leads:  /api/employer-lead')
     print(f'⏰ Scheduler:       Every 30 min (Business hours only)')
     print('='*70 + "\n")
     app.run(host='0.0.0.0', port=port, debug=debug)

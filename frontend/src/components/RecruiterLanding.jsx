@@ -1,15 +1,16 @@
+// src/components/RecruiterLanding.jsx
+// CHANGES FROM ORIGINAL:
+//   1. Import EmployerNetworkBanner
+//   2. Accept onViewChange prop (already passed from App.jsx via handleViewChange)
+//   3. Render <EmployerNetworkBanner onNavigateToEmployerNetwork={...} />
+//   ALL OTHER LOGIC IS COMPLETELY UNTOUCHED
 import { useState } from 'react'
-import './LandingPage.css' // Reuse existing styles
+import './LandingPage.css'
+import EmployerNetworkBanner from './EmployerNetworkBanner' // ✅ NEW
 
-function RecruiterLanding({ onBackToJobSeeker, onLogin }) {
-  // Mobile menu state is no longer needed here since the global Navbar handles it
-  
+function RecruiterLanding({ onBackToJobSeeker, onLogin, onViewChange }) { // ✅ added onViewChange
   return (
     <div className="landing-page">
-      {/* 🚀 REMOVED: Internal <nav> block. 
-         Now relies on the Global Navbar in App.jsx (same as the main Landing Page). 
-      */}
-
       {/* Recruiter Hero Section */}
       <section className="hero" style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div className="hero-content">
@@ -31,10 +32,10 @@ function RecruiterLanding({ onBackToJobSeeker, onLogin }) {
         </div>
       </section>
 
-      {/* ⛔️ FOOTER REMOVED: 
-         The internal <footer> section has been deleted to prevent double footer issue.
-         The page now uses the global Footer component from App.jsx.
-      */}
+      {/* ✅ NEW: Employer Network popup banner */}
+      <EmployerNetworkBanner
+        onNavigateToEmployerNetwork={() => onViewChange && onViewChange('employer-network')}
+      />
     </div>
   )
 }

@@ -18,36 +18,30 @@ import AdminDashboard from './components/Admin/AdminDashboard'
 import PaymentBlastTrigger from './components/PaymentBlastTrigger'
 import ContactPage from './components/ContactPage'
 import LegalPage from './components/LegalPage'
+import EmployerNetwork from './components/EmployerNetwork' // ✅ NEW
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
 
 // ✅ FIX: Detect guest session using URL params FIRST (most reliable),
 // then fall back to localStorage signals.
-// URL param is immune to cross-site localStorage clearing by browsers (Safari/Brave etc).
 const detectGuestSession = (params) => {
-  // PRIMARY: guest_id embedded in URL by the backend checkout endpoint
-  // This is set in payment.py success_url and ALWAYS survives a Stripe redirect
   const urlGuestId = params.get('guest_id') || ''
   if (urlGuestId.startsWith('guest_')) {
     console.log('✅ Guest detected via URL param:', urlGuestId)
-    // Restore localStorage so the rest of the app (guestTrackingService) works normally
     localStorage.setItem('guest_id', urlGuestId)
     localStorage.setItem('guestId', urlGuestId)
     localStorage.setItem('is_guest_session', 'true')
     return urlGuestId
   }
 
-  // FALLBACK 1: is_guest_session flag in localStorage
   const flagSet = localStorage.getItem('is_guest_session') === 'true'
-  // FALLBACK 2: guest_id key directly in localStorage  
   const storedGuestId = localStorage.getItem('guest_id') || localStorage.getItem('guestId') || ''
   if (flagSet || storedGuestId.startsWith('guest_')) {
     console.log('✅ Guest detected via localStorage:', storedGuestId || 'flag only')
     return storedGuestId || 'unknown_guest'
   }
 
-  // FALLBACK 3: pending blast data = they were mid-checkout as guest
   const pendingConfig = localStorage.getItem('pending_blast_config')
   const pendingPlan = localStorage.getItem('selected_plan_type')
   if (pendingConfig || pendingPlan) {
@@ -97,7 +91,6 @@ function App() {
         const isPaymentReturn = params.get('payment') === 'success'
         const sessionId = params.get('session_id')
 
-        // ✅ FIX: Pass URL params so guest_id from URL is the primary check
         const detectedGuestId = isPaymentReturn ? detectGuestSession(params) : null
         const isGuestReturning = !!detectedGuestId
 
@@ -111,7 +104,6 @@ function App() {
         const { data: { session } } = await supabase.auth.getSession()
 
         if (session?.user) {
-          // ── REGISTERED USER ──────────────────────────────────────────
           setUser(session.user)
           setIsGuest(false)
           localStorage.removeItem('is_guest_session')
@@ -133,24 +125,20 @@ function App() {
           }
 
         } else if (isPaymentReturn && isGuestReturning) {
-          // ── GUEST RETURNING FROM STRIPE PAYMENT ──────────────────────
           console.log('✅ Guest returning from payment — routing to workbench')
           setIsGuest(true)
           setPaymentSuccess(true)
           setViewMode('upload-workbench')
           setHasUploadedInSession(false)
 
-          // Clean URL: remove guest_id from address bar but keep session_id for PaymentSuccessHandler
           const cleanUrl = `${window.location.pathname}?payment=success&session_id=${sessionId}`
           window.history.replaceState({}, '', cleanUrl)
 
         } else if (isPaymentReturn && !isGuestReturning) {
-          // ── PAYMENT RETURN BUT NO GUEST SESSION FOUND ─────────────────
           console.warn('⚠️ Payment return but no guest session detected — going home')
           setViewMode('jobseeker-home')
 
         } else {
-          // ── NORMAL PAGE LOAD, NO PAYMENT ─────────────────────────────
           if (!['privacy', 'terms', 'refund'].includes(viewMode)) {
             setViewMode('jobseeker-home')
           }
@@ -213,6 +201,7 @@ function App() {
     switch (view) {
       case 'home': setViewMode((user || isGuest) ? 'upload-workbench' : 'jobseeker-home'); break
       case 'recruiter': setViewMode('recruiter'); break
+      case 'employer-network': setViewMode('employer-network'); break // ✅ NEW
       case 'dashboard': setViewMode('dashboard'); break
       case 'contact': setViewMode('contact'); break
       case 'admin':
@@ -260,9 +249,25 @@ function App() {
       return <AdminDashboard user={user} onExit={() => setViewMode('dashboard')} />
     }
 
+    // ✅ NEW: Employer Network page
+    if (viewMode === 'employer-network') {
+      return (
+        <EmployerNetwork
+          onLogin={() => setShowSignup(true)}
+          onViewChange={handleViewChange}
+        />
+      )
+    }
+
     if (viewMode === 'recruiter') {
       if (user) return <div className="container"><RecruiterOnboarding user={user} /></div>
-      return <RecruiterLanding onBackToJobSeeker={() => setViewMode('jobseeker-home')} onLogin={() => setShowSignup(true)} />
+      return (
+        <RecruiterLanding
+          onBackToJobSeeker={() => setViewMode('jobseeker-home')}
+          onLogin={() => setShowSignup(true)}
+          onViewChange={handleViewChange} // ✅ NEW: pass down so banner can navigate
+        />
+      )
     }
 
     if (user || isGuest) {
@@ -342,7 +347,7 @@ function App() {
       {shouldShowFooter && <Footer onViewChange={handleViewChange} />}
 
       {showSignup && (
-        viewMode === 'recruiter'
+        viewMode === 'recruiter' || viewMode === 'employer-network'  // ✅ NEW: also show RecruiterAuth on employer page
           ? <RecruiterAuth
               onClose={() => setShowSignup(false)}
               onSuccess={(u) => { setUser({ ...u, role: 'recruiter' }); setShowSignup(false) }}

@@ -6,7 +6,7 @@ Works for both registered and guest users.
 
 ✅ FIXED: Batch progress tracking — emails never repeat to the same recruiters.
 
-HOW BATCHING WORKS (example: Starter plan = 250 recruiters, batch=100):
+HOW BATCHING WORKS (example: Starter plan = 250 recruiters, batch=50):
 
   Tick 1  → already_sent=0,   fetches rows 1–100,   sends 100,  saves delivered=100
   Tick 2  → already_sent=100, fetches rows 101–200,  sends 100,  saves delivered=200
@@ -34,7 +34,7 @@ BREVO_TEMPLATE_DAY1 = int(os.getenv("BREVO_TEMPLATE_DAY1", "3"))
 BREVO_TEMPLATE_DAY4 = int(os.getenv("BREVO_TEMPLATE_DAY4", "4"))
 BREVO_TEMPLATE_DAY8 = int(os.getenv("BREVO_TEMPLATE_DAY8", "5"))
 
-MAX_EMAILS_PER_BATCH = int(os.getenv("MAX_EMAILS_PER_BATCH", "100"))
+MAX_EMAILS_PER_BATCH = int(os.getenv("MAX_EMAILS_PER_BATCH", "50"))
 
 # Plan-based delays (seconds between each email) — unchanged
 PLAN_SEND_DELAYS = {
@@ -223,12 +223,12 @@ def _send_brevo_email(to_email, to_name, template_id, params):
 #   4. Returns cumulative total so _update_campaign_after_wave can save correctly
 #
 # Example — Basic plan (500 recruiters):
-#   Tick 1: already_sent=0   → fetches 1–100,   sends 100, cumulative=100
-#   Tick 2: already_sent=100 → fetches 101–200,  sends 100, cumulative=200
-#   Tick 3: already_sent=200 → fetches 201–300,  sends 100, cumulative=300
-#   Tick 4: already_sent=300 → fetches 301–400,  sends 100, cumulative=400
-#   Tick 5: already_sent=400 → fetches 401–500,  sends 100, cumulative=500
-#           wave_complete=True → drip_day1_sent_at stamped → Day 4 unlocked
+#   Tick 1: already_sent=0   → fetches 1–50,    sends 50,  cumulative=50
+#   Tick 2: already_sent=50  → fetches 51–100,  sends 50,  cumulative=100
+#   Tick 3: already_sent=100 → fetches 101–150, sends 50,  cumulative=150
+#   ...
+#   Tick 10: already_sent=450 → fetches 451–500, sends 50, cumulative=500
+#            wave_complete=True → drip_day1_sent_at stamped → Day 4 unlocked
 # ─────────────────────────────────────────────────────────────────────────────
 def _send_drip_wave(campaign: dict, drip_day: int) -> dict:
     """
