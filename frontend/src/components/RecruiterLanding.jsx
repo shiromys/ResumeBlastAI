@@ -1,14 +1,9 @@
 // src/components/RecruiterLanding.jsx
-// CHANGES FROM ORIGINAL:
-//   1. Import EmployerNetworkBanner
-//   2. Accept onViewChange prop (already passed from App.jsx via handleViewChange)
-//   3. Render <EmployerNetworkBanner onNavigateToEmployerNetwork={...} />
-//   ALL OTHER LOGIC IS COMPLETELY UNTOUCHED
 import { useState } from 'react'
 import './LandingPage.css'
-import EmployerNetworkBanner from './EmployerNetworkBanner' // ✅ NEW
+import EmployerNetworkBanner from './EmployerNetworkBanner'
 
-function RecruiterLanding({ onBackToJobSeeker, onLogin, onViewChange }) { // ✅ added onViewChange
+function RecruiterLanding({ onBackToJobSeeker, onLogin, onViewChange }) { 
   return (
     <div className="landing-page">
       {/* Recruiter Hero Section */}
@@ -21,8 +16,9 @@ function RecruiterLanding({ onBackToJobSeeker, onLogin, onViewChange }) { // ✅
           </p>
           
           <div className="cta-container">
+            {/* ✅ CHANGED: CTA Text updated to strictly say Log In */}
             <button className="cta-button large" onClick={onLogin}>
-              Register or Log In
+              Recruiter Log In
             </button>
           </div>
           
@@ -32,7 +28,7 @@ function RecruiterLanding({ onBackToJobSeeker, onLogin, onViewChange }) { // ✅
         </div>
       </section>
 
-      {/* ✅ NEW: Employer Network popup banner */}
+      {/* Employer Network popup banner */}
       <EmployerNetworkBanner
         onNavigateToEmployerNetwork={() => onViewChange && onViewChange('employer-network')}
       />

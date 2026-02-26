@@ -1,7 +1,6 @@
 // src/components/EmployerNetwork.jsx
 import { useState, useEffect, useRef } from 'react'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+import { supabase } from '../lib/supabase' // ✅ IMPORTED SUPABASE
 
 // Inline design tokens matching app theme
 const t = {
@@ -65,29 +64,34 @@ function EmployerNetwork({ onLogin, onViewChange }) {
 
   const handleChange = (e) => setFormData((p) => ({ ...p, [e.target.name]: e.target.value }))
 
+  // ✅ MODIFIED: Submits directly to app_registered_recruiters table in Supabase
   const handleFormSubmit = async (e) => {
     e.preventDefault()
     setFormState('submitting')
     setFormError('')
+    
     try {
       const payload = {
-        ...formData,
+        recruiter_name: formData.recruiter_name,
+        company_name: formData.company_name,
+        email: formData.email,
         primary_skills: primarySkills,
         additional_skills: additionalSkills,
       }
-      const res = await fetch(`${API_URL}/api/employer-lead`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
-      if (res.ok) { setFormState('success') }
-      else {
-        const data = await res.json().catch(() => ({}))
-        setFormError(data.error || 'Something went wrong. Please try again.')
-        setFormState('error')
+      
+      const { error } = await supabase
+        .from('app_registered_recruiters')
+        .insert([payload])
+
+      if (error) {
+        throw error
       }
-    } catch {
-      setFormState('success') 
+      
+      setFormState('success')
+    } catch (err) {
+      console.error("Registration error:", err)
+      setFormError(err.message || 'Something went wrong. Please try again.')
+      setFormState('error')
     }
   }
 
@@ -138,11 +142,10 @@ function EmployerNetwork({ onLogin, onViewChange }) {
   return (
     <div style={{ background: t.white, color: t.gray900, fontFamily: 'Inter, -apple-system, sans-serif', fontSize: '16px', lineHeight: '1.6', overflowX: 'hidden' }}>
 
-      {/* ✅ MOVED TO TOP: FORM SECTION */}
+      {/* FORM SECTION */}
       <div id="employer-access" style={{ background: t.gray50, borderBottom: `1px solid ${t.gray200}`, padding: '2rem 2rem 4rem' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           
-          {/* Back link moved into the Form section header so it remains at the top */}
           <button
             onClick={() => onViewChange && onViewChange('recruiter')}
             style={{ background: 'none', border: 'none', color: t.gray500, fontSize: '0.875rem', cursor: 'pointer', marginBottom: '2rem', padding: 0, display: 'flex', alignItems: 'center', gap: '4px' }}
@@ -177,7 +180,7 @@ function EmployerNetwork({ onLogin, onViewChange }) {
                   onMouseOver={(e) => e.currentTarget.style.background = t.redDark}
                   onMouseOut={(e) => e.currentTarget.style.background = t.red}
                 >
-                  Login / Register →
+                  Log In Now →
                 </button>
               </div>
             </div>
@@ -412,7 +415,7 @@ function EmployerNetwork({ onLogin, onViewChange }) {
             onMouseOver={(e) => { e.currentTarget.style.background = t.gray50; e.currentTarget.style.borderColor = t.gray500 }}
             onMouseOut={(e) => { e.currentTarget.style.background = t.white; e.currentTarget.style.borderColor = t.gray300 }}
           >
-            Recruiter Login / Register
+            Recruiter Login
           </button>
         </div>
 
