@@ -36,22 +36,6 @@ def get_all_rows(table, query=''):
 def get_brevo_stats():
     """
     Fetches 100% real-time Brevo data — NO hardcoded values.
-
-    API calls made:
-      1. GET /v3/account          → plan type, credits remaining, account info,
-                                    plan start/end dates, and all plan features
-      2. GET /v3/smtp/statistics/aggregatedReport (today)      → emails sent today
-      3. GET /v3/smtp/statistics/aggregatedReport (this month) → emails sent this month
-
-    How total_limit is derived (fully dynamic):
-      - For 'subscription' plans: Brevo returns plan[].credits as the REMAINING
-        monthly allowance. We call the month-to-date stats report to get emails
-        already sent this billing cycle. total_limit = credits_remaining + sent_this_month.
-      - For 'payAsYouGo' plans: credits field is the remaining pre-paid credits.
-        We calculate used from the monthly report the same way.
-      - For 'free' plans: Brevo enforces a 300 emails/day hard limit. We use
-        300 as total_limit (the only legitimate fixed value here — it is Brevo's
-        published free-tier constraint, not a business assumption).
     """
     try:
         api_key = os.getenv('BREVO_API_KEY')
@@ -76,8 +60,6 @@ def get_brevo_stats():
 
         account_data = account_resp.json()
 
-        # Pick the most relevant plan in priority order:
-        # subscription > payAsYouGo > free
         all_plans = account_data.get('plan', [])
         plan_info = (
             next((p for p in all_plans if p.get('type') == 'subscription'), None)
@@ -87,7 +69,7 @@ def get_brevo_stats():
         )
 
         plan_type      = plan_info.get('type', 'free')
-        credits_left   = plan_info.get('credits', 0)  # remaining allowance from Brevo
+        credits_left   = plan_info.get('credits', 0) 
 
         # ── CALL 2: Today's email stats ──────────────────────────────────────
         today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
@@ -101,14 +83,11 @@ def get_brevo_stats():
             )
             if day_stats_resp.status_code == 200:
                 day_stats = day_stats_resp.json()
-                # 'requests' = total send attempts today (includes delivered + bounced + etc.)
                 daily_sent = day_stats.get('requests', 0)
         except Exception as day_err:
             print(f"⚠️ Brevo daily stats fetch failed (non-fatal): {day_err}")
 
         # ── CALL 3: This billing-cycle / month-to-date email stats ───────────
-        # We use the 1st of the current month to today so we know how many
-        # emails have already been sent in this billing cycle.
         now_utc = datetime.now(timezone.utc)
         month_start_str = now_utc.replace(day=1).strftime('%Y-%m-%d')
         monthly_sent = 0
@@ -127,20 +106,16 @@ def get_brevo_stats():
 
         # ── Calculate total_limit & usage ────────────────────────────────────
         if plan_type == 'free':
-            # Brevo's free tier: 300 emails/day hard cap (their published constraint)
             total_limit    = 300
-            credits_used   = daily_sent          # for free plan, "used" = today's sent
+            credits_used   = daily_sent          
             credits_left_display = max(0, total_limit - daily_sent)
             usage_label    = "today's free daily limit"
         else:
-            # For paid plans: total = what's remaining + what was already sent this month
-            # This gives us the true plan size dynamically from Brevo's own data.
             total_limit        = credits_left + monthly_sent
             credits_used       = monthly_sent
             credits_left_display = credits_left
             usage_label        = "monthly plan limit"
 
-        # Usage percentage (guard against divide-by-zero)
         if total_limit > 0:
             usage_percentage = round((credits_used / total_limit) * 100, 2)
         else:
@@ -148,16 +123,11 @@ def get_brevo_stats():
 
         trigger_alert = usage_percentage >= 70
 
-        # ── Plan start / renewal dates ───────────────────────────────────────
-        # Brevo subscription plans expose startDate & endDate on the plan object.
-        plan_start_date = plan_info.get('startDate')   # ISO string or None
-        plan_end_date   = plan_info.get('endDate')     # ISO string or None
+        plan_start_date = plan_info.get('startDate')  
+        plan_end_date   = plan_info.get('endDate')    
 
-        # Fall back to account creation date only if plan start is absent
         purchase_date = plan_start_date or account_data.get('createdAt', 'N/A')
 
-        # ── Build features list from live plan data ───────────────────────────
-        # Only facts we can derive from the API — no assumptions.
         features = []
         features.append(f"Plan Type: {plan_type.replace('payAsYouGo', 'Pay As You Go').replace('subscription', 'Subscription').title()}")
 
@@ -175,17 +145,15 @@ def get_brevo_stats():
             features.append("Priority Email Delivery")
 
         if plan_end_date:
-            # Show renewal as a feature tag so it's visible at a glance
             try:
                 renewal_dt = datetime.fromisoformat(plan_end_date.replace('Z', '+00:00'))
                 features.append(f"Renews: {renewal_dt.strftime('%B %d, %Y')}")
             except Exception:
                 features.append(f"Renewal Date: {plan_end_date}")
 
-        # ── Build response ───────────────────────────────────────────────────
         return jsonify({
             'success': True,
-            'fetched_at': now_utc.strftime('%Y-%m-%d %H:%M:%S UTC'),   # helps admin see data freshness
+            'fetched_at': now_utc.strftime('%Y-%m-%d %H:%M:%S UTC'),   
             'plan_details': {
                 'type':               plan_type,
                 'total_limit':        total_limit,
@@ -344,7 +312,7 @@ def delete_user():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 # =========================================================
-# 3. SYSTEM HEALTH (Live data refined)
+# 3. SYSTEM HEALTH
 # =========================================================
 @admin_bp.route('/api/admin/health', methods=['GET'])
 def get_health():
@@ -475,7 +443,7 @@ def update_contact_notes(ticket_id):
         return jsonify({'error': str(e)}), 500
 
 # =========================================================
-# 5. GENERAL STATS (Live data refined)
+# 5. GENERAL STATS
 # =========================================================
 @admin_bp.route('/api/admin/stats', methods=['GET'])
 def get_stats():
@@ -504,7 +472,6 @@ def get_stats():
 
 @admin_bp.route('/api/admin/recruiters/stats', methods=['GET'])
 def get_recruiters_stats():
-    """Get counts from both recruiter tables"""
     try:
         paid_res = requests.get(f"{SUPABASE_URL}/rest/v1/recruiters?select=id", headers=_get_headers())
         paid_count = len(paid_res.json()) if paid_res.status_code == 200 else 0
@@ -527,24 +494,16 @@ def get_recruiters_stats():
 
 @admin_bp.route('/api/admin/recruiters/add', methods=['POST'])
 def add_recruiter():
-    """Add a new recruiter to the specified table"""
     try:
         data = request.json
         target_table = data.get('target_table')
         
-        # ✅ CHANGED: Added 'app_registered_recruiters' to the allowed tables list.
-        # This table stores unverified recruiters who self-register through the app.
-        # The 'recruiters' table remains exclusively for verified/paid recruiters.
         if target_table not in ['recruiters', 'freemium_recruiters', 'app_registered_recruiters']:
             return jsonify({'error': 'Invalid target table'}), 400
 
-        # ✅ CHANGED: Base payload differs per table.
-        # - 'recruiters' and 'freemium_recruiters' use email_status (existing columns).
-        # - 'app_registered_recruiters' uses id (Supabase Auth UUID) as PK and
-        #   does NOT have an email_status column, so we exclude it.
         if target_table == 'app_registered_recruiters':
             recruiter_data = {
-                'id': data.get('id'),           # Supabase Auth UUID — required as PK
+                'id': data.get('id'),
                 'email': data.get('email'),
                 'is_active': True,
                 'created_at': datetime.utcnow().isoformat()
@@ -581,7 +540,6 @@ def add_recruiter():
 
 @admin_bp.route('/api/admin/recruiters/delete', methods=['DELETE'])
 def delete_recruiter_by_email():
-    """Delete a recruiter by email from a specific table and log the action"""
     try:
         data = request.json
         target_table = data.get('target_table')
@@ -622,7 +580,6 @@ def delete_recruiter_by_email():
 
 @admin_bp.route('/api/admin/plans', methods=['GET'])
 def get_plans():
-    """Fetch all plans for admin display"""
     try:
         url = f"{SUPABASE_URL}/rest/v1/plans?select=*&order=price_cents.asc"
         resp = requests.get(url, headers=_get_headers())
@@ -636,7 +593,6 @@ def get_plans():
 
 @admin_bp.route('/api/admin/plans/update', methods=['PATCH'])
 def update_plan():
-    """Update pricing or limits for a plan"""
     try:
         data = request.json
         plan_id = data.get('id')
@@ -680,3 +636,148 @@ def get_user_count():
         }), 200
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
+
+# =========================================================
+# 7. DRIP CAMPAIGN MANAGEMENT & REAL-TIME STATS
+# =========================================================
+
+@admin_bp.route('/api/admin/drip-campaign/user-stats', methods=['GET'])
+def get_user_drip_stats():
+    """
+    Fetches real-time email event data directly from Brevo for a specific user.
+    """
+    email = request.args.get('email')
+    if not email:
+        return jsonify({'error': 'Email required'}), 400
+
+    try:
+        user_id = UserService.get_user_id_by_email(email)
+        if not user_id:
+            return jsonify({'error': 'User not found in system'}), 404
+
+        url = f"{SUPABASE_URL}/rest/v1/blast_campaigns?user_id=eq.{user_id}&order=created_at.desc&limit=1"
+        resp = requests.get(url, headers=_get_headers())
+        campaigns = resp.json()
+        
+        if not campaigns:
+            return jsonify({'error': 'No active drip campaigns found for this user'}), 404
+            
+        campaign = campaigns[0]
+        campaign_id = campaign['id']
+
+        api_key = os.getenv('BREVO_API_KEY')
+        brevo_headers = {'accept': 'application/json', 'api-key': api_key}
+
+        events = []
+        offset = 0
+        limit = 100
+        
+        # Pull events from Brevo matching this campaign ID
+        for _ in range(5): 
+            evt_resp = requests.get(
+                f"https://api.brevo.com/v3/smtp/statistics/events?tags={campaign_id}&limit={limit}&offset={offset}", 
+                headers=brevo_headers
+            )
+            if evt_resp.status_code == 200:
+                data = evt_resp.json().get('events', [])
+                events.extend(data)
+                if len(data) < limit:
+                    break
+                offset += limit
+            else:
+                break
+
+        sent_emails = set()
+        bounced_emails = set()
+        unsub_emails = set()
+
+        for evt in events:
+            evt_type = evt.get('event')
+            mail = evt.get('email')
+            if evt_type in ['delivered', 'requests']:
+                sent_emails.add(mail)
+            elif evt_type in ['bounces', 'hardBounces', 'softBounces', 'blocked']:
+                bounced_emails.add(mail)
+            elif evt_type in ['unsubscribed']:
+                unsub_emails.add(mail)
+
+        return jsonify({
+            'success': True,
+            'campaign': {
+                'id': campaign_id,
+                'plan_name': campaign.get('plan_name'),
+                'status': campaign.get('status'),
+                'wave1_complete': bool(campaign.get('drip_day1_sent_at')),
+                'wave2_complete': bool(campaign.get('drip_day2_sent_at')),
+                'wave3_complete': bool(campaign.get('drip_day3_sent_at')),
+                'created_at': campaign.get('created_at')
+            },
+            'stats': {
+                'sent': list(sent_emails),
+                'bounced': list(bounced_emails),
+                'unsubscribed': list(unsub_emails)
+            }
+        }), 200
+
+    except Exception as e:
+        print(f"Error fetching drip stats: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/drip-campaign/force-wave', methods=['POST'])
+def force_drip_wave():
+    """
+    Manually forces the backend scheduler to unlock Wave 2 or Wave 3,
+    bypassing the requirement that the previous wave must be 100% complete.
+    """
+    data = request.json
+    email = data.get('email')
+    target_wave = data.get('wave')
+
+    if not email or target_wave not in [2, 3]:
+        return jsonify({'error': 'Valid email and wave (2 or 3) required'}), 400
+
+    try:
+        user_id = UserService.get_user_id_by_email(email)
+        if not user_id:
+            return jsonify({'error': 'User not found in system'}), 404
+
+        url = f"{SUPABASE_URL}/rest/v1/blast_campaigns?user_id=eq.{user_id}&status=eq.active&order=created_at.desc&limit=1"
+        resp = requests.get(url, headers=_get_headers())
+        campaigns = resp.json()
+        
+        if not campaigns:
+            return jsonify({'error': 'No active campaign found to override'}), 404
+            
+        campaign_id = campaigns[0]['id']
+        now_iso = datetime.utcnow().isoformat()
+        
+        update_data = {}
+
+        if target_wave == 2:
+            # Fake wave 1 completion and set wave 2 schedule to now
+            update_data['drip_day1_sent_at'] = now_iso
+            update_data['day4_scheduled_for'] = now_iso
+            update_data['drip_day1_status'] = 'sent'
+        elif target_wave == 3:
+            # Fake wave 1 & 2 completion and set wave 3 schedule to now
+            update_data['drip_day1_sent_at'] = campaigns[0].get('drip_day1_sent_at') or now_iso
+            update_data['drip_day2_sent_at'] = now_iso
+            update_data['day8_scheduled_for'] = now_iso
+            update_data['drip_day1_status'] = 'sent'
+            update_data['drip_day2_status'] = 'sent'
+
+        update_url = f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}"
+        patch_resp = requests.patch(update_url, json=update_data, headers=_get_headers())
+
+        if patch_resp.status_code in [200, 204]:
+            return jsonify({
+                'success': True, 
+                'message': f'Wave {target_wave} constraints bypassed. The scheduler will process this on the next tick.'
+            }), 200
+        else:
+            return jsonify({'error': 'Failed to update database overrides'}), 500
+
+    except Exception as e:
+        print(f"Error forcing drip wave: {e}")
+        return jsonify({'error': str(e)}), 500
