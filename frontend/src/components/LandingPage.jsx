@@ -61,13 +61,34 @@ const TypewriterEffect = ({ text, delay = 0, infinite = false, onTypeEnd, onDele
 
 // --- Plan static config (mirrors Supabase plans table) ---
 const PLAN_CONFIG = {
-  free:         { label: 'Free',         price: '$0',     defaultCents: 0,    defaultLimit: 11,   drip: false, badge: null,           features: ['11 verified recruiters','Resume analysis','Guaranteed delivery','Professional template','Email support'] },
-  starter:      { label: 'Starter',      price: '$9.99',  defaultCents: 999,  defaultLimit: 250,  drip: true,  badge: null,           features: ['250 verified recruiters','3-wave drip campaign','Day 1 → Day 4 → Day 8','Industry-specific list','Priority support'] },
-  basic:        { label: 'Basic',        price: '$14.99', defaultCents: 1499, defaultLimit: 500,  drip: true,  badge: 'MOST POPULAR', features: ['500 verified recruiters','3-wave drip campaign','Day 1 → Day 4 → Day 8','Domain-specific list','Skill analysis'] },
-  professional: { label: 'Professional', price: '$29.99', defaultCents: 2999, defaultLimit: 750,  drip: true,  badge: null,           comingSoon: true, features: ['750 verified recruiters','3-wave drip campaign','Day 1 → Day 4 → Day 8','Resume score report','Priority support'] },
-  growth:       { label: 'Growth',       price: '$39.99', defaultCents: 3999, defaultLimit: 1000, drip: true,  badge: null,           comingSoon: true, features: ['1,000 verified recruiters','3-wave drip campaign','Day 1 → Day 4 → Day 8','Custom recruiter filter','Dedicated support'] },
-  advanced:     { label: 'Advanced',     price: '$49.99', defaultCents: 4999, defaultLimit: 1250, drip: true,  badge: null,           comingSoon: true, features: ['1,250 verified recruiters','3-wave drip campaign','Day 1 → Day 4 → Day 8','Full analytics dashboard','VIP support'] },
-  premium:      { label: 'Premium',      price: '$59.99', defaultCents: 5999, defaultLimit: 1500, drip: true,  badge: 'BEST RESULTS', comingSoon: true, features: ['1,500 verified recruiters','3-wave drip campaign','Day 1 → Day 4 → Day 8','Everything included','White-glove support'] },
+  free: { 
+    label: 'Free', price: '$0', defaultCents: 0, defaultLimit: 11, drip: false, badge: null, 
+    features: ['11 verified recruiters', 'Resume analysis', 'Guaranteed delivery', 'Professional template', 'Email support'] 
+  },
+  starter: { 
+    label: 'Starter', price: '$9.99', defaultCents: 999, defaultLimit: 250, drip: true, badge: null, 
+    features: ['250 recruiters', 'Resume Analysis', '3-Wave drip campaign', 'Industry-specific list', 'regular support', 'Guaranteed email delivery'] 
+  },
+  basic: { 
+    label: 'Basic plan', price: '$14.99', defaultCents: 1499, defaultLimit: 500, drip: true, badge: 'MOST POPULAR', 
+    features: ['500 recruiters', 'Resume Analysis', 'Curated Resume score', '3-wave drip campaign', 'industry specific list', 'Guaranteed email delivery', 'Support response within 24 hours'] 
+  },
+  professional: { 
+    label: 'Professional', price: '$29.99', defaultCents: 2999, defaultLimit: 750, drip: true, badge: null, comingSoon: true, 
+    features: ['750 recruiters', 'Resume Analysis', 'Skill Analysis', '3-wave drip campaign', 'Industry-specific list', 'Guaranteed email delivery', 'Periodical email delivery status (optional)', 'Support response within 24 hours', 'Express email support'] 
+  },
+  growth: { 
+    label: 'Growth', price: '$39.99', defaultCents: 3999, defaultLimit: 1000, drip: true, badge: null, comingSoon: true, 
+    features: ['1000 recruiters', 'Resume Analysis', 'Skill Analysis', '3-wave drip campaign', 'Industry-specific list', 'Guaranteed email delivery', 'periodical email delivery status', 'Priority email support within 12 hours', 'Express email support within 8 hours (optional)'] 
+  },
+  advanced: { 
+    label: 'Advance', price: '$49.99', defaultCents: 4999, defaultLimit: 1250, drip: true, badge: null, comingSoon: true, 
+    features: ['1250 recruiters', 'Resume Analysis', 'Skill Analysis', '3-wave drip campaign', 'Industry-specific list', 'Guaranteed email delivery', 'Periodical email delivery status', 'Express email support within 8 hours'] 
+  },
+  premium: { 
+    label: 'Premium', price: '$59.99', defaultCents: 5999, defaultLimit: 1500, drip: true, badge: 'BEST RESULTS', comingSoon: true, 
+    features: ['1500 recruiters', 'everything in Advance plan', 'Customized plan according to enterprise requirement', 'Call us for customisation'] 
+  },
 }
 
 const PAID_KEYS = ['starter', 'basic', 'professional', 'growth', 'advanced', 'premium']
@@ -282,7 +303,7 @@ function LandingPage({ onGetStarted, user }) {
                     
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                       {c.features
-                        .filter(f => !f.toLowerCase().includes('verified recruiters') && !f.toLowerCase().includes('3-wave drip') && !f.toLowerCase().includes('day 1 → day 4 → day 8'))
+                        .filter(f => !f.toLowerCase().includes('recruiters') && !f.toLowerCase().includes('3-wave drip') && !f.toLowerCase().includes('day 1 → day 4 → day 8'))
                         .map((feature, idx) => (
                         <li key={idx} style={{ 
                           display: 'flex', alignItems: 'flex-start', gap: '10px', 
