@@ -13,8 +13,8 @@ function EmployerNetworkBanner({ onNavigateToEmployerNetwork }) {
       setVisible(true)
     }
 
-    // First appearance
-    const firstTimer = setTimeout(show, 1500)
+    // First appearance (Delay removed, appears instantly)
+    show()
 
     // Re-appear every 45s after being dismissed
     const reAppearInterval = setInterval(() => {
@@ -25,7 +25,6 @@ function EmployerNetworkBanner({ onNavigateToEmployerNetwork }) {
     }, 45000)
 
     return () => {
-      clearTimeout(firstTimer)
       clearInterval(reAppearInterval)
     }
   }, [])

@@ -1,21 +1,6 @@
 import './Footer.css'
 
 function Footer({ onViewChange }) {
-  const handleScrollOrNav = (sectionId) => {
-    // Navigate to home first if we are on a different page (like admin or legal)
-    if (onViewChange) {
-      onViewChange('jobseeker-home')
-    }
-    
-    // Scroll to section after a brief delay to allow page load
-    setTimeout(() => {
-      const element = document.getElementById(sectionId)
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth' })
-      }
-    }, 100)
-  }
-
   return (
     <footer className="footer">
       <div className="footer-content">
@@ -25,16 +10,15 @@ function Footer({ onViewChange }) {
         </div>
         <div className="footer-section">
           <h4>Product</h4>
-          <button onClick={() => handleScrollOrNav('how-it-works')} className="footer-link">
+          <button onClick={() => onViewChange('how-it-works')} className="footer-link">
             How It Works
           </button>
-          <button onClick={() => handleScrollOrNav('pricing')} className="footer-link">
+          <button onClick={() => onViewChange('pricing')} className="footer-link">
             Pricing
           </button>
         </div>
         <div className="footer-section">
           <h4>Legal</h4>
-          {/* ✅ NAVIGATION LINKS */}
           <button onClick={() => onViewChange('privacy')} className="footer-link">
             Privacy Policy
           </button>

@@ -194,26 +194,54 @@ function App() {
   }
 
   const handleViewChange = (view) => {
-    window.scrollTo(0, 0)
     if (['privacy', 'terms', 'refund'].includes(view)) {
+      window.scrollTo(0, 0)
       navigate(`/${view}`)
       return
     }
     switch (view) {
-      case 'home': navigate((user || isGuest) ? '/workbench' : '/'); break
-      case 'recruiter': navigate('/recruiter'); break
-      case 'employer-network': navigate('/employer-network'); break // ✅ NEW
-      case 'dashboard': navigate('/dashboard'); break
-      case 'contact': navigate('/contact'); break
+      case 'home': 
+        window.scrollTo(0, 0)
+        navigate((user || isGuest) ? '/workbench' : '/')
+        break
+      case 'recruiter': 
+        window.scrollTo(0, 0)
+        navigate('/recruiter')
+        break
+      case 'employer-network': 
+        window.scrollTo(0, 0)
+        navigate('/employer-network')
+        break
+      case 'dashboard': 
+        window.scrollTo(0, 0)
+        navigate('/dashboard')
+        break
+      case 'contact': 
+        window.scrollTo(0, 0)
+        navigate('/contact')
+        break
       case 'admin':
+        window.scrollTo(0, 0)
         if (isAdmin) navigate('/admin')
         else alert('You do not have admin privileges')
         break
+      // ✅ FIX: Store scroll target in sessionStorage before navigating,
+      // then poll for the element after LandingPage finishes its own scrollTo(0,0)
       case 'how-it-works':
-      case 'pricing':
-        navigate('/')
-        setTimeout(() => document.getElementById(view)?.scrollIntoView({ behavior: 'smooth' }), 100)
+      case 'pricing': {
+        const alreadyOnHome = location.pathname === '/'
+        if (alreadyOnHome) {
+          // Already on landing page — just scroll directly
+          const el = document.getElementById(view)
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        } else {
+          // Coming from another page (e.g. employer-network)
+          // Store the target so LandingPage can pick it up after mount
+          sessionStorage.setItem('scrollTarget', view)
+          navigate('/', { state: { skipScrollReset: true } })
+        }
         break
+      }
       default: break
     }
   }

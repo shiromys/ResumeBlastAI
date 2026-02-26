@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { useLocation } from 'react-router-dom'
 import { initiateCheckout } from '../services/paymentService'
 import './LandingPage.css'
 
@@ -73,9 +74,9 @@ const PAID_KEYS = ['starter', 'basic', 'professional', 'growth', 'advanced', 'pr
 
 function LandingPage({ onGetStarted, user }) {
   const [plans, setPlans] = useState({})
+  const location = useLocation()
 
   useEffect(() => {
-    window.scrollTo(0, 0)
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
     fetch(`${API_URL}/api/plans/public`)
       .then(res => res.json())
@@ -87,6 +88,26 @@ function LandingPage({ onGetStarted, user }) {
         }
       })
       .catch(err => console.error('Failed to load plans:', err))
+
+    const scrollTarget = sessionStorage.getItem('scrollTarget')
+    const skipReset = location?.state?.skipScrollReset
+
+    if (scrollTarget) {
+      sessionStorage.removeItem('scrollTarget')
+      // Use multiple attempts — first reset scroll to top ourselves,
+      // then after the page fully renders, scroll to the target section.
+      // This prevents React Router scroll restoration from interfering.
+      window.scrollTo(0, 0)
+      const timer = setTimeout(() => {
+        const el = document.getElementById(scrollTarget)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      }, 500)
+      return () => clearTimeout(timer)
+    } else if (!skipReset) {
+      window.scrollTo(0, 0)
+    }
   }, [])
 
   const handlePlanSelection = async (planKey) => {
