@@ -22,7 +22,7 @@ const PLAN_CONFIG = {
 
 const PAID_PLAN_KEYS = ['starter','basic','professional','growth','advanced','premium']
 
-function BlastConfig({ resumeId, resumeUrl, userData, isGuest, paymentVerified, onBlastComplete, onCancel }) {
+function BlastConfig({ resumeId, resumeUrl, resumeText, userData, isGuest, paymentVerified, onBlastComplete, onCancel }) {
   const [blastConfig, setBlastConfig]   = useState({ industry: 'Technology', location: 'Remote' })
   const [status, setStatus]             = useState('idle')
   const [statusMessage, setStatusMessage] = useState('')
@@ -121,7 +121,13 @@ function BlastConfig({ resumeId, resumeUrl, userData, isGuest, paymentVerified, 
         throw new Error(`Stripe Price ID is missing for plan: ${planKey}. Please check your .env variables.`)
       }
 
-      localStorage.setItem('pending_blast_resume_data', JSON.stringify({ id: resumeId, url: resumeUrl }))
+      // ✅ FIX: Save resumeText so it can be restored in App.jsx after redirect
+      localStorage.setItem('pending_blast_resume_data', JSON.stringify({ 
+        id: resumeId, 
+        url: resumeUrl,
+        text: resumeText 
+      }))
+      
       localStorage.setItem('pending_blast_config', JSON.stringify({ plan: planKey, industry: blastConfig.industry, location: blastConfig.location }))
       if (!isGuest) await trackPaymentInitiated(userData.id, planKey)
       

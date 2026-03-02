@@ -106,6 +106,23 @@ function App() {
 
         const { data: { session } } = await supabase.auth.getSession()
 
+        // ✅ HELPER: Restore Resume State from LocalStorage
+        const restoreResumeData = () => {
+          const savedData = localStorage.getItem('pending_blast_resume_data')
+          if (savedData) {
+            try {
+              const parsed = JSON.parse(savedData)
+              setResumeId(parsed.id || '')
+              setResumeUrl(parsed.url || '')
+              setResumeText(parsed.text || '')
+              setHasUploadedInSession(true)
+              console.log('✅ Restored resume data from localStorage')
+            } catch (e) {
+              console.error('Failed to parse saved resume data', e)
+            }
+          }
+        }
+
         if (session?.user) {
           setUser(session.user)
           setIsGuest(false)
@@ -117,10 +134,9 @@ function App() {
 
           if (isPaymentReturn) {
             setPaymentSuccess(true)
-            setHasUploadedInSession(true)
+            restoreResumeData() // FIX: Restore state for registered users
             navigate('/workbench', { replace: true })
           } else if (window.location.pathname === '/') {
-             // Only force navigation if landing on root
              if (adminStatus) {
                 navigate('/admin', { replace: true })
              } else if (session.user.user_metadata?.role === 'recruiter') {
@@ -134,8 +150,8 @@ function App() {
           console.log('✅ Guest returning from payment — routing to workbench')
           setIsGuest(true)
           setPaymentSuccess(true)
+          restoreResumeData() // FIX: Restore state and set hasUploadedInSession to true
           navigate('/workbench', { replace: true })
-          setHasUploadedInSession(false)
 
           const cleanUrl = `${window.location.pathname}?payment=success&session_id=${sessionId}`
           window.history.replaceState({}, '', cleanUrl)
@@ -225,18 +241,13 @@ function App() {
         if (isAdmin) navigate('/admin')
         else alert('You do not have admin privileges')
         break
-      // ✅ FIX: Store scroll target in sessionStorage before navigating,
-      // then poll for the element after LandingPage finishes its own scrollTo(0,0)
       case 'how-it-works':
       case 'pricing': {
         const alreadyOnHome = location.pathname === '/'
         if (alreadyOnHome) {
-          // Already on landing page — just scroll directly
           const el = document.getElementById(view)
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
         } else {
-          // Coming from another page (e.g. employer-network)
-          // Store the target so LandingPage can pick it up after mount
           sessionStorage.setItem('scrollTarget', view)
           navigate('/', { state: { skipScrollReset: true } })
         }
