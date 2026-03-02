@@ -107,8 +107,6 @@ function App() {
         const { data: { session } } = await supabase.auth.getSession()
 
         // ✅ HELPER: Restore Resume State from LocalStorage
-        // This ensures the workbench knows a resume was already uploaded 
-        // and contains the necessary text/ID to initiate the blast.
         const restoreResumeData = () => {
           const savedData = localStorage.getItem('pending_blast_resume_data')
           if (savedData) {
@@ -136,9 +134,10 @@ function App() {
 
           if (isPaymentReturn) {
             setPaymentSuccess(true)
-            restoreResumeData() // ✅ FIX: Restore state for registered users returning from Stripe
+            restoreResumeData() // ✅ FIX: Restore state for registered users
             navigate('/workbench', { replace: true })
           } else if (window.location.pathname === '/') {
+             // Only force navigation if landing on root
              if (adminStatus) {
                 navigate('/admin', { replace: true })
              } else if (session.user.user_metadata?.role === 'recruiter') {
@@ -152,7 +151,7 @@ function App() {
           console.log('✅ Guest returning from payment — routing to workbench')
           setIsGuest(true)
           setPaymentSuccess(true)
-          restoreResumeData() // ✅ FIX: Restore state for guests returning from Stripe
+          restoreResumeData() // ✅ FIX: Restore state for guests
           navigate('/workbench', { replace: true })
 
           const cleanUrl = `${window.location.pathname}?payment=success&session_id=${sessionId}`
@@ -243,13 +242,18 @@ function App() {
         if (isAdmin) navigate('/admin')
         else alert('You do not have admin privileges')
         break
+      // ✅ FIX: Store scroll target in sessionStorage before navigating,
+      // then poll for the element after LandingPage finishes its own scrollTo(0,0)
       case 'how-it-works':
       case 'pricing': {
         const alreadyOnHome = location.pathname === '/'
         if (alreadyOnHome) {
+          // Already on landing page — just scroll directly
           const el = document.getElementById(view)
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
         } else {
+          // Coming from another page (e.g. employer-network)
+          // Store the target so LandingPage can pick it up after mount
           sessionStorage.setItem('scrollTarget', view)
           navigate('/', { state: { skipScrollReset: true } })
         }
@@ -396,4 +400,4 @@ function App() {
   )
 }
 
-export default App;
+export default App

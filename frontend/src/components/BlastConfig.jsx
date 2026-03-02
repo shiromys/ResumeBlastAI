@@ -121,7 +121,7 @@ function BlastConfig({ resumeId, resumeUrl, resumeText, userData, isGuest, payme
         throw new Error(`Stripe Price ID is missing for plan: ${planKey}. Please check your .env variables.`)
       }
 
-      // ✅ FIX: Save resumeText, id, and url so it can be restored in App.jsx after redirect
+      // ✅ FIX: Save resumeText so it can be restored in App.jsx after redirect
       localStorage.setItem('pending_blast_resume_data', JSON.stringify({ 
         id: resumeId, 
         url: resumeUrl,
