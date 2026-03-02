@@ -9,14 +9,15 @@ import {
 import { saveGuestBlastStart, saveGuestBlastComplete } from '../services/guestTrackingService'
 import './BlastConfig.css'
 
+// ✅ MODIFIED: Added amount (in cents) and stripePriceId mapped from your .env file
 const PLAN_CONFIG = {
-  free:         { label: 'Free Plan',          price: '$0.00',  recruiters: 11,   drip: false },
-  starter:      { label: 'Starter Plan',       price: '$9.99',  recruiters: 250,  drip: true  },
-  basic:        { label: 'Basic Plan',         price: '$14.99', recruiters: 500,  drip: true  },
-  professional: { label: 'Professional Plan',  price: '$29.99', recruiters: 750,  drip: true, comingSoon: true },
-  growth:       { label: 'Growth Plan',        price: '$39.99', recruiters: 1000, drip: true, comingSoon: true },
-  advanced:     { label: 'Advanced Plan',      price: '$49.99', recruiters: 1250, drip: true, comingSoon: true },
-  premium:      { label: 'Premium Plan',       price: '$59.99', recruiters: 1500, drip: true, comingSoon: true },
+  free:         { label: 'Free Plan',          price: '$0.00',  amount: 0,    recruiters: 11,   drip: false },
+  starter:      { label: 'Starter Plan',       price: '$9.99',  amount: 999,  recruiters: 250,  drip: true,  stripePriceId: import.meta.env.VITE_PRICE_STARTER },
+  basic:        { label: 'Basic Plan',         price: '$14.99', amount: 1499, recruiters: 500,  drip: true,  stripePriceId: import.meta.env.VITE_PRICE_BASIC },
+  professional: { label: 'Professional Plan',  price: '$29.99', amount: 2999, recruiters: 750,  drip: true, comingSoon: true, stripePriceId: import.meta.env.VITE_PRICE_PROFESSIONAL },
+  growth:       { label: 'Growth Plan',        price: '$39.99', amount: 3999, recruiters: 1000, drip: true, comingSoon: true, stripePriceId: import.meta.env.VITE_PRICE_GROWTH },
+  advanced:     { label: 'Advanced Plan',      price: '$49.99', amount: 4999, recruiters: 1250, drip: true, comingSoon: true, stripePriceId: import.meta.env.VITE_PRICE_ADVANCE },
+  premium:      { label: 'Premium Plan',       price: '$59.99', amount: 5999, recruiters: 1500, drip: true, comingSoon: true, stripePriceId: import.meta.env.VITE_PRICE_PREMIUM },
 }
 
 const PAID_PLAN_KEYS = ['starter','basic','professional','growth','advanced','premium']
@@ -109,10 +110,28 @@ function BlastConfig({ resumeId, resumeUrl, userData, isGuest, paymentVerified, 
     setStatus('payment_processing')
     setStatusMessage('Redirecting to secure payment...')
     try {
+      // ✅ MODIFIED: Extract Stripe Price ID and Amount to send to backend
+      const config = PLAN_CONFIG[planKey]
+      const dbPlan = plans[planKey]
+      
+      const amountToCharge = dbPlan ? dbPlan.price_cents : config.amount
+      const stripePriceId = config.stripePriceId
+
+      if (!stripePriceId) {
+        throw new Error(`Stripe Price ID is missing for plan: ${planKey}. Please check your .env variables.`)
+      }
+
       localStorage.setItem('pending_blast_resume_data', JSON.stringify({ id: resumeId, url: resumeUrl }))
       localStorage.setItem('pending_blast_config', JSON.stringify({ plan: planKey, industry: blastConfig.industry, location: blastConfig.location }))
       if (!isGuest) await trackPaymentInitiated(userData.id, planKey)
-      await initiateCheckout({ email: userData.email, user_id: userData.id, plan: planKey, disclaimer_accepted: disclaimerAccepted })
+      
+      // ✅ MODIFIED: Pass stripePriceId and amountToCharge to initiateCheckout
+      await initiateCheckout(
+        { email: userData.email, user_id: userData.id, plan: planKey, disclaimer_accepted: disclaimerAccepted },
+        stripePriceId,
+        amountToCharge
+      )
+      
       isBlasting.current = false
     } catch (err) {
       setStatus('error')

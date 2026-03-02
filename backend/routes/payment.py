@@ -73,6 +73,9 @@ def create_checkout_session():
         user_id = data.get('user_id')
         plan_type = data.get('plan', 'basic').lower()
         disclaimer_accepted = data.get('disclaimer_accepted', False)
+        
+        price_id = data.get('price_id')
+        front_amount = data.get('amount')
 
         # 1. Fetch Plan details from Database
         plan_amount = 999
@@ -98,25 +101,29 @@ def create_checkout_session():
                 plan_amount = 1299
                 plan_limit = 500
 
-        # ✅ FIX: Build success_url with guest_id embedded as a URL parameter.
-        # This ensures the guest identity survives the Stripe redirect regardless
-        # of whether localStorage is cleared by the browser during cross-site navigation.
+        # Use frontend amount if provided, else rely on DB plan amount
+        if front_amount:
+            plan_amount = front_amount
+
         is_guest = GuestService.is_guest(str(user_id))
         
         if is_guest:
-            # Embed guest_id directly in the success URL so App.jsx can read it from params
             success_url = (
                 f'{frontend_url}?payment=success'
                 f'&session_id={{CHECKOUT_SESSION_ID}}'
-                f'&guest_id={user_id}'  # ✅ KEY FIX: guest_id in URL survives any redirect
+                f'&guest_id={user_id}'
             )
             print(f"[Payment] 🏷️ Guest checkout — embedding guest_id in success_url: {user_id}")
         else:
             success_url = f'{frontend_url}?payment=success&session_id={{CHECKOUT_SESSION_ID}}'
 
-        checkout_session = stripe.checkout.Session.create(
-            payment_method_types=['card'],
-            line_items=[{
+        if price_id:
+            line_items = [{
+                'price': price_id,
+                'quantity': 1,
+            }]
+        else:
+            line_items = [{
                 'price_data': {
                     'currency': 'usd',
                     'product_data': {
@@ -126,11 +133,17 @@ def create_checkout_session():
                     'unit_amount': plan_amount,
                 },
                 'quantity': 1,
-            }],
+            }]
+
+        checkout_session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=line_items,
             mode='payment',
             customer_email=user_email,
             client_reference_id=str(user_id),
             metadata={'plan_name': plan_type, 'user_id': str(user_id)},
+            # ✅ NEW: This tells Stripe to automatically generate a formal Bill/Invoice
+            invoice_creation={"enabled": True}, 
             success_url=success_url,
             cancel_url=f'{frontend_url}?payment=cancelled',
         )

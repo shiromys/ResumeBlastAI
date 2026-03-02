@@ -5,7 +5,8 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 const stripePromise = loadStripe(STRIPE_PUBLIC_KEY);
 
-export const initiateCheckout = async (user) => {
+// ✅ UPDATED: Added priceId and amount parameters
+export const initiateCheckout = async (user, priceId, amount) => {
   const stripe = await stripePromise;
 
   const response = await fetch(`${API_URL}/api/create-checkout-session`, {
@@ -15,8 +16,11 @@ export const initiateCheckout = async (user) => {
       email: user.email,
       user_id: user.id,
       plan: user.plan,
-      // ✅ NEW: Send disclaimer status to backend
-      disclaimer_accepted: user.disclaimer_accepted 
+      // Send disclaimer status to backend
+      disclaimer_accepted: user.disclaimer_accepted,
+      // ✅ NEW: Passing Stripe price ID and amount to backend
+      price_id: priceId,
+      amount: amount
     })
   });
 
