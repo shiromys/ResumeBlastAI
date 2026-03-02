@@ -107,6 +107,8 @@ function App() {
         const { data: { session } } = await supabase.auth.getSession()
 
         // ✅ HELPER: Restore Resume State from LocalStorage
+        // This ensures the workbench knows a resume was already uploaded 
+        // and contains the necessary text/ID to initiate the blast.
         const restoreResumeData = () => {
           const savedData = localStorage.getItem('pending_blast_resume_data')
           if (savedData) {
@@ -134,7 +136,7 @@ function App() {
 
           if (isPaymentReturn) {
             setPaymentSuccess(true)
-            restoreResumeData() // FIX: Restore state for registered users
+            restoreResumeData() // ✅ FIX: Restore state for registered users returning from Stripe
             navigate('/workbench', { replace: true })
           } else if (window.location.pathname === '/') {
              if (adminStatus) {
@@ -150,7 +152,7 @@ function App() {
           console.log('✅ Guest returning from payment — routing to workbench')
           setIsGuest(true)
           setPaymentSuccess(true)
-          restoreResumeData() // FIX: Restore state and set hasUploadedInSession to true
+          restoreResumeData() // ✅ FIX: Restore state for guests returning from Stripe
           navigate('/workbench', { replace: true })
 
           const cleanUrl = `${window.location.pathname}?payment=success&session_id=${sessionId}`
@@ -394,4 +396,4 @@ function App() {
   )
 }
 
-export default App
+export default App;
