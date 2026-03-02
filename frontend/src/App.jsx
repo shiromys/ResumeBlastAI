@@ -24,9 +24,11 @@ import EmployerNetwork from './components/EmployerNetwork' // ✅ NEW
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
 
-// ✅ FIX: Detect guest session using URL params FIRST (most reliable),
-// then fall back to localStorage signals.
-const detectGuestSession = (params) => {
+// ✅ FIX: Modified to accept isAuth parameter. 
+// If a user is logged in, we ignore guest logic to prevent session conflicts.
+const detectGuestSession = (params, isAuth) => {
+  if (isAuth) return null; // Force exit if user is logged in
+
   const urlGuestId = params.get('guest_id') || ''
   if (urlGuestId.startsWith('guest_')) {
     console.log('✅ Guest detected via URL param:', urlGuestId)
@@ -94,17 +96,21 @@ function App() {
         const isPaymentReturn = params.get('payment') === 'success'
         const sessionId = params.get('session_id')
 
-        const detectedGuestId = isPaymentReturn ? detectGuestSession(params) : null
+        // 1. Check Supabase Auth FIRST
+        const { data: { session } } = await supabase.auth.getSession()
+        const isAuthenticated = !!session?.user
+
+        // 2. Only check for Guest if NOT authenticated
+        const detectedGuestId = isPaymentReturn ? detectGuestSession(params, isAuthenticated) : null
         const isGuestReturning = !!detectedGuestId
 
         console.log('🔍 Session init:', { 
+          isAuthenticated,
           isPaymentReturn, 
           isGuestReturning,
           detectedGuestId,
           sessionId: sessionId?.slice(0, 20) 
         })
-
-        const { data: { session } } = await supabase.auth.getSession()
 
         // ✅ HELPER: Restore Resume State from LocalStorage
         const restoreResumeData = () => {
@@ -123,10 +129,12 @@ function App() {
           }
         }
 
-        if (session?.user) {
+        if (isAuthenticated) {
           setUser(session.user)
           setIsGuest(false)
-          localStorage.removeItem('is_guest_session')
+          // Explicitly clear guest flags when a real user is found
+          localStorage.removeItem('is_guest_session') 
+          localStorage.removeItem('guest_id')
           prevUserIdRef.current = session.user.id
 
           const adminStatus = await checkAdminStatus(session.user.email)
@@ -134,10 +142,9 @@ function App() {
 
           if (isPaymentReturn) {
             setPaymentSuccess(true)
-            restoreResumeData() // ✅ FIX: Restore state for registered users
+            restoreResumeData() // Restore state for registered users
             navigate('/workbench', { replace: true })
           } else if (window.location.pathname === '/') {
-             // Only force navigation if landing on root
              if (adminStatus) {
                 navigate('/admin', { replace: true })
              } else if (session.user.user_metadata?.role === 'recruiter') {
@@ -151,14 +158,14 @@ function App() {
           console.log('✅ Guest returning from payment — routing to workbench')
           setIsGuest(true)
           setPaymentSuccess(true)
-          restoreResumeData() // ✅ FIX: Restore state for guests
+          restoreResumeData() // Restore state for guests
           navigate('/workbench', { replace: true })
 
           const cleanUrl = `${window.location.pathname}?payment=success&session_id=${sessionId}`
           window.history.replaceState({}, '', cleanUrl)
 
         } else if (isPaymentReturn && !isGuestReturning) {
-          console.warn('⚠️ Payment return but no guest session detected — going home')
+          console.warn('⚠️ Payment return but no session detected — going home')
           navigate('/', { replace: true })
         }
       } catch (error) {
@@ -175,6 +182,7 @@ function App() {
       if (event === 'SIGNED_IN' && session?.user) {
         setIsGuest(false)
         localStorage.removeItem('is_guest_session')
+        localStorage.removeItem('guest_id')
         if (prevUserIdRef.current === session.user.id) return
         prevUserIdRef.current = session.user.id
         setUser(session.user)
@@ -242,18 +250,13 @@ function App() {
         if (isAdmin) navigate('/admin')
         else alert('You do not have admin privileges')
         break
-      // ✅ FIX: Store scroll target in sessionStorage before navigating,
-      // then poll for the element after LandingPage finishes its own scrollTo(0,0)
       case 'how-it-works':
       case 'pricing': {
         const alreadyOnHome = location.pathname === '/'
         if (alreadyOnHome) {
-          // Already on landing page — just scroll directly
           const el = document.getElementById(view)
           if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
         } else {
-          // Coming from another page (e.g. employer-network)
-          // Store the target so LandingPage can pick it up after mount
           sessionStorage.setItem('scrollTarget', view)
           navigate('/', { state: { skipScrollReset: true } })
         }

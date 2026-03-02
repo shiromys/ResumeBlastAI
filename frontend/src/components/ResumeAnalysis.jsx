@@ -395,7 +395,7 @@ function ResumeAnalysis({ user, isGuest, resumeText, resumeUrl, resumeId, isPaym
         <BlastConfig
           resumeId={resumeId}
           resumeUrl={resumeUrl}
-          resumeText={resumeText}
+          resumeText={resumeText} // ✅ FIX: Added prop to ensure data is passed to BlastConfig for storage
           isGuest={isGuest}
           paymentVerified={paymentVerified}
           userData={{
@@ -426,4 +426,4 @@ const getScoreColor = (score) => {
   return '#DC2626'; 
 };
 
-export default ResumeAnalysis
+export default ResumeAnalysis;
