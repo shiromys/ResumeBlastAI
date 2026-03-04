@@ -4,6 +4,9 @@
 #   1. FIXED: Conditionally adding "tags" to email_payload.
 #      If campaign_id is missing/None, the "tags" key is NOT sent.
 #      This prevents the "Brevo API error (400): tags is blank" error.
+#   2. FIXED: Fallback logic for replyTo email. Used `or` instead of `.get()`
+#      default so that empty strings ("") properly fall back to sender_email
+#      preventing Brevo from rejecting the API call.
 #   ALL OTHER LOGIC IS COMPLETELY UNTOUCHED
 # ============================================================
 
@@ -213,7 +216,7 @@ class RecruiterEmailService:
                     "email": self.sender_email
                 },
                 "replyTo": {
-                    "email": candidate_data.get('candidate_email', self.sender_email),
+                    "email": candidate_data.get('candidate_email') or self.sender_email,
                     "name": sender_name
                 },
                 "to": [

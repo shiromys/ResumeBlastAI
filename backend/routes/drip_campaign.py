@@ -109,12 +109,18 @@ def create_drip_campaign(campaign_data: dict) -> dict:
     now          = datetime.utcnow()
     plan_name    = campaign_data.get("plan_name", "starter").lower()
 
+    # ✅ FIX: Sanitize user_id — never pass empty string to a UUID column
+    raw_user_id = campaign_data.get("user_id", "")
+    user_id     = raw_user_id if raw_user_id and str(raw_user_id).strip() else None
+
+    print(f"[Drip] Creating campaign: plan={plan_name} user_id={user_id!r}")
+
     # Calculate wave start times -- continuous, no gaps
     day4_time = calculate_wave_start(plan_name, now, wave=2)   # Wave 2 start
     day8_time = calculate_wave_start(plan_name, now, wave=3)   # Wave 3 start
 
     record = {
-        "user_id":            campaign_data["user_id"],
+        "user_id":            user_id,                                    # ✅ None instead of ""
         "user_type":          campaign_data.get("user_type", "registered"),
         "resume_id":          campaign_data.get("resume_id"),
         "stripe_session_id":  campaign_data.get("stripe_session_id"),
@@ -132,7 +138,7 @@ def create_drip_campaign(campaign_data: dict) -> dict:
         "day4_scheduled_for": day4_time.isoformat(),
         "day8_scheduled_for": day8_time.isoformat(),
         "created_at":         now.isoformat(),
-        "updated_at":         now.isoformat()
+        # ✅ FIX: removed "updated_at" — column does not exist in blast_campaigns schema
     }
 
     resp = requests.post(
@@ -146,6 +152,7 @@ def create_drip_campaign(campaign_data: dict) -> dict:
         campaign_id = created[0]["id"] if isinstance(created, list) else created.get("id")
         print(f"[Drip] Campaign created: {campaign_id}")
         print(f"[Drip]   Plan         : {plan_name}")
+        print(f"[Drip]   User ID      : {user_id!r}")
         print(f"[Drip]   Wave 2 start : {day4_time.strftime('%Y-%m-%d %H:%M UTC')}")
         print(f"[Drip]   Wave 3 start : {day8_time.strftime('%Y-%m-%d %H:%M UTC')}")
         return {"success": True, "campaign_id": campaign_id}

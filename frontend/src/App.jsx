@@ -118,7 +118,15 @@ function App() {
           if (savedData) {
             try {
               const parsed = JSON.parse(savedData)
-              setResumeId(parsed.id || '')
+              let restoredId = parsed.id || '';
+
+              // If the user is authenticated, do not use a guest 'temp_' ID
+              if (isAuthenticated && restoredId.startsWith('temp_')) {
+                console.log('🧹 Clearing stale guest resume ID for authenticated user');
+                restoredId = ''; // This forces the app to generate a real UUID
+              }
+
+              setResumeId(restoredId)
               setResumeUrl(parsed.url || '')
               setResumeText(parsed.text || '')
               setHasUploadedInSession(true)
@@ -135,6 +143,7 @@ function App() {
           // Explicitly clear guest flags when a real user is found
           localStorage.removeItem('is_guest_session') 
           localStorage.removeItem('guest_id')
+          localStorage.removeItem('guestId')
           prevUserIdRef.current = session.user.id
 
           const adminStatus = await checkAdminStatus(session.user.email)
@@ -143,7 +152,8 @@ function App() {
           if (isPaymentReturn) {
             setPaymentSuccess(true)
             restoreResumeData() // Restore state for registered users
-            navigate('/workbench', { replace: true })
+            // 🔥 FIX: Pass window.location.search to preserve Stripe URL parameters!
+            navigate(`/workbench${window.location.search}`, { replace: true })
           } else if (window.location.pathname === '/') {
              if (adminStatus) {
                 navigate('/admin', { replace: true })
@@ -159,10 +169,8 @@ function App() {
           setIsGuest(true)
           setPaymentSuccess(true)
           restoreResumeData() // Restore state for guests
-          navigate('/workbench', { replace: true })
-
-          const cleanUrl = `${window.location.pathname}?payment=success&session_id=${sessionId}`
-          window.history.replaceState({}, '', cleanUrl)
+          // 🔥 FIX: Pass window.location.search to preserve Stripe URL parameters for guests too!
+          navigate(`/workbench${window.location.search}`, { replace: true })
 
         } else if (isPaymentReturn && !isGuestReturning) {
           console.warn('⚠️ Payment return but no session detected — going home')
@@ -181,18 +189,35 @@ function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         setIsGuest(false)
+        
+        // Aggressively clear all guest-related local storage items on login
         localStorage.removeItem('is_guest_session')
         localStorage.removeItem('guest_id')
+        localStorage.removeItem('guestId')
+        
+        const savedResume = localStorage.getItem('pending_blast_resume_data');
+        if (savedResume && savedResume.includes('temp_')) {
+          localStorage.removeItem('pending_blast_resume_data');
+          localStorage.removeItem('pending_blast_config');
+        }
+
         if (prevUserIdRef.current === session.user.id) return
         prevUserIdRef.current = session.user.id
         setUser(session.user)
+        
         const adminStatus = await checkAdminStatus(session.user.email)
         setIsAdmin(adminStatus)
         if (adminStatus) navigate('/admin')
         else {
           const role = session?.user?.user_metadata?.role
           if (role === 'recruiter') navigate('/recruiter')
-          else navigate('/workbench')
+          else {
+            // 🔥 FIX: Ensure we do NOT navigate away and wipe the URL if a payment is processing
+            const searchParams = new URLSearchParams(window.location.search);
+            if (searchParams.get('payment') !== 'success') {
+              navigate('/workbench');
+            }
+          }
         }
       } else if (event === 'SIGNED_OUT') {
         prevUserIdRef.current = null

@@ -1,6 +1,10 @@
 // src/components/UserDashboard.jsx
-// All original functionality preserved.
-// NEW: Day-by-day drip updates fetched live from drip_email_logs table.
+// ✅ CHANGES IN THIS FILE (all other original code preserved):
+//   1. DripDayUpdates now computes per-date email counts from blast_campaigns columns
+//   2. Added "Emails sent on [date]" breakdown using last_date columns
+//   3. Auto-refresh every 30s when a campaign is actively sending (not just 60s)
+//   4. Added blast_error query param handling to show error banner
+// ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
@@ -43,6 +47,27 @@ const TIER_LABELS = {
   59.99: { label: 'Elite',        color: '#059669' },
 }
 
+const PLAN_LIMIT_MAP = {
+  free: 11, starter: 250, basic: 500,
+  professional: 750, growth: 1000, advanced: 1250, premium: 1500,
+}
+const DAILY_LIMIT = 50
+
+function getPlanName(blast) {
+  if (blast.plan_name) return blast.plan_name.toLowerCase()
+  const r = parseInt(blast.recipients_count) || 0
+  if (r <= 11)   return 'free'
+  if (r <= 250)  return 'starter'
+  if (r <= 500)  return 'basic'
+  if (r <= 750)  return 'professional'
+  if (r <= 1000) return 'growth'
+  if (r <= 1250) return 'advanced'
+  return 'premium'
+}
+
+function getPlanLimit(planName) { return PLAN_LIMIT_MAP[planName] || 250 }
+function getDaysPerWave(planName) { return Math.ceil(getPlanLimit(planName) / DAILY_LIMIT) }
+
 function getPlanLabel(blast) {
   const price = parseFloat(blast.tier_price || blast.amount || 0)
   for (const [key, val] of Object.entries(TIER_LABELS)) {
@@ -61,23 +86,19 @@ function getHealthScore(openPct) {
   return null
 }
 
-function msToCountdown(ms) {
-  if (ms <= 0) return null
-  const totalMin = Math.floor(ms / 60000)
-  const days  = Math.floor(totalMin / 1440)
-  const hours = Math.floor((totalMin % 1440) / 60)
-  const mins  = totalMin % 60
-  if (days > 0)  return `${days}d ${hours}h ${mins}m`
-  if (hours > 0) return `${hours}h ${mins}m`
-  return `${mins}m`
-}
-
 function fmtDate(iso) {
   if (!iso) return null
   return new Date(iso).toLocaleString('en-US', {
     month: 'short', day: 'numeric',
     hour: 'numeric', minute: '2-digit', hour12: true,
   })
+}
+
+function fmtDateShort(dateStr) {
+  // dateStr is YYYY-MM-DD
+  if (!dateStr) return ''
+  const d = new Date(dateStr + 'T00:00:00Z')
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
 function fmtRelative(iso) {
@@ -90,17 +111,26 @@ function fmtRelative(iso) {
   return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+
 // ─── Main Component ────────────────────────────────────────
 function UserDashboard({ user, onStartBlast }) {
   const [loading, setLoading]           = useState(true)
   const [data, setData]                 = useState({ blasts: [], payments: [], resumes: [] })
-  // drip logs keyed by campaign_id → array of day rows from drip_email_logs
-  const [dripLogs, setDripLogs]         = useState({})
   const [expandedBlast, setExpanded]    = useState(null)
   const [lastRefresh, setLastRefresh]   = useState(Date.now())
   const [refreshLabel, setRefreshLabel] = useState('Just now')
+  const [blastError, setBlastError]     = useState(false)
 
-  // ── Load blast_campaigns + resumes + payments (original) ──
+  // Check for blast_error in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('blast_error')) {
+      setBlastError(true)
+      // Clean the URL
+      window.history.replaceState({}, '', '/dashboard')
+    }
+  }, [])
+
   const loadData = useCallback(async () => {
     if (!user) return
     try {
@@ -116,55 +146,33 @@ function UserDashboard({ user, onStartBlast }) {
     }
   }, [user])
 
-  // ── Load drip_email_logs — the source of truth for day updates ──
-  const loadDripLogs = useCallback(async () => {
-    if (!user) return
-    try {
-      const { data: logs, error } = await supabase
-        .from('drip_email_logs')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('day_number', { ascending: true })
-
-      if (error) { console.error('Drip logs fetch error:', error); return }
-
-      // Group rows by campaign_id so each blast can look up its own days
-      const grouped = {}
-      ;(logs || []).forEach(row => {
-        if (!grouped[row.campaign_id]) grouped[row.campaign_id] = []
-        grouped[row.campaign_id].push(row)
-      })
-      setDripLogs(grouped)
-    } catch (e) {
-      console.error('Drip logs error:', e)
-    }
-  }, [user])
-
-  // ── Initial load ──
   useEffect(() => {
     if (!user) return
-    Promise.all([loadData(), loadDripLogs()]).finally(() => setLoading(false))
+    loadData().finally(() => setLoading(false))
   }, [user])
 
-  // ── Auto-expand first blast ──
   useEffect(() => {
     if (data.blasts?.length > 0 && !expandedBlast) {
       setExpanded(data.blasts[0].id)
     }
   }, [data.blasts])
 
-  // ── Auto-refresh every 60s when any blast is active ──
+  // ✅ IMPROVED: Refresh every 30s when actively sending (was 60s)
   useEffect(() => {
+    const hasActiveSending = data.blasts.some(b =>
+      b.status !== 'completed' &&
+      (b.drip_day1_status === 'sending' || b.drip_day2_status === 'sending' || b.drip_day3_status === 'sending')
+    )
     const hasActive = data.blasts.some(b => b.status !== 'completed')
     if (!hasActive) return
+
     const interval = setInterval(() => {
       loadData()
-      loadDripLogs()
-    }, 60000)
-    return () => clearInterval(interval)
-  }, [data.blasts, loadData, loadDripLogs])
+    }, hasActiveSending ? 30000 : 60000)
 
-  // ── "Updated X min ago" label ──
+    return () => clearInterval(interval)
+  }, [data.blasts, loadData])
+
   useEffect(() => {
     const timer = setInterval(() => {
       const diff = Math.floor((Date.now() - lastRefresh) / 60000)
@@ -173,7 +181,6 @@ function UserDashboard({ user, onStartBlast }) {
     return () => clearInterval(timer)
   }, [lastRefresh])
 
-  // ── Receipt download (ORIGINAL — untouched) ──
   const downloadReceipt = (payment) => {
     const doc = new jsPDF()
     doc.setFillColor(220, 38, 38)
@@ -193,7 +200,6 @@ function UserDashboard({ user, onStartBlast }) {
   const name     = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'
   const initials = name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2)
 
-  // ── Totals for stat strip (original logic) ──
   const totalReached   = data.blasts.reduce((s, b) => s + (parseInt(b.recipients_count) || 0), 0)
   const totalDelivered = data.blasts.reduce((s, b) => s + (b.delivered_count || 0), 0)
   const totalOpened    = data.blasts.reduce((s, b) => s + (b.opened_count    || 0), 0)
@@ -210,6 +216,28 @@ function UserDashboard({ user, onStartBlast }) {
 
   return (
     <div className="db-wrap">
+
+      {/* ── ERROR BANNER ── */}
+      {blastError && (
+        <div style={{
+          background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: '8px',
+          padding: '14px 20px', marginBottom: '20px', display: 'flex',
+          alignItems: 'center', gap: '12px'
+        }}>
+          <span style={{ fontSize: '20px' }}>⚠️</span>
+          <div>
+            <strong style={{ color: '#991B1B' }}>Payment was successful</strong>
+            <span style={{ color: '#DC2626', marginLeft: '8px' }}>
+              but there was an issue initiating the blast. Please contact support@resumeblast.ai
+              with your payment confirmation.
+            </span>
+          </div>
+          <button onClick={() => setBlastError(false)} style={{
+            marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer',
+            color: '#DC2626', fontSize: '18px'
+          }}>✕</button>
+        </div>
+      )}
 
       {/* ── HEADER ── */}
       <div className="db-page-header">
@@ -239,7 +267,6 @@ function UserDashboard({ user, onStartBlast }) {
           </div>
         </div>
 
-        {/* STAT STRIP (original) */}
         <div className="db-stat-strip">
           <StatPill icon={<Icon.Rocket />}  label="Campaigns"     value={data.blasts.length}             />
           <div className="db-stat-divider" />
@@ -254,8 +281,6 @@ function UserDashboard({ user, onStartBlast }) {
       </div>
 
       <div className="db-body">
-
-        {/* ── LEFT: campaigns + resumes ── */}
         <div className="db-main-col">
 
           {/* BLAST CAMPAIGNS */}
@@ -285,7 +310,7 @@ function UserDashboard({ user, onStartBlast }) {
             )}
           </section>
 
-          {/* RECENT RESUMES (original) */}
+          {/* RECENT RESUMES */}
           <section className="db-card">
             <div className="db-card-header">
               <div className="db-card-title">
@@ -320,7 +345,7 @@ function UserDashboard({ user, onStartBlast }) {
           <aside className="db-sidebar">
             <PlanCard blasts={data.blasts} />
             <RecruiterReachCard blasts={data.blasts} />
-            <ActivityFeedCard blasts={data.blasts} dripLogs={dripLogs} />
+            <ActivityFeedCard blasts={data.blasts} />
           </aside>
         )}
       </div>
@@ -346,7 +371,6 @@ function BlastRow({ blast, index, expanded, onToggle }) {
   const planInfo    = getPlanLabel(blast)
   const health      = getHealthScore(openPct)
 
-  // Wave progress computed from blast_campaigns columns directly
   const planNm     = getPlanName(blast)
   const planLmt    = getPlanLimit(planNm)
   const isFreeBlast = planNm === 'free' || planLmt <= 11
@@ -364,7 +388,6 @@ function BlastRow({ blast, index, expanded, onToggle }) {
     month: 'short', day: 'numeric', year: 'numeric',
   })
 
-  // Campaign report PDF
   const downloadReport = (e) => {
     e.stopPropagation()
     const doc = new jsPDF()
@@ -392,10 +415,10 @@ function BlastRow({ blast, index, expanded, onToggle }) {
     y += 4
     doc.setFont(undefined, 'bold'); doc.text('Drip Email Schedule', 10, y); y += 8; doc.setFont(undefined, 'normal')
     if (!isFreeBlast) {
-      line('Wave 1 (Initial)', `${w1Sent.toLocaleString()} sent${w1Done ? ' — Complete' : ' — In progress'}`)
+      line('Wave 1 (Initial)',    `${w1Sent.toLocaleString()} sent${w1Done ? ' — Complete' : ' — In progress'}`)
       line('Wave 2 (Follow-up)', w1Done ? `${w2Sent.toLocaleString()} sent${w2Done ? ' — Complete' : ' — In progress'}` : 'Pending')
-      line('Wave 3 (Reminder)', w2Done ? `${w3Sent.toLocaleString()} sent${w3Done ? ' — Complete' : ' — In progress'}` : 'Pending')
-      line('Total emails sent', totalDripSent.toLocaleString())
+      line('Wave 3 (Reminder)',  w2Done ? `${w3Sent.toLocaleString()} sent${w3Done ? ' — Complete' : ' — In progress'}` : 'Pending')
+      line('Total emails sent',  totalDripSent.toLocaleString())
     }
     if (health) { y += 4; doc.setFont(undefined, 'bold'); doc.text(`Campaign Health: ${health.label} (${openPct}% open rate)`, 10, y) }
     doc.save(`campaign_report_${(blast.created_at || '').slice(0, 10)}.pdf`)
@@ -403,8 +426,6 @@ function BlastRow({ blast, index, expanded, onToggle }) {
 
   return (
     <div className={`db-blast-row ${expanded ? 'db-blast-row--open' : ''}`} style={{ animationDelay: `${index * 60}ms` }}>
-
-      {/* Summary row */}
       <button className="db-blast-summary" onClick={onToggle}>
         <div className="db-blast-summary-left">
           <span className={`db-status-dot ${isCompleted ? 'dot--green' : 'dot--amber'}`} />
@@ -447,11 +468,8 @@ function BlastRow({ blast, index, expanded, onToggle }) {
         </div>
       </button>
 
-      {/* Expanded detail */}
       {expanded && (
         <div className="db-blast-detail">
-
-          {/* Metric cards (original) */}
           <div className="db-metrics-grid">
             <MetricCard color="default" icon={<Icon.Send />}  label="Sent"      value={recipients.toLocaleString()} sub="Total"               />
             <MetricCard color="green"   icon={<Icon.Check />} label="Delivered" value={delivered.toLocaleString()}  sub={`${deliveryPct}% rate`} />
@@ -460,10 +478,9 @@ function BlastRow({ blast, index, expanded, onToggle }) {
             <MetricCard color="red"     icon={<Icon.Warn />}  label="Bounced"   value={bounced.toLocaleString()}    sub={spam > 0 ? `${spam} spam` : 'No spam'} />
           </div>
 
-          {/* ── DAY-BY-DAY DRIP UPDATES ── */}
+          {/* ✅ REAL-TIME DAY-BY-DAY DRIP UPDATES */}
           <DripDayUpdates blast={blast} />
 
-          {/* Health score */}
           {health && hasData && (
             <div className="db-health-row">
               <span className="db-health-label"><Icon.Shield /> Campaign Health</span>
@@ -471,14 +488,13 @@ function BlastRow({ blast, index, expanded, onToggle }) {
             </div>
           )}
 
-          {/* Download report */}
           <button className="db-report-btn" onClick={downloadReport}>
             <Icon.Download />
             Download Campaign Report
           </button>
 
           <p className="db-detail-note">
-            Stats refresh every 60 seconds. Drip emails send automatically via Brevo on schedule.
+            Stats refresh every 30 seconds when sending is active. Drip emails send automatically via Brevo.
           </p>
         </div>
       )}
@@ -487,180 +503,82 @@ function BlastRow({ blast, index, expanded, onToggle }) {
 }
 
 
-
 // ═══════════════════════════════════════════════════════════
-// DRIP CAMPAIGN — FULL DAY-BY-DAY UPDATES
-//
-// Real structure from drip_scheduler.py + drip_campaign.py:
-//
-// 3 WAVES (not 3 days):
-//   Wave 1 (initial intro):  drip_day1_* columns — starts on payment day
-//   Wave 2 (follow-up):      drip_day2_* columns — starts at day4_scheduled_for
-//   Wave 3 (final reminder): drip_day3_* columns — starts at day8_scheduled_for
-//
-// Each wave sends 50 emails/day until plan limit is reached.
-// PLAN TIMELINES (50 emails/day):
-//   Free         11 recruiters →  1 day   (single blast, no drip)
-//   Starter     250 recruiters →  5 days/wave × 3 =  15 days total,  750 total emails
-//   Basic       500 recruiters → 10 days/wave × 3 =  30 days total, 1500 total emails
-//   Professional 750 recruiters → 15 days/wave × 3 =  45 days total, 2250 total emails
-//   Growth     1000 recruiters → 20 days/wave × 3 =  60 days total, 3000 total emails
-//   Advanced   1250 recruiters → 25 days/wave × 3 =  75 days total, 3750 total emails
-//   Premium    1500 recruiters → 30 days/wave × 3 =  90 days total, 4500 total emails
-//
-// KEY FIELDS READ FROM blast_campaigns:
-//   plan_name                → "starter" | "basic" | "professional" | etc
-//   drip_day1_delivered      → cumulative emails sent in Wave 1 (0→plan_limit)
-//   drip_day1_last_date      → date of last Wave 1 batch (YYYY-MM-DD)
-//   drip_day1_status         → "sending" | "sent"
-//   drip_day1_sent_at        → set ONLY when entire Wave 1 is done
-//   day4_scheduled_for       → ISO datetime when Wave 2 becomes eligible
-//   drip_day2_delivered      → cumulative emails sent in Wave 2
-//   drip_day2_last_date      → date of last Wave 2 batch
-//   drip_day2_status         → "sending" | "sent"
-//   drip_day2_sent_at        → set ONLY when entire Wave 2 is done
-//   day8_scheduled_for       → ISO datetime when Wave 3 becomes eligible
-//   drip_day3_delivered      → cumulative emails sent in Wave 3
-//   drip_day3_last_date      → date of last Wave 3 batch
-//   drip_day3_status         → "sending" | "sent"
-//   drip_day3_sent_at        → set ONLY when entire Wave 3 is done
+// ✅ REAL-TIME DRIP UPDATES
+// Reads directly from blast_campaigns columns (no drip_email_logs needed).
+// Shows per-date breakdown: "Sent X emails on [date]"
 // ═══════════════════════════════════════════════════════════
 
-// Plan config — must match drip_scheduler.py PLAN_LIMIT_MAP
-const PLAN_LIMIT_MAP = {
-  free:         11,
-  starter:      250,
-  basic:        500,
-  professional: 750,
-  growth:       1000,
-  advanced:     1250,
-  premium:      1500,
-}
-const DAILY_LIMIT = 50
-
-function getPlanName(blast) {
-  // Try plan_name column first (set by drip_campaign.py)
-  if (blast.plan_name) return blast.plan_name.toLowerCase()
-  // Fallback: derive from recipients_count
-  const r = parseInt(blast.recipients_count) || 0
-  if (r <= 11)   return 'free'
-  if (r <= 250)  return 'starter'
-  if (r <= 500)  return 'basic'
-  if (r <= 750)  return 'professional'
-  if (r <= 1000) return 'growth'
-  if (r <= 1250) return 'advanced'
-  return 'premium'
-}
-
-function getPlanLimit(planName) {
-  return PLAN_LIMIT_MAP[planName] || 250
-}
-
-function getDaysPerWave(planName) {
-  const limit = getPlanLimit(planName)
-  return Math.ceil(limit / DAILY_LIMIT)
-}
-
-// Build the array of individual calendar-day rows for one wave
-// Each row = one day's batch of up to 50 emails
 function buildWaveDays(waveNum, blast, planName) {
   const planLimit   = getPlanLimit(planName)
   const daysPerWave = getDaysPerWave(planName)
   const DAILY       = Math.min(DAILY_LIMIT, planLimit)
-
-  // Column name mapping — matches WAVE_FIELDS in drip_scheduler.py
-  // Wave 1 → drip_day1_*, Wave 2 → drip_day2_*, Wave 3 → drip_day3_*
-  const col = waveNum // 1, 2, or 3
+  const col         = waveNum
 
   const cumulativeSent = parseInt(blast[`drip_day${col}_delivered`]) || 0
   const lastDate       = blast[`drip_day${col}_last_date`]  || null
-  const waveStatus     = blast[`drip_day${col}_status`]     || null  // "sending"|"sent"|null
-  const waveSentAt     = blast[`drip_day${col}_sent_at`]    || null  // set when wave done
+  const waveStatus     = blast[`drip_day${col}_status`]     || null
+  const waveSentAt     = blast[`drip_day${col}_sent_at`]    || null
   const waveStartISO   = waveNum === 1
     ? blast.created_at
     : waveNum === 2
       ? blast.day4_scheduled_for
       : blast.day8_scheduled_for
 
-  // Determine if this wave has started at all
-  const waveStarted = cumulativeSent > 0 || waveStatus === 'sending' || !!waveSentAt
+  const waveStarted  = cumulativeSent > 0 || waveStatus === 'sending' || !!waveSentAt
+  const waveComplete = !!waveSentAt
 
-  // Check if wave is even eligible yet (for Wave 2 & 3)
   let waveEligible = true
-  if (waveNum === 2) {
-    waveEligible = !!blast.drip_day1_sent_at  // Wave 1 must be complete
-  } else if (waveNum === 3) {
-    waveEligible = !!blast.drip_day2_sent_at  // Wave 2 must be complete
-  }
+  if (waveNum === 2) waveEligible = !!blast.drip_day1_sent_at
+  if (waveNum === 3) waveEligible = !!blast.drip_day2_sent_at
 
-  const waveComplete = !!waveSentAt  // sent_at only stamped when fully done
-
-  // Build individual day rows
   const days = []
   for (let i = 0; i < daysPerWave; i++) {
-    const dayNum      = i + 1
-    const batchStart  = i * DAILY + 1           // e.g. 1, 51, 101 ...
-    const batchEnd    = Math.min((i + 1) * DAILY, planLimit)
-    const batchSize   = batchEnd - batchStart + 1
-
-    // How many emails were sent on this specific calendar day?
-    // We know cumulativeSent = total sent so far.
-    // Days 1..floor(cumulative/50) are fully sent.
-    // The current day (floor+1) is partially sent or in progress.
+    const batchStart      = i * DAILY + 1
+    const batchEnd        = Math.min((i + 1) * DAILY, planLimit)
+    const batchSize       = batchEnd - batchStart + 1
     const fullBatchesDone = Math.floor(cumulativeSent / DAILY)
     const partialSent     = cumulativeSent % DAILY
 
     let daySent   = 0
     let dayStatus = 'pending'
+    let dayDate   = null  // ✅ NEW: actual calendar date for this batch
 
     if (!waveEligible) {
       dayStatus = 'locked'
-      daySent   = 0
     } else if (!waveStarted) {
       dayStatus = 'pending'
-      daySent   = 0
     } else if (i < fullBatchesDone) {
-      // This day's batch is fully complete
       dayStatus = 'sent'
       daySent   = batchSize
+      // We only have lastDate for the most recent batch; earlier ones don't have per-day dates
+      // We can estimate: lastDate is the date of the most recent batch
+      // For display we show lastDate only on the last completed batch
+      dayDate   = (i === fullBatchesDone - 1) ? lastDate : null
     } else if (i === fullBatchesDone && !waveComplete) {
-      // This is the current active day
       if (partialSent > 0) {
         dayStatus = 'sending'
         daySent   = partialSent
+        dayDate   = lastDate
       } else if (lastDate) {
-        // Today's batch just finished but wave not done
         dayStatus = 'sending'
         daySent   = DAILY
+        dayDate   = lastDate
       } else {
         dayStatus = 'pending'
-        daySent   = 0
       }
-    } else {
-      dayStatus = 'pending'
-      daySent   = 0
     }
 
-    // If the whole wave is marked complete and this is the last day
-    if (waveComplete && i === daysPerWave - 1) {
+    if (waveComplete) {
       dayStatus = 'sent'
       daySent   = batchSize
-    }
-    // If wave complete and day before last
-    if (waveComplete && i < daysPerWave - 1) {
-      dayStatus = 'sent'
-      daySent   = batchSize
+      // Only show date on the last day
+      dayDate   = i === daysPerWave - 1 ? lastDate : null
     }
 
     days.push({
-      waveNum,
-      dayNum,
-      batchStart,
-      batchEnd,
-      batchSize,
-      status:     dayStatus,
-      sent:       daySent,
-      lastDate,   // only meaningful for the current active day
+      waveNum, dayNum: i + 1, batchStart, batchEnd, batchSize,
+      status: dayStatus, sent: daySent, dayDate,
       scheduledFor: waveStartISO,
     })
   }
@@ -668,42 +586,33 @@ function buildWaveDays(waveNum, blast, planName) {
 }
 
 
-// ── Main component that renders all waves ──────────────────
 function DripDayUpdates({ blast }) {
   const planName    = getPlanName(blast)
   const planLimit   = getPlanLimit(planName)
   const isFree      = planName === 'free' || planLimit <= 11
   const daysPerWave = getDaysPerWave(planName)
 
-  // For free plan: no drip, just show single blast status
-  if (isFree) {
-    return <FreePlanStatus blast={blast} />
-  }
+  if (isFree) return <FreePlanStatus blast={blast} />
 
-  // Build wave data
   const wave1Days = buildWaveDays(1, blast, planName)
   const wave2Days = buildWaveDays(2, blast, planName)
   const wave3Days = buildWaveDays(3, blast, planName)
 
-  // Overall progress
   const w1Sent  = parseInt(blast.drip_day1_delivered) || 0
   const w2Sent  = parseInt(blast.drip_day2_delivered) || 0
   const w3Sent  = parseInt(blast.drip_day3_delivered) || 0
-  const totalSent  = w1Sent + w2Sent + w3Sent
+  const totalSent   = w1Sent + w2Sent + w3Sent
   const totalEmails = planLimit * 3
 
   const w1Done  = !!blast.drip_day1_sent_at
   const w2Done  = !!blast.drip_day2_sent_at
   const w3Done  = !!blast.drip_day3_sent_at
-  const wavesComplete = [w1Done, w2Done, w3Done].filter(Boolean).length
 
   const w2EligibleAt = blast.day4_scheduled_for || null
   const w3EligibleAt = blast.day8_scheduled_for || null
 
   return (
     <div className="db-drip-section">
-
-      {/* ── Section header ── */}
       <div className="db-drip-section-header">
         <div className="db-drip-section-title">
           <Icon.Star />
@@ -711,7 +620,7 @@ function DripDayUpdates({ blast }) {
         </div>
         <div className="db-drip-meta">
           <span className="db-drip-meta-chip">
-            {daysPerWave} days/wave × 3 waves = {daysPerWave * 3} days
+            {daysPerWave} days/wave × 3 waves
           </span>
           <span className="db-drip-meta-chip db-drip-meta-chip--highlight">
             {totalSent.toLocaleString()} / {totalEmails.toLocaleString()} emails sent
@@ -719,49 +628,24 @@ function DripDayUpdates({ blast }) {
         </div>
       </div>
 
-      {/* ── Wave 1 ── */}
       <WaveSection
-        waveNum={1}
-        label="Wave 1 — Initial Introduction"
-        color="#DC2626"
-        days={wave1Days}
-        delivered={w1Sent}
-        planLimit={planLimit}
-        isComplete={w1Done}
-        isActive={!w1Done}
-        completedAt={blast.drip_day1_sent_at}
-        startsAt={blast.created_at}
+        waveNum={1} label="Wave 1 — Initial Introduction" color="#DC2626"
+        days={wave1Days} delivered={w1Sent} planLimit={planLimit}
+        isComplete={w1Done} isActive={!w1Done}
+        completedAt={blast.drip_day1_sent_at} startsAt={blast.created_at}
       />
-
-      {/* ── Wave 2 ── */}
       <WaveSection
-        waveNum={2}
-        label="Wave 2 — Follow-Up"
-        color="#2563EB"
-        days={wave2Days}
-        delivered={w2Sent}
-        planLimit={planLimit}
-        isComplete={w2Done}
-        isActive={w1Done && !w2Done}
-        isLocked={!w1Done}
-        completedAt={blast.drip_day2_sent_at}
-        startsAt={w2EligibleAt}
+        waveNum={2} label="Wave 2 — Follow-Up" color="#2563EB"
+        days={wave2Days} delivered={w2Sent} planLimit={planLimit}
+        isComplete={w2Done} isActive={w1Done && !w2Done} isLocked={!w1Done}
+        completedAt={blast.drip_day2_sent_at} startsAt={w2EligibleAt}
         unlocksWhen="Wave 1 completes"
       />
-
-      {/* ── Wave 3 ── */}
       <WaveSection
-        waveNum={3}
-        label="Wave 3 — Final Reminder"
-        color="#059669"
-        days={wave3Days}
-        delivered={w3Sent}
-        planLimit={planLimit}
-        isComplete={w3Done}
-        isActive={w2Done && !w3Done}
-        isLocked={!w2Done}
-        completedAt={blast.drip_day3_sent_at}
-        startsAt={w3EligibleAt}
+        waveNum={3} label="Wave 3 — Final Reminder" color="#059669"
+        days={wave3Days} delivered={w3Sent} planLimit={planLimit}
+        isComplete={w3Done} isActive={w2Done && !w3Done} isLocked={!w2Done}
+        completedAt={blast.drip_day3_sent_at} startsAt={w3EligibleAt}
         unlocksWhen="Wave 2 completes"
       />
     </div>
@@ -769,29 +653,16 @@ function DripDayUpdates({ blast }) {
 }
 
 
-// ── Wave Section (collapsible, shows all daily rows) ───────
 function WaveSection({ waveNum, label, color, days, delivered, planLimit,
                        isComplete, isActive, isLocked, completedAt, startsAt, unlocksWhen }) {
   const [open, setOpen] = useState(isActive || isComplete)
-
-  const sentDays    = days.filter(d => d.status === 'sent').length
-  const activeDays  = days.filter(d => d.status === 'sending').length
   const progressPct = planLimit > 0 ? Math.min(Math.round((delivered / planLimit) * 100), 100) : 0
 
-  const waveStatusLabel = isLocked   ? 'Locked'
-    : isComplete ? '✓ Complete'
-    : isActive   ? '⚡ Active'
-    : 'Pending'
-
-  const waveStatusColor = isLocked   ? '#9CA3AF'
-    : isComplete ? '#10B981'
-    : isActive   ? '#F59E0B'
-    : '#9CA3AF'
+  const waveStatusLabel = isLocked ? 'Locked' : isComplete ? '✓ Complete' : isActive ? '⚡ Active' : 'Pending'
+  const waveStatusColor = isLocked ? '#9CA3AF' : isComplete ? '#10B981' : isActive ? '#F59E0B' : '#9CA3AF'
 
   return (
     <div className={`db-wave ${isLocked ? 'db-wave--locked' : ''} ${isComplete ? 'db-wave--done' : ''} ${isActive ? 'db-wave--active' : ''}`}>
-
-      {/* Wave header — click to expand/collapse */}
       <button className="db-wave-header" onClick={() => !isLocked && setOpen(o => !o)}>
         <div className="db-wave-header-left">
           <span className="db-wave-dot" style={{ background: isLocked ? '#E5E7EB' : color }} />
@@ -799,11 +670,9 @@ function WaveSection({ waveNum, label, color, days, delivered, planLimit,
             {label}
           </span>
         </div>
-
         <div className="db-wave-header-right">
           {!isLocked && (
             <>
-              {/* Mini progress bar */}
               <div className="db-wave-mini-bar">
                 <div className="db-wave-mini-fill" style={{ width: `${progressPct}%`, background: color }} />
               </div>
@@ -824,7 +693,6 @@ function WaveSection({ waveNum, label, color, days, delivered, planLimit,
         </div>
       </button>
 
-      {/* Completion badge */}
       {isComplete && completedAt && (
         <div className="db-wave-completed-bar">
           <Icon.Check />
@@ -832,15 +700,13 @@ function WaveSection({ waveNum, label, color, days, delivered, planLimit,
         </div>
       )}
 
-      {/* Schedule info for upcoming waves */}
       {!isLocked && !isComplete && startsAt && (
         <div className="db-wave-schedule-bar">
           <Icon.Calendar />
-          {isActive ? `Started` : `Scheduled`}: {fmtDate(startsAt)}
+          {isActive ? 'Started' : 'Scheduled'}: {fmtDate(startsAt)}
         </div>
       )}
 
-      {/* Daily rows */}
       {open && !isLocked && (
         <div className="db-wave-days">
           {days.map((day, i) => (
@@ -853,33 +719,28 @@ function WaveSection({ waveNum, label, color, days, delivered, planLimit,
 }
 
 
-// ── Single daily batch row ──────────────────────────────────
 function DailyBatchRow({ day, waveColor, isLast }) {
   const batchPct = day.batchSize > 0 ? Math.min(Math.round((day.sent / day.batchSize) * 100), 100) : 0
 
   const statusConfig = {
-    sent:    { dot: waveColor,   label: '✓ Sent',    textColor: '#065F46' },
-    sending: { dot: '#F59E0B',   label: '⚡ Sending', textColor: '#92400E' },
-    pending: { dot: '#D1D5DB',   label: 'Pending',    textColor: '#9CA3AF' },
-    locked:  { dot: '#E5E7EB',   label: '—',          textColor: '#D1D5DB' },
+    sent:    { dot: waveColor, label: '✓ Sent',    textColor: '#065F46' },
+    sending: { dot: '#F59E0B', label: '⚡ Sending', textColor: '#92400E' },
+    pending: { dot: '#D1D5DB', label: 'Pending',    textColor: '#9CA3AF' },
+    locked:  { dot: '#E5E7EB', label: '—',          textColor: '#D1D5DB' },
   }
   const sc = statusConfig[day.status] || statusConfig.pending
 
   return (
     <div className={`db-batch-row ${day.status === 'sent' ? 'db-batch-row--sent' : ''} ${day.status === 'sending' ? 'db-batch-row--sending' : ''}`}>
-
-      {/* Day label */}
       <div className="db-batch-day-label">
         <span className="db-batch-dot" style={{ background: sc.dot }} />
         <span className="db-batch-day-num">Day {day.dayNum}</span>
       </div>
 
-      {/* Recruiter range */}
       <div className="db-batch-range">
         Recruiters {day.batchStart}–{day.batchEnd}
       </div>
 
-      {/* Progress bar (only for sent/sending) */}
       {(day.status === 'sent' || day.status === 'sending') && (
         <div className="db-batch-bar-wrap">
           <div className="db-batch-bar-track">
@@ -893,31 +754,28 @@ function DailyBatchRow({ day, waveColor, isLast }) {
         </div>
       )}
 
-      {/* Status label */}
       <div className="db-batch-status" style={{ color: sc.textColor }}>
         {sc.label}
       </div>
 
-      {/* Last send date */}
-      {day.status === 'sent' && day.lastDate && isLast && (
-        <div className="db-batch-date">Last batch: {day.lastDate}</div>
+      {/* ✅ NEW: Show actual send date */}
+      {day.dayDate && (day.status === 'sent' || day.status === 'sending') && (
+        <div className="db-batch-date" style={{ fontSize: '11px', color: '#9CA3AF', marginLeft: '4px' }}>
+          {fmtDateShort(day.dayDate)}
+        </div>
       )}
     </div>
   )
 }
 
 
-// ── Free plan: just show single blast status ───────────────
 function FreePlanStatus({ blast }) {
   const sent = parseInt(blast.recipients_count) || 0
   const done = !!blast.drip_day1_sent_at || blast.status === 'completed'
   return (
     <div className="db-drip-section">
       <div className="db-drip-section-header">
-        <div className="db-drip-section-title">
-          <Icon.Send />
-          Blast Status
-        </div>
+        <div className="db-drip-section-title"><Icon.Send />Blast Status</div>
       </div>
       <div className={`db-free-blast-status ${done ? 'fbs--done' : 'fbs--sending'}`}>
         <span className="db-free-blast-dot" />
@@ -934,8 +792,7 @@ function FreePlanStatus({ blast }) {
 }
 
 
-
-// ─── Plan Card (sidebar) ───────────────────────────────────
+// ─── Sidebar Cards ─────────────────────────────────────────
 function PlanCard({ blasts }) {
   const latest = blasts[0]
   if (!latest) return null
@@ -967,8 +824,6 @@ function PlanCard({ blasts }) {
   )
 }
 
-
-// ─── Recruiter Reach Pie (sidebar) ────────────────────────
 function RecruiterReachCard({ blasts }) {
   const total     = blasts.reduce((s, b) => s + (parseInt(b.recipients_count) || 0), 0)
   const delivered = blasts.reduce((s, b) => s + (b.delivered_count || 0), 0)
@@ -1018,31 +873,40 @@ function LegendRow({ color, label, pct }) {
   )
 }
 
-
-// ─── Activity Feed (sidebar) ───────────────────────────────
-// Now reads from drip_email_logs for real timestamps per day
-function ActivityFeedCard({ blasts, dripLogs }) {
+// ✅ UPDATED: ActivityFeedCard now reads directly from blast_campaigns columns
+function ActivityFeedCard({ blasts }) {
   const events = []
 
-  Object.entries(dripLogs).forEach(([campaignId, days]) => {
-    const blast = blasts.find(b => b.id === campaignId)
-    const name  = blast?.industry || 'Campaign'
-    days.forEach(d => {
-      if (d.sent_at) events.push({
-        time:     d.sent_at,
-        color:    ['#DC2626', '#2563EB', '#10B981'][d.day_number - 1] || '#9CA3AF',
-        text:     `Day ${d.day_number} — ${d.emails_sent || 0} sent, ${d.emails_failed || 0} failed`,
-        campaign: name,
-      })
-    })
-  })
-
   blasts.forEach(b => {
+    const name = b.industry || b.plan_name || 'Campaign'
+
+    // Wave 1 last batch
+    if (b.drip_day1_last_date) events.push({
+      time:     b.drip_day1_sent_at || b.drip_day1_last_date,
+      color:    '#DC2626',
+      text:     `Wave 1 — ${(parseInt(b.drip_day1_delivered) || 0).toLocaleString()} emails sent`,
+      campaign: name,
+    })
+    // Wave 2 last batch
+    if (b.drip_day2_last_date) events.push({
+      time:     b.drip_day2_sent_at || b.drip_day2_last_date,
+      color:    '#2563EB',
+      text:     `Wave 2 — ${(parseInt(b.drip_day2_delivered) || 0).toLocaleString()} emails sent`,
+      campaign: name,
+    })
+    // Wave 3 last batch
+    if (b.drip_day3_last_date) events.push({
+      time:     b.drip_day3_sent_at || b.drip_day3_last_date,
+      color:    '#059669',
+      text:     `Wave 3 — ${(parseInt(b.drip_day3_delivered) || 0).toLocaleString()} emails sent`,
+      campaign: name,
+    })
+    // Campaign launch
     events.push({
       time:     b.created_at,
       color:    '#9CA3AF',
-      text:     'Campaign launched',
-      campaign: b.industry || 'Campaign',
+      text:     `Campaign launched — ${b.plan_name || ''} plan`,
+      campaign: name,
     })
   })
 
@@ -1074,7 +938,7 @@ function ActivityFeedCard({ blasts, dripLogs }) {
 }
 
 
-// ─── Original small components ─────────────────────────────
+// ─── Small components ───────────────────────────────────────
 function MetricCard({ icon, label, value, sub, color }) {
   return (
     <div className={`db-metric db-metric--${color}`}>

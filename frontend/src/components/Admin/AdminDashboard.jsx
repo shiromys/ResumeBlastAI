@@ -22,11 +22,22 @@ function AdminDashboard({ user, onExit }) {
   
   const [unreadCount, setUnreadCount] = useState(0)
 
-  // NEW: Drip Campaign States
-  const [dripEmail, setDripEmail] = useState('')
+  // ✅ CHANGED: Drip Campaign States - Now uses user_id instead of email
+  const [dripUserId, setDripUserId] = useState('')
   const [dripData, setDripData] = useState(null)
   const [dripLoading, setDripLoading] = useState(false)
   const [dripError, setDripError] = useState(null)
+
+  // ✅ FIX: Real-time Polling for Drip Campaigns
+  useEffect(() => {
+    let interval;
+    if (activeTab === 'drip' && dripUserId && dripData) {
+      interval = setInterval(() => {
+        handleSearchDrip(); 
+      }, 30000); // 30 second refresh
+    }
+    return () => clearInterval(interval);
+  }, [activeTab, dripUserId, dripData]);
 
   useEffect(() => {
     if (!user) {
@@ -124,6 +135,45 @@ function AdminDashboard({ user, onExit }) {
     }
   }
 
+  // ✅ CHANGED: Real-time status lookup using user_id instead of email
+  const handleSearchDrip = async (e) => {
+    if (e) e.preventDefault();
+    
+    // Validate user_id is provided
+    if (!dripUserId || dripUserId.trim() === '') {
+      setDripError('Please enter a user ID');
+      return;
+    }
+    
+    setDripLoading(true);
+    setDripError(null);
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/drip-stats?user_id=${encodeURIComponent(dripUserId)}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const result = await response.json();
+      
+      if (result.success && result.data) {
+        setDripData(result.data);
+        console.log('✅ Drip campaign data loaded:', result.data);
+      } else {
+        setDripError(result.message || 'Campaign not found');
+        setDripData(null);
+      }
+    } catch (err) {
+      console.error('Drip stats error:', err);
+      setDripError(`Failed to fetch drip stats: ${err.message}`);
+      setDripData(null);
+    } finally {
+      setDripLoading(false);
+    }
+  };
+
   const handleDateRangeSubmit = (e) => {
     e.preventDefault()
     if (startDate && endDate) {
@@ -193,34 +243,9 @@ function AdminDashboard({ user, onExit }) {
     }
   }
 
-  // =========================================================
-  // DRIP CAMPAIGN FUNCTIONS
-  // =========================================================
-  const fetchDripStats = async (e) => {
-    e.preventDefault()
-    if (!dripEmail) return
-    
-    setDripLoading(true)
-    setDripError(null)
-    setDripData(null)
-    
-    try {
-      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-      const res = await fetch(`${API_URL}/api/admin/drip-campaign/user-stats?email=${encodeURIComponent(dripEmail)}`)
-      const data = await res.json()
-      
-      if (!res.ok) throw new Error(data.error || 'Failed to fetch campaign stats')
-      setDripData(data)
-    } catch (err) {
-      setDripError(err.message)
-    } finally {
-      setDripLoading(false)
-    }
-  }
-
   const forceWave = async (wave) => {
     const waveName = wave === 2 ? 'Day 4 Follow-up' : 'Day 8 Reminder'
-    if (!window.confirm(`⚠️ Override Warning:\n\nAre you sure you want to force start the ${waveName} (Wave ${wave}) for ${dripEmail}?\n\nThis completely bypasses the daily sending limits and prerequisite checks.`)) return
+    if (!window.confirm(`⚠️ Override Warning:\n\nAre you sure you want to force start the ${waveName} (Wave ${wave}) for user ${dripUserId}?\n\nThis completely bypasses the daily sending limits and prerequisite checks.`)) return
 
     setDripLoading(true)
     try {
@@ -228,14 +253,14 @@ function AdminDashboard({ user, onExit }) {
       const res = await fetch(`${API_URL}/api/admin/drip-campaign/force-wave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: dripEmail, wave })
+        body: JSON.stringify({ user_id: dripUserId, wave })
       })
       const data = await res.json()
       
       if (!res.ok) throw new Error(data.error || 'Failed to force wave')
       
       alert(`✅ ${data.message}`)
-      fetchDripStats({ preventDefault: () => {} }) // Refresh data
+      handleSearchDrip() // Refresh data
     } catch (err) {
       alert(`❌ Error: ${err.message}`)
     } finally {
@@ -261,7 +286,6 @@ function AdminDashboard({ user, onExit }) {
              Monitoring
           </button>
 
-          {/* ✅ NEW: Drip Campaigns Tab */}
           <button
             className={`nav-item ${activeTab === 'drip' ? 'active' : ''}`}
             onClick={() => setActiveTab('drip')}
@@ -342,31 +366,29 @@ function AdminDashboard({ user, onExit }) {
           </div>
         ) : (
           <>
-            {/* ========================================================= */}
-            {/* NEW DRIP CAMPAIGN SECTION */}
-            {/* ========================================================= */}
+            {/* ✅ UPDATED DRIP CAMPAIGN SECTION WITH USER_ID INPUT */}
             {activeTab === 'drip' && (
               <div>
                 <h2> Drip Campaign Management</h2>
                 
                 <div className="date-range-section">
                   <h3> Lookup User Campaign</h3>
-                  <form onSubmit={fetchDripStats} className="date-range-form" style={{ alignItems: 'end' }}>
+                  <form onSubmit={handleSearchDrip} className="date-range-form" style={{ alignItems: 'end' }}>
                     <div className="form-group" style={{ width: '300px' }}>
-                      <label htmlFor="drip-email">User Email Address</label>
+                      <label htmlFor="drip-user-id">User ID</label>
                       <input
-                        id="drip-email"
-                        type="email"
-                        placeholder="user@example.com"
-                        value={dripEmail}
-                        onChange={(e) => setDripEmail(e.target.value)}
+                        id="drip-user-id"
+                        type="text"
+                        placeholder="ccfe7980-f90a-4044-9e8d-ee5e300e75dc"
+                        value={dripUserId}
+                        onChange={(e) => setDripUserId(e.target.value)}
                         required
                         style={{ padding: '10px 14px', border: '2px solid #E2E8F0', borderRadius: '10px' }}
                       />
                     </div>
                     <div className="form-group">
                       <button type="submit" className="btn-primary" disabled={dripLoading}>
-                        {dripLoading ? 'Fetching...' : 'Fetch Real-Time Stats'}
+                        {dripLoading ? 'Fetching...' : 'Check Blast Status'}
                       </button>
                     </div>
                   </form>
@@ -380,109 +402,78 @@ function AdminDashboard({ user, onExit }) {
 
                 {dripData && (
                   <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                      <h3>Campaign Info: <span style={{color: '#DC2626'}}>{dripData.status?.toUpperCase()}</span></h3>
+                      <span style={{ fontSize: '12px', color: '#6b7280' }}>🔄 Polling active: Updates every 30s</span>
+                    </div>
+
                     <div className="stats-grid">
-                      <div className="stat-card">
-                        <h3>Plan Name</h3>
-                        <div className="stat-value" style={{ textTransform: 'capitalize' }}>
-                          {dripData.campaign.plan_name}
-                        </div>
-                        <p>Status: <span className="badge-success" style={{ background: '#F1F5F9', color: '#334155', border: 'none' }}>{dripData.campaign.status}</span></p>
+                      <div className="stat-card" style={{ background: '#F9FAFB', border: '1px solid #E5E7EB' }}>
+                        <h3>Total Progress</h3>
+                        <div className="stat-value">{dripData.total_sent} / {dripData.total_recipients}</div>
+                        <p>Total Emails Sent</p>
                       </div>
 
-                      <div className="stat-card">
-                        <h3>Sent Emails</h3>
-                        <div className="stat-value" style={{ color: '#059669' }}>
-                          {dripData.stats.sent.length}
-                        </div>
-                        <p>Successfully delivered</p>
+                      <div className="stat-card" style={{ borderLeft: '4px solid #3B82F6' }}>
+                        <h3>Wave 1 (Day 1)</h3>
+                        <div className="stat-value" style={{ color: '#3B82F6' }}>{dripData.wave1_sent}</div>
+                        <p>Initial Blast</p>
                       </div>
 
-                      <div className="stat-card">
-                        <h3>Bounced Emails</h3>
-                        <div className="stat-value" style={{ color: '#DC2626' }}>
-                          {dripData.stats.bounced.length}
-                        </div>
-                        <p>Hard/Soft bounces</p>
+                      <div className="stat-card" style={{ borderLeft: '4px solid #10B981' }}>
+                        <h3>Wave 2 (Day 4)</h3>
+                        <div className="stat-value" style={{ color: '#10B981' }}>{dripData.wave2_sent}</div>
+                        <p>Follow-up emails</p>
                       </div>
 
-                      <div className="stat-card">
-                        <h3>Unsubscribed</h3>
-                        <div className="stat-value" style={{ color: '#F59E0B' }}>
-                          {dripData.stats.unsubscribed.length}
-                        </div>
-                        <p>Opted out</p>
+                      <div className="stat-card" style={{ borderLeft: '4px solid #F59E0B' }}>
+                        <h3>Wave 3 (Day 8)</h3>
+                        <div className="stat-value" style={{ color: '#F59E0B' }}>{dripData.wave3_sent}</div>
+                        <p>Final reminders</p>
                       </div>
                     </div>
 
                     <div className="stat-card" style={{ marginBottom: '32px' }}>
                       <h3>⚙️ Manual Overrides</h3>
                       <p style={{ fontSize: '13px', color: '#64748B', marginBottom: '16px' }}>
-                        Force the backend scheduler to immediately unlock subsequent waves, skipping the 100% completion requirement.
+                        Force the scheduler to skip completion requirements and start next waves immediately.
                       </p>
                       <div style={{ display: 'flex', gap: '16px' }}>
                         <button 
                           className="btn-primary" 
                           onClick={() => forceWave(2)} 
-                          disabled={dripData.campaign.wave2_complete}
-                          style={{ background: dripData.campaign.wave2_complete ? '#94A3B8' : '#DC2626', boxShadow: 'none' }}
+                          disabled={dripData.wave2_sent > 0}
+                          style={{ background: dripData.wave2_sent > 0 ? '#94A3B8' : '#DC2626', boxShadow: 'none' }}
                         >
-                          {dripData.campaign.wave2_complete ? 'Wave 2 Already Started' : 'Force Start Wave 2 (Day 4)'}
+                          {dripData.wave2_sent > 0 ? 'Wave 2 In Progress' : 'Force Start Wave 2'}
                         </button>
                         <button 
                           className="btn-primary" 
                           onClick={() => forceWave(3)} 
-                          disabled={dripData.campaign.wave3_complete}
-                          style={{ background: dripData.campaign.wave3_complete ? '#94A3B8' : '#DC2626', boxShadow: 'none' }}
+                          disabled={dripData.wave3_sent > 0}
+                          style={{ background: dripData.wave3_sent > 0 ? '#94A3B8' : '#DC2626', boxShadow: 'none' }}
                         >
-                          {dripData.campaign.wave3_complete ? 'Wave 3 Already Started' : 'Force Start Wave 3 (Day 8)'}
+                          {dripData.wave3_sent > 0 ? 'Wave 3 In Progress' : 'Force Start Wave 3'}
                         </button>
                       </div>
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '24px' }}>
-                      <div className="stat-card" style={{ padding: 0, overflow: 'hidden' }}>
-                        <div style={{ padding: '16px', borderBottom: '1px solid #E2E8F0', background: '#F0FDF4' }}>
-                          <h3 style={{ margin: 0, color: '#065F46' }}>✅ Sent ({dripData.stats.sent.length})</h3>
-                        </div>
-                        <div style={{ maxHeight: '400px', overflowY: 'auto', padding: '16px' }}>
-                          {dripData.stats.sent.map((email, i) => (
-                            <div key={i} style={{ fontSize: '13px', padding: '6px 0', borderBottom: '1px solid #F1F5F9' }}>{email}</div>
-                          ))}
-                          {dripData.stats.sent.length === 0 && <span style={{ fontSize: '13px', color: '#94A3B8' }}>No emails sent yet</span>}
-                        </div>
-                      </div>
-
-                      <div className="stat-card" style={{ padding: 0, overflow: 'hidden' }}>
-                        <div style={{ padding: '16px', borderBottom: '1px solid #E2E8F0', background: '#FEF2F2' }}>
-                          <h3 style={{ margin: 0, color: '#991B1B' }}>❌ Bounced ({dripData.stats.bounced.length})</h3>
-                        </div>
-                        <div style={{ maxHeight: '400px', overflowY: 'auto', padding: '16px' }}>
-                          {dripData.stats.bounced.map((email, i) => (
-                            <div key={i} style={{ fontSize: '13px', padding: '6px 0', borderBottom: '1px solid #F1F5F9', color: '#DC2626' }}>{email}</div>
-                          ))}
-                          {dripData.stats.bounced.length === 0 && <span style={{ fontSize: '13px', color: '#94A3B8' }}>No bounced emails</span>}
-                        </div>
-                      </div>
-
-                      <div className="stat-card" style={{ padding: 0, overflow: 'hidden' }}>
-                        <div style={{ padding: '16px', borderBottom: '1px solid #E2E8F0', background: '#FFFBEB' }}>
-                          <h3 style={{ margin: 0, color: '#92400E' }}>⚠️ Unsubscribed ({dripData.stats.unsubscribed.length})</h3>
-                        </div>
-                        <div style={{ maxHeight: '400px', overflowY: 'auto', padding: '16px' }}>
-                          {dripData.stats.unsubscribed.map((email, i) => (
-                            <div key={i} style={{ fontSize: '13px', padding: '6px 0', borderBottom: '1px solid #F1F5F9', color: '#D97706' }}>{email}</div>
-                          ))}
-                          {dripData.stats.unsubscribed.length === 0 && <span style={{ fontSize: '13px', color: '#94A3B8' }}>No unsubscriptions</span>}
-                        </div>
-                      </div>
+                    <div className="stat-card">
+                       <h3>📜 Campaign Metadata</h3>
+                       <div style={{ marginTop: '10px', fontSize: '14px', lineHeight: '2' }}>
+                          <p><strong>User ID:</strong> <code style={{background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{dripData.user_id}</code></p>
+                          <p><strong>User Email:</strong> {dripData.user_email}</p>
+                          <p><strong>Resume URL:</strong> <a href={dripData.resume_url} target="_blank" rel="noreferrer" style={{color: '#DC2626', textDecoration: 'underline'}}>View Blasted File</a></p>
+                          <p><strong>Plan Name:</strong> <span style={{textTransform: 'capitalize'}}>{dripData.plan_name}</span></p>
+                          <p><strong>Started At:</strong> {new Date(dripData.created_at).toLocaleString()}</p>
+                          <p><strong>Last Batch Activity:</strong> {dripData.last_activity || 'Processing Initial Wave...'}</p>
+                       </div>
                     </div>
                   </>
                 )}
               </div>
             )}
 
-            {/* REST OF THE TABS (monitoring, recruiters, brevo, users, stripe, health, support) remain completely unchanged */}
-            
             {activeTab === 'monitoring' && data.monitoring && (
               <div>
                 <h2> System Overview</h2>
@@ -626,7 +617,7 @@ function AdminDashboard({ user, onExit }) {
                   {[
                     { label: 'Account Holder', value: data.brevoStats.account_holder },
                     { label: 'Account Email',  value: data.brevoStats.account_email  },
-                    { label: 'Company',         value: data.brevoStats.company        },
+                    { label: 'Company',         value: data.brevoStats.company         },
                     { label: 'Data Fetched At', value: data.brevoStats.fetched_at     }
                   ].map(({ label, value }) => (
                     <div key={label}>
