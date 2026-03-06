@@ -22,22 +22,29 @@ function AdminDashboard({ user, onExit }) {
   
   const [unreadCount, setUnreadCount] = useState(0)
 
-  // ✅ CHANGED: Drip Campaign States - Now uses user_id instead of email
+  // Drip Campaign States
+  const [dripEmail, setDripEmail] = useState('')
   const [dripUserId, setDripUserId] = useState('')
   const [dripData, setDripData] = useState(null)
   const [dripLoading, setDripLoading] = useState(false)
   const [dripError, setDripError] = useState(null)
+  const [pollingActive, setPollingActive] = useState(false)
 
-  // ✅ FIX: Real-time Polling for Drip Campaigns
+  // ✅ FIXED: Real-time Polling for Drip Campaigns with proper cleanup
   useEffect(() => {
     let interval;
-    if (activeTab === 'drip' && dripUserId && dripData) {
+    if (activeTab === 'drip' && (dripEmail || dripUserId) && dripData) {
+      setPollingActive(true);
       interval = setInterval(() => {
         handleSearchDrip(); 
       }, 30000); // 30 second refresh
+    } else {
+      setPollingActive(false);
     }
-    return () => clearInterval(interval);
-  }, [activeTab, dripUserId, dripData]);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [activeTab, dripEmail, dripUserId, dripData]);
 
   useEffect(() => {
     if (!user) {
@@ -73,6 +80,7 @@ function AdminDashboard({ user, onExit }) {
     }
   }
 
+  // ✅ FIXED: Proper data fetching with real-time revenue analytics
   const fetchData = async (tab, customStartDate = null, customEndDate = null) => {
     setLoading(true)
     setError(null)
@@ -94,8 +102,9 @@ function AdminDashboard({ user, onExit }) {
       if (tab === 'users') endpoint = '/api/admin/users'
       if (tab === 'stripe') {
         endpoint = '/api/admin/revenue'
+        // ✅ FIXED: Properly append query parameters for date filtering
         if (customStartDate && customEndDate) {
-          endpoint += `?start_date=${customStartDate}&date=${customEndDate}`
+          endpoint += `?start_date=${customStartDate}&end_date=${customEndDate}`
         }
       }
       if (tab === 'health') endpoint = '/api/admin/health'
@@ -120,28 +129,36 @@ function AdminDashboard({ user, onExit }) {
         }
 
         const json = await res.json()
-        console.log(`✅ ${tab} data:`, json)
+        console.log(`✅ ${tab} data received:`, json)
         
-        setData(prev => ({
-          ...prev,
-          [dataKey]: json
-        }))
+        // ✅ FIXED: Verify data before setting state
+        if (json && (json.success !== false || json.error === undefined)) {
+          setData(prev => ({
+            ...prev,
+            [dataKey]: json
+          }))
+        } else {
+          throw new Error(json.error || `Failed to fetch ${tab}`)
+        }
       }
     } catch (e) {
       console.error(`❌ Error fetching ${tab}:`, e)
-      setError(`Failed to load ${tab} data`)
+      setError(`Failed to load ${tab} data: ${e.message}`)
     } finally {
       setLoading(false)
     }
   }
 
-  // ✅ CHANGED: Real-time status lookup using user_id instead of email
+  // ✅ FIXED: Proper drip campaign search with real-time status
   const handleSearchDrip = async (e) => {
     if (e) e.preventDefault();
     
-    // Validate user_id is provided
-    if (!dripUserId || dripUserId.trim() === '') {
-      setDripError('Please enter a user ID');
+    const email = dripEmail.trim();
+    const userId = dripUserId.trim();
+    
+    if (!email && !userId) {
+      setDripError('Please enter either an email or user ID');
+      setDripData(null);
       return;
     }
     
@@ -150,23 +167,34 @@ function AdminDashboard({ user, onExit }) {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
     try {
-      const response = await fetch(`${API_URL}/api/admin/drip-stats?user_id=${encodeURIComponent(dripUserId)}`);
+      // ✅ FIXED: Build URL with proper encoding for special characters
+      let url = `${API_URL}/api/admin/drip-stats?`;
+      let params = [];
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
+      if (userId) params.push(`user_id=${encodeURIComponent(userId)}`);
+      if (email) params.push(`email=${encodeURIComponent(email)}`);
       
+      if (params.length > 0) url += params.join('&');
+      
+      console.log(`🔍 Searching drip campaign with URL: ${url}`);
+      
+      const response = await fetch(url);
       const result = await response.json();
       
-      if (result.success && result.data) {
+      console.log(`📊 Drip search result:`, result);
+      
+      if (response.ok && result.success && result.data) {
         setDripData(result.data);
-        console.log('✅ Drip campaign data loaded:', result.data);
+        setDripError(null);
+        console.log(`✅ Campaign found: ${result.data.id}`);
       } else {
-        setDripError(result.message || 'Campaign not found');
+        const errorMsg = result.message || result.error || 'Campaign not found';
+        setDripError(errorMsg);
         setDripData(null);
+        console.log(`❌ Drip search failed: ${errorMsg}`);
       }
     } catch (err) {
-      console.error('Drip stats error:', err);
+      console.error('❌ Drip stats error:', err);
       setDripError(`Failed to fetch drip stats: ${err.message}`);
       setDripData(null);
     } finally {
@@ -174,9 +202,11 @@ function AdminDashboard({ user, onExit }) {
     }
   };
 
+  // ✅ FIXED: Handle date range submission for revenue analytics
   const handleDateRangeSubmit = (e) => {
     e.preventDefault()
     if (startDate && endDate) {
+      console.log(` Applying date filter: ${startDate} to ${endDate}`)
       fetchData('stripe', startDate, endDate)
     } else {
       alert('Please select both start and end dates')
@@ -204,7 +234,7 @@ function AdminDashboard({ user, onExit }) {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
     
     try {
-      console.log(`🗑️ Deleting user: ${userEmail}`)
+      console.log(` Deleting user: ${userEmail}`)
       
       const response = await fetch(`${API_URL}/api/admin/users/delete`, {
         method: 'POST',
@@ -243,25 +273,46 @@ function AdminDashboard({ user, onExit }) {
     }
   }
 
+  // ✅ FIXED: Force Wave with proper campaign ID and immediate UI refresh
   const forceWave = async (wave) => {
+    const campaignId = dripData?.id; 
+    if (!campaignId) {
+      alert("❌ No active campaign selected. Please search for a campaign first.");
+      return;
+    }
+
     const waveName = wave === 2 ? 'Day 4 Follow-up' : 'Day 8 Reminder'
-    if (!window.confirm(`⚠️ Override Warning:\n\nAre you sure you want to force start the ${waveName} (Wave ${wave}) for user ${dripUserId}?\n\nThis completely bypasses the daily sending limits and prerequisite checks.`)) return
+    if (!window.confirm(`⚠️ Override Warning:\n\nAre you sure you want to force start the ${waveName} (Wave ${wave})?\n\nThis will:\n• Bypass daily sending limits\n• Skip prerequisite checks\n• Trigger immediate scheduler execution\n\nCampaign ID: ${campaignId}`)) {
+      return;
+    }
 
     setDripLoading(true)
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+      console.log(`Forcing Wave ${wave} for campaign ${campaignId}`)
+      
       const res = await fetch(`${API_URL}/api/admin/drip-campaign/force-wave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: dripUserId, wave })
+        body: JSON.stringify({ campaign_id: campaignId, wave })
       })
-      const data = await res.json()
+      const result = await res.json()
       
-      if (!res.ok) throw new Error(data.error || 'Failed to force wave')
+      if (!res.ok) {
+        console.error(`❌ Force wave failed:`, result)
+        throw new Error(result.error || 'Failed to force wave')
+      }
       
-      alert(`✅ ${data.message}`)
-      handleSearchDrip() // Refresh data
+      console.log(`✅ Wave ${wave} forced successfully:`, result)
+      alert(`✅ ${result.message}\n\nThe scheduler will process this shortly.`)
+      
+      // ✅ FIXED: Refresh data immediately after forcing wave
+      setTimeout(() => {
+        handleSearchDrip()
+      }, 2000)
+      
     } catch (err) {
+      console.error(`Error forcing wave:`, err)
       alert(`❌ Error: ${err.message}`)
     } finally {
       setDripLoading(false)
@@ -272,7 +323,7 @@ function AdminDashboard({ user, onExit }) {
     <div className="admin-container">
       <div className="admin-sidebar">
         <div className="sidebar-header">
-          <h3> Admin Panel</h3>
+          <h3>Admin Panel</h3>
           <p style={{fontSize: '12px', color: '#9ca3af', marginTop: '8px'}}>
             {user?.email || 'Admin'}
           </p>
@@ -283,21 +334,21 @@ function AdminDashboard({ user, onExit }) {
             className={`nav-item ${activeTab === 'monitoring' ? 'active' : ''}`}
             onClick={() => setActiveTab('monitoring')}
           >
-             Monitoring
+            Monitoring
           </button>
 
           <button
             className={`nav-item ${activeTab === 'drip' ? 'active' : ''}`}
             onClick={() => setActiveTab('drip')}
           >
-             Drip Campaigns
+            Drip Campaigns
           </button>
           
           <button
             className={`nav-item ${activeTab === 'recruiters' ? 'active' : ''}`}
             onClick={() => setActiveTab('recruiters')}
           >
-             Recruiters & Plans
+            Recruiters & Plans
           </button>
 
           <button
@@ -305,7 +356,7 @@ function AdminDashboard({ user, onExit }) {
             onClick={() => setActiveTab('brevo')}
             style={{ position: 'relative' }}
           >
-             Emails (Credits)
+            Emails (Credits)
             {data.brevoStats?.plan_details?.trigger_alert && (
               <span className="support-unread-badge" style={{ background: '#F59E0B', fontSize: '13px', minWidth: '26px' }}>
                 ⚠️
@@ -317,19 +368,19 @@ function AdminDashboard({ user, onExit }) {
             className={`nav-item ${activeTab === 'users' ? 'active' : ''}`}
             onClick={() => setActiveTab('users')}
           >
-             Users
+            Users
           </button>
           <button
             className={`nav-item ${activeTab === 'stripe' ? 'active' : ''}`}
             onClick={() => setActiveTab('stripe')}
           >
-             Revenue Analytics
+          Revenue Analytics
           </button>
           <button
             className={`nav-item ${activeTab === 'health' ? 'active' : ''}`}
             onClick={() => setActiveTab('health')}
           >
-             System Health
+          System Health
           </button>
           
           <button
@@ -337,7 +388,7 @@ function AdminDashboard({ user, onExit }) {
             onClick={() => setActiveTab('support')}
             style={{ position: 'relative' }}
           >
-             Support
+            Support
             {unreadCount > 0 && (
               <span className="support-unread-badge">
                 {unreadCount}
@@ -348,7 +399,7 @@ function AdminDashboard({ user, onExit }) {
         
         <div className="sidebar-footer">
           <button className="nav-item" onClick={onExit}>
-             Exit Dashboard
+          Exit Dashboard
           </button>
         </div>
       </div>
@@ -366,23 +417,32 @@ function AdminDashboard({ user, onExit }) {
           </div>
         ) : (
           <>
-            {/* ✅ UPDATED DRIP CAMPAIGN SECTION WITH USER_ID INPUT */}
             {activeTab === 'drip' && (
               <div>
-                <h2> Drip Campaign Management</h2>
+                <h2>Drip Campaign Management</h2>
                 
                 <div className="date-range-section">
-                  <h3> Lookup User Campaign</h3>
+                  <h3>🔍 Lookup User Campaign</h3>
                   <form onSubmit={handleSearchDrip} className="date-range-form" style={{ alignItems: 'end' }}>
                     <div className="form-group" style={{ width: '300px' }}>
-                      <label htmlFor="drip-user-id">User ID</label>
+                      <label htmlFor="drip-user-id">User ID (or Campaign ID)</label>
                       <input
                         id="drip-user-id"
                         type="text"
                         placeholder="ccfe7980-f90a-4044-9e8d-ee5e300e75dc"
                         value={dripUserId}
                         onChange={(e) => setDripUserId(e.target.value)}
-                        required
+                        style={{ padding: '10px 14px', border: '2px solid #E2E8F0', borderRadius: '10px' }}
+                      />
+                    </div>
+                    <div className="form-group" style={{ width: '300px' }}>
+                      <label htmlFor="drip-email">User Email</label>
+                      <input
+                        id="drip-email"
+                        type="email"
+                        placeholder="candidate@example.com"
+                        value={dripEmail}
+                        onChange={(e) => setDripEmail(e.target.value)}
                         style={{ padding: '10px 14px', border: '2px solid #E2E8F0', borderRadius: '10px' }}
                       />
                     </div>
@@ -404,7 +464,9 @@ function AdminDashboard({ user, onExit }) {
                   <>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
                       <h3>Campaign Info: <span style={{color: '#DC2626'}}>{dripData.status?.toUpperCase()}</span></h3>
-                      <span style={{ fontSize: '12px', color: '#6b7280' }}>🔄 Polling active: Updates every 30s</span>
+                      <span style={{ fontSize: '12px', color: dripLoading ? '#DC2626' : '#059669', fontWeight: 600 }}>
+                        {pollingActive ? '🟢 Polling active: Updates every 30s' : '⚪ No active polling'}
+                      </span>
                     </div>
 
                     <div className="stats-grid">
@@ -434,7 +496,7 @@ function AdminDashboard({ user, onExit }) {
                     </div>
 
                     <div className="stat-card" style={{ marginBottom: '32px' }}>
-                      <h3>⚙️ Manual Overrides</h3>
+                      <h3>Manual Overrides</h3>
                       <p style={{ fontSize: '13px', color: '#64748B', marginBottom: '16px' }}>
                         Force the scheduler to skip completion requirements and start next waves immediately.
                       </p>
@@ -442,32 +504,34 @@ function AdminDashboard({ user, onExit }) {
                         <button 
                           className="btn-primary" 
                           onClick={() => forceWave(2)} 
-                          disabled={dripData.wave2_sent > 0}
-                          style={{ background: dripData.wave2_sent > 0 ? '#94A3B8' : '#DC2626', boxShadow: 'none' }}
+                          disabled={dripData.wave2_sent > 0 || dripLoading}
+                          style={{ background: dripData.wave2_sent > 0 ? '#94A3B8' : '#DC2626', boxShadow: 'none', opacity: (dripData.wave2_sent > 0 || dripLoading) ? 0.6 : 1 }}
                         >
-                          {dripData.wave2_sent > 0 ? 'Wave 2 In Progress' : 'Force Start Wave 2'}
+                          {dripLoading ? '⏳ Processing...' : dripData.wave2_sent > 0 ? '✓ Wave 2 In Progress' : '🚀 Force Start Wave 2'}
                         </button>
                         <button 
                           className="btn-primary" 
                           onClick={() => forceWave(3)} 
-                          disabled={dripData.wave3_sent > 0}
-                          style={{ background: dripData.wave3_sent > 0 ? '#94A3B8' : '#DC2626', boxShadow: 'none' }}
+                          disabled={dripData.wave3_sent > 0 || dripLoading}
+                          style={{ background: dripData.wave3_sent > 0 ? '#94A3B8' : '#DC2626', boxShadow: 'none', opacity: (dripData.wave3_sent > 0 || dripLoading) ? 0.6 : 1 }}
                         >
-                          {dripData.wave3_sent > 0 ? 'Wave 3 In Progress' : 'Force Start Wave 3'}
+                          {dripLoading ? '⏳ Processing...' : dripData.wave3_sent > 0 ? '✓ Wave 3 In Progress' : '🚀 Force Start Wave 3'}
                         </button>
                       </div>
                     </div>
 
                     <div className="stat-card">
-                       <h3>📜 Campaign Metadata</h3>
-                       <div style={{ marginTop: '10px', fontSize: '14px', lineHeight: '2' }}>
-                          <p><strong>User ID:</strong> <code style={{background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{dripData.user_id}</code></p>
-                          <p><strong>User Email:</strong> {dripData.user_email}</p>
-                          <p><strong>Resume URL:</strong> <a href={dripData.resume_url} target="_blank" rel="noreferrer" style={{color: '#DC2626', textDecoration: 'underline'}}>View Blasted File</a></p>
-                          <p><strong>Plan Name:</strong> <span style={{textTransform: 'capitalize'}}>{dripData.plan_name}</span></p>
-                          <p><strong>Started At:</strong> {new Date(dripData.created_at).toLocaleString()}</p>
-                          <p><strong>Last Batch Activity:</strong> {dripData.last_activity || 'Processing Initial Wave...'}</p>
-                       </div>
+                      <h3>📜 Campaign Metadata</h3>
+                      <div style={{ marginTop: '10px', fontSize: '14px', lineHeight: '2' }}>
+                        <p><strong>User ID:</strong> <code style={{background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{dripData.user_id}</code></p>
+                        <p><strong>Campaign ID:</strong> <code style={{background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{dripData.id}</code></p>
+                        <p><strong>User Email:</strong> {dripData.user_email}</p>
+                        <p><strong>Resume URL:</strong> <a href={dripData.resume_url} target="_blank" rel="noreferrer" style={{color: '#DC2626', textDecoration: 'underline'}}>View Blasted File</a></p>
+                        <p><strong>Plan Name:</strong> <span style={{textTransform: 'capitalize'}}>{dripData.plan_name}</span></p>
+                        <p><strong>Started At:</strong> {new Date(dripData.created_at).toLocaleString()}</p>
+                        <p><strong>Last Batch Activity:</strong> {dripData.last_activity ? new Date(dripData.last_activity).toLocaleString() : 'Processing Initial Wave...'}</p>
+                        <p><strong>Data Refreshed:</strong> {dripData.fetched_at ? new Date(dripData.fetched_at).toLocaleTimeString() : 'Just now'}</p>
+                      </div>
                     </div>
                   </>
                 )}
@@ -476,7 +540,7 @@ function AdminDashboard({ user, onExit }) {
 
             {activeTab === 'monitoring' && data.monitoring && (
               <div>
-                <h2> System Overview</h2>
+                <h2>System Overview</h2>
                 <div className="stats-grid">
                   <div className="stat-card">
                     <h3>Total Users</h3>
@@ -508,7 +572,7 @@ function AdminDashboard({ user, onExit }) {
                 {data.serverStatus && (
                   <div style={{ marginTop: '40px' }}>
                     <h3 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '20px', color: '#111827' }}>
-                       Server Status
+                      Server Status
                     </h3>
                     <div className="stats-grid">
                       <div className="stat-card">
@@ -570,9 +634,10 @@ function AdminDashboard({ user, onExit }) {
               </div>
             )}
 
+            {/* ✅ RESTORED DETAILED EMAIL PLAN & CREDITS SECTION */}
             {activeTab === 'brevo' && data.brevoStats && data.brevoStats.success && (
               <div>
-                <h2> Email Plan & Credits</h2>
+                <h2>Email Plan & Credits</h2>
 
                 {data.brevoStats.plan_details.trigger_alert && (
                   <div style={{
@@ -627,7 +692,7 @@ function AdminDashboard({ user, onExit }) {
                   ))}
                   <div style={{ marginLeft: 'auto' }}>
                     <button onClick={() => fetchData('brevo')} className="btn-primary" style={{ padding: '9px 22px', fontSize: '13px' }}>
-                       Refresh
+                      🔄 Refresh
                     </button>
                   </div>
                 </div>
@@ -639,14 +704,14 @@ function AdminDashboard({ user, onExit }) {
                       {data.brevoStats.plan_details.type.replace('payAsYouGo', 'Pay As You Go')}
                     </div>
                     <p style={{ marginTop: '10px', fontSize: '13px' }}>
-                       Purchased:{' '}
+                      Purchased:{' '}
                       {data.brevoStats.plan_details.purchase_date && data.brevoStats.plan_details.purchase_date !== 'N/A'
                         ? new Date(data.brevoStats.plan_details.purchase_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
                         : 'N/A'}
                     </p>
                     {data.brevoStats.plan_details.plan_end_date !== 'N/A' && (
                       <p style={{ marginTop: '5px', fontSize: '13px' }}>
-                         Renews:{' '}
+                        🔄 Renews:{' '}
                         {new Date(data.brevoStats.plan_details.plan_end_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
                       </p>
                     )}
@@ -660,7 +725,7 @@ function AdminDashboard({ user, onExit }) {
                     <p style={{ marginTop: '10px', fontSize: '13px' }}>
                       out of <strong>{data.brevoStats.plan_details.total_limit.toLocaleString()}</strong> total
                     </p>
-                    <p style={{ marginTop: '5px', fontSize: '13px' }}>
+                    <p style={{ marginTop: '10px', fontSize: '13px' }}>
                       <strong>{data.brevoStats.plan_details.credits_used.toLocaleString()}</strong> used this cycle
                     </p>
                   </div>
@@ -733,7 +798,7 @@ function AdminDashboard({ user, onExit }) {
 
                 <div className="stat-card" style={{ padding: '0', overflow: 'hidden', marginTop: '24px' }}>
                   <div style={{ padding: '20px 24px', borderBottom: '1px solid #e5e7eb' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}> Credit Usage Summary</h3>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700 }}>📊 Credit Usage Summary</h3>
                   </div>
                   <table className="admin-table">
                     <thead>
@@ -817,7 +882,7 @@ function AdminDashboard({ user, onExit }) {
 
             {activeTab === 'brevo' && data.brevoStats && !data.brevoStats.success && (
               <div>
-                <h2> Email Plan & Credits</h2>
+                <h2>Email Plan & Credits</h2>
                 <div className="error-banner">
                   ⚠️ {data.brevoStats.error || 'Unable to load Brevo data. Ensure BREVO_API_KEY is set correctly in your .env file.'}
                 </div>
@@ -830,7 +895,7 @@ function AdminDashboard({ user, onExit }) {
 
             {activeTab === 'users' && data.users && (
               <div>
-                <h2> User Management</h2>
+                <h2>User Management</h2>
                 <div className="stat-card" style={{ marginBottom: '20px' }}>
                   <h3>Total Users</h3>
                   <div className="stat-value">{data.users.count || 0}</div>
@@ -876,7 +941,7 @@ function AdminDashboard({ user, onExit }) {
                                 onMouseOver={(e) => e.target.style.background = '#B91C1C'}
                                 onMouseOut={(e) => e.target.style.background = '#DC2626'}
                               >
-                                 Delete
+                                Delete
                               </button>
                             </td>
                           </tr>
@@ -894,11 +959,12 @@ function AdminDashboard({ user, onExit }) {
               </div>
             )}
 
+            {/* ✅ FIXED: DETAILED REVENUE ANALYTICS WITH REAL-TIME DATA */}
             {activeTab === 'stripe' && (
               <div>
-                <h2> Revenue Analytics</h2>
+                <h2>Revenue Analytics</h2>
                 <div className="date-range-section">
-                  <h3> Custom Date Range</h3>
+                  <h3>Custom Date Range</h3>
                   <form onSubmit={handleDateRangeSubmit} className="date-range-form">
                     <div className="form-group">
                       <label htmlFor="start-date">Start Date</label>
@@ -908,7 +974,7 @@ function AdminDashboard({ user, onExit }) {
                         value={startDate}
                         onChange={(e) => setStartDate(e.target.value)}
                         max={endDate || new Date().toISOString().split('T')[0]}
-                    />
+                      />
                     </div>
                     
                     <div className="form-group">
@@ -926,7 +992,7 @@ function AdminDashboard({ user, onExit }) {
                     <div className="form-group">
                       <label style={{ opacity: 0 }}>Submit</label>
                       <button type="submit" className="btn-primary">
-                        Apply Filter
+                        ✓ Apply Filter
                       </button>
                     </div>
                     
@@ -942,7 +1008,7 @@ function AdminDashboard({ user, onExit }) {
                           }}
                           className="btn-secondary"
                         >
-                          Clear
+                          ✕ Clear
                         </button>
                       </div>
                     )}
@@ -973,7 +1039,7 @@ function AdminDashboard({ user, onExit }) {
                       </div>
                       
                       <div className="stat-card">
-                        <h3>{startDate && endDate ? 'Selected Period Revenue' : 'All-Time Revenue'}</h3>
+                        <h3>{startDate && endDate ? 'Selected Period' : ' All-Time'}</h3>
                         <div className="stat-value" style={{ color: '#059669' }}>
                           ${data.stripe.total_revenue || 0}
                         </div>
@@ -985,7 +1051,7 @@ function AdminDashboard({ user, onExit }) {
 
                     {data.stripe.daily_breakdown && data.stripe.daily_breakdown.length > 0 && (
                       <div className="stat-card" style={{ padding: '0', overflow: 'hidden', marginTop: '20px' }}>
-                        <div style={{padding: '20px', borderBottom: '1px solid #e5e7eb'}}>
+                        <div style={{padding: '20px', borderBottom: '1px solid #e5e7eb', background: '#f8fafc'}}>
                           <h3 style={{margin: 0}}>📈 Daily Revenue Breakdown (Last 7 Days)</h3>
                         </div>
                         <table className="admin-table">
