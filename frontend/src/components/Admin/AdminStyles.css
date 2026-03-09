@@ -534,6 +534,359 @@ button:active {
   letter-spacing: 0.05em;
 }
 
+/* === BREVO LOGS STYLES (NEW) === */
+
+/* Brevo Logs Filter Section */
+.brevo-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 25px;
+  padding: 15px;
+  background: var(--bg-white);
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.brevo-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.brevo-filter-group label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.brevo-filter-group input,
+.brevo-filter-group select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  font-family: inherit;
+  transition: all 0.3s ease;
+  background: var(--bg-white);
+}
+
+.brevo-filter-group input:focus,
+.brevo-filter-group select:focus {
+  outline: none;
+  border-color: var(--brand-red);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+}
+
+.brevo-filter-group select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%2364748B' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 30px;
+}
+
+/* Brevo Logs Export Button */
+.brevo-export-btn {
+  display: flex;
+  align-items: flex-end;
+}
+
+.brevo-export-btn button {
+  width: 100%;
+  padding: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  transition: all 0.3s ease;
+  font-family: inherit;
+}
+
+.brevo-export-btn button:hover {
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+  transform: translateY(-2px);
+}
+
+/* Brevo Logs Summary Cards */
+.brevo-summary {
+  margin-bottom: 25px;
+  padding: 15px;
+  background: var(--bg-white);
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.brevo-summary h3 {
+  margin: 0 0 15px 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.brevo-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.brevo-summary-card {
+  text-align: center;
+  padding: 15px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+}
+
+.brevo-summary-card-label {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.9;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.brevo-summary-card-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Brevo Logs Table */
+.brevo-logs-table-container {
+  margin-bottom: 25px;
+  background: var(--bg-white);
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.brevo-logs-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.brevo-logs-table thead {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.brevo-logs-table thead th {
+  padding: 15px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border: none;
+}
+
+.brevo-logs-table tbody td {
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--border-light);
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.brevo-logs-table tbody tr {
+  transition: background-color 0.2s ease;
+}
+
+.brevo-logs-table tbody tr:hover {
+  background: linear-gradient(90deg, rgba(220, 38, 38, 0.02) 0%, transparent 100%);
+}
+
+.brevo-logs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Brevo Event Type Badge */
+.brevo-event-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.brevo-event-badge.delivered {
+  background-color: #c8e6c9;
+  color: #2e7d32;
+}
+
+.brevo-event-badge.opened {
+  background-color: #bbdefb;
+  color: #1565c0;
+}
+
+.brevo-event-badge.click {
+  background-color: #ffe0b2;
+  color: #e65100;
+}
+
+.brevo-event-badge.bounce {
+  background-color: #ffcdd2;
+  color: #c62828;
+}
+
+.brevo-event-badge.other {
+  background-color: #f3e5f5;
+  color: #6a1b9a;
+}
+
+/* Brevo Logs Pagination */
+.brevo-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  padding: 20px;
+  background: var(--bg-white);
+  border-top: 1px solid var(--border-light);
+  border-radius: 0 0 12px 12px;
+  margin-top: 0;
+}
+
+.brevo-pagination-btn {
+  padding: 10px 15px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 12px;
+  transition: all 0.3s ease;
+  font-family: inherit;
+}
+
+.brevo-pagination-btn:hover:not(:disabled) {
+  background: #764ba2;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  transform: translateY(-2px);
+}
+
+.brevo-pagination-btn:disabled {
+  background: #cbd5e1;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.brevo-pagination-info {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* Brevo Logs Empty State */
+.brevo-empty-state {
+  padding: 50px;
+  text-align: center;
+  color: #999;
+  background: var(--bg-white);
+  border-radius: 12px;
+  border: 1px solid var(--border-light);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Brevo Logs Error Banner */
+.brevo-error-banner {
+  color: #dc2626;
+  padding: 15px;
+  background: #fee2e2;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* Brevo Logs Loading State */
+.brevo-loading {
+  color: #666;
+  margin-bottom: 15px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* === RESPONSIVE BREVO LOGS === */
+@media (max-width: 1024px) {
+  .brevo-filters {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    padding: 12px;
+  }
+  
+  .brevo-summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 10px;
+  }
+  
+  .brevo-logs-table thead th,
+  .brevo-logs-table tbody td {
+    padding: 10px 12px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .brevo-filters {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 10px;
+  }
+  
+  .brevo-export-btn {
+    grid-column: 1 / -1;
+  }
+  
+  .brevo-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  
+  .brevo-logs-table {
+    font-size: 12px;
+  }
+  
+  .brevo-logs-table thead th,
+  .brevo-logs-table tbody td {
+    padding: 8px 10px;
+  }
+  
+  .brevo-pagination {
+    flex-direction: column;
+    gap: 10px;
+  }
+  
+  .brevo-pagination-btn {
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+}
+
 /* === RESPONSIVE DESIGN === */
 @media (max-width: 1024px) {
   .admin-sidebar {

@@ -11,6 +11,7 @@ admin_bp = Blueprint('admin', __name__)
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+BREVO_WEBHOOK_SECRET = os.getenv('BREVO_WEBHOOK_SECRET')
 
 def _get_headers():
     return {
@@ -232,7 +233,6 @@ def get_drip_stats():
         d2 = int(campaign.get('drip_day2_delivered') or 0)
         d3 = int(campaign.get('drip_day3_delivered') or 0)
         
-        # FULLY DYNAMIC: Fetch total recipients logically without hardcoding
         total_recipients = campaign.get('recipients_count') or campaign.get('total_recruiters')
         
         if not total_recipients:
@@ -247,7 +247,6 @@ def get_drip_stats():
                     matching_plan = p
                     break
             
-            # Use real database limit, fallback to 0 if plan is completely missing
             total_recipients = matching_plan.get('recruiter_limit') if matching_plan else 0
 
         actual_status = campaign.get('status', 'unknown')
@@ -277,7 +276,6 @@ def get_drip_stats():
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-
 @admin_bp.route('/api/admin/drip-campaign/force-wave', methods=['POST'])
 def force_drip_wave():
     data = request.json
@@ -296,48 +294,157 @@ def force_drip_wave():
         now = datetime.now(timezone.utc).isoformat()
         
         if target_wave == 2:
-            update_data = {
-                'drip_day1_sent_at': now, 
-                'day4_scheduled_for': now,
-                'status': 'in_progress'
-            }
+            update_data = {'drip_day1_sent_at': now, 'day4_scheduled_for': now, 'status': 'in_progress'}
         else:
-            update_data = {
-                'drip_day2_sent_at': now, 
-                'day8_scheduled_for': now,
-                'status': 'in_progress'
-            }
+            update_data = {'drip_day2_sent_at': now, 'day8_scheduled_for': now, 'status': 'in_progress'}
 
-        patch_resp = requests.patch(
-            f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}",
-            json=update_data,
-            headers=_get_headers()
-        )
+        patch_resp = requests.patch(f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}", json=update_data, headers=_get_headers())
         
-        if patch_resp.status_code in [200, 204]:
-            return jsonify({'success': True, 'message': f'Wave {target_wave} forced and initiated.'}), 200
-        else:
-            return jsonify({'error': f'Failed: {patch_resp.text}'}), 500
+        if patch_resp.status_code in [200, 204]: return jsonify({'success': True, 'message': f'Wave {target_wave} forced.'}), 200
+        else: return jsonify({'error': f'Failed: {patch_resp.text}'}), 500
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 # =========================================================
-# KEEP ALL OTHER ENDPOINTS FROM ORIGINAL FILE
+# 3. BREVO LOGS ENDPOINTS (UPDATED)
 # =========================================================
+@admin_bp.route('/api/admin/brevo-logs', methods=['GET'])
+def get_brevo_logs():
+    try:
+        limit = min(int(request.args.get('limit', 100)), 1000)
+        offset = int(request.args.get('offset', 0))
+        event_type = request.args.get('event_type', '').strip()
+        email_to = request.args.get('email_to', '').strip()
+        start_date = request.args.get('start_date', '').strip()
+        end_date = request.args.get('end_date', '').strip()
+        campaign_id = request.args.get('campaign_id', '').strip()
 
+        params = [("select", "*")]
+
+        if event_type: params.append(("event_type", f"eq.{event_type}"))
+        if email_to: params.append(("email_to", f"ilike.%{email_to}%"))
+        if campaign_id: params.append(("campaign_id", f"eq.{campaign_id}"))
+
+        # ✅ FIXED: Provide pure YYYY-MM-DD format directly to Supabase to let PostgreSQL handle internal conversions perfectly.
+        if start_date:
+            params.append(("timestamp", f"gte.{start_date}"))
+
+        if end_date:
+            try:
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
+                params.append(("timestamp", f"lt.{end_dt.strftime('%Y-%m-%d')}"))
+            except Exception: pass
+
+        params.append(("order", "timestamp.desc"))
+        params.append(("limit", str(limit)))
+        params.append(("offset", str(offset)))
+
+        base_url = f"{SUPABASE_URL}/rest/v1/brevo_event_logs"
+        resp = requests.get(base_url, headers=_get_headers(), params=params)
+
+        if resp.status_code == 200:
+            logs = resp.json()
+            total = len(logs)
+            content_range = resp.headers.get('content-range', '')
+            if '/' in content_range:
+                try: total = int(content_range.split('/')[-1])
+                except: pass
+
+            return jsonify({
+                'success': True,
+                'total': total,
+                'limit': limit,
+                'offset': offset,
+                'logs': logs
+            }), 200
+        else:
+            return jsonify({'success': False, 'error': f'Query failed: {resp.text}'}), resp.status_code
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@admin_bp.route('/api/admin/brevo-logs/summary', methods=['GET'])
+def get_brevo_logs_summary():
+    try:
+        days = int(request.args.get('days', 7))
+        email_to = request.args.get('email_to', '').strip()
+
+        now = datetime.now(timezone.utc)
+        start_date = (now - timedelta(days=days))
+        
+        # ✅ FIXED: Prevent complex formatting from breaking the URL
+        params = [
+            ("select", "*"),
+            ("timestamp", f"gte.{start_date.strftime('%Y-%m-%d')}"),
+            ("order", "timestamp.desc"),
+            ("limit", "5000")
+        ]
+        
+        if email_to: params.append(("email_to", f"ilike.%{email_to}%"))
+
+        url = f"{SUPABASE_URL}/rest/v1/brevo_event_logs"
+        resp = requests.get(url, headers=_get_headers(), params=params)
+
+        if resp.status_code != 200:
+            return jsonify({'success': False, 'error': 'Failed to fetch logs'}), 400
+
+        logs = resp.json()
+
+        event_breakdown = {}
+        daily_breakdown = {}
+
+        for log in logs:
+            event_type = log.get('event_type', 'unknown')
+            timestamp = log.get('timestamp', '')
+
+            event_breakdown[event_type] = event_breakdown.get(event_type, 0) + 1
+
+            if timestamp:
+                try:
+                    date_key = timestamp[:10]
+                    if date_key not in daily_breakdown: daily_breakdown[date_key] = {}
+                    daily_breakdown[date_key][event_type] = daily_breakdown[date_key].get(event_type, 0) + 1
+                except: pass
+
+        top_events_by_date = []
+        for date_key in sorted(daily_breakdown.keys(), reverse=True):
+            day_data = daily_breakdown[date_key]
+            day_data['date'] = date_key
+            day_data['total'] = sum(day_data.values()) - 1
+            top_events_by_date.append(day_data)
+
+        return jsonify({
+            'success': True,
+            'summary': {
+                'total_events': len(logs),
+                'event_breakdown': event_breakdown,
+                'date_range': {
+                    'start': start_date.strftime('%Y-%m-%d'), 
+                    'end': now.strftime('%Y-%m-%d')
+                },
+                'top_events_by_date': top_events_by_date[:30]
+            }
+        }), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+# =========================================================
+# 4. BREVO STATS
+# =========================================================
 @admin_bp.route('/api/admin/brevo-stats', methods=['GET'])
 def get_brevo_stats():
     try:
         api_key = os.getenv('BREVO_API_KEY')
-        if not api_key:
-            return jsonify({'success': False, 'error': 'BREVO_API_KEY not configured.'}), 500
+        if not api_key: return jsonify({'success': False, 'error': 'BREVO_API_KEY not configured.'}), 500
 
         brevo_headers = {'accept': 'application/json', 'api-key': api_key}
         account_resp = requests.get('https://api.brevo.com/v3/account', headers=brevo_headers, timeout=10)
         
-        if account_resp.status_code != 200:
-            return jsonify({'success': False, 'error': f"Brevo API error {account_resp.status_code}"}), 500
+        if account_resp.status_code != 200: return jsonify({'success': False, 'error': f"Brevo API error {account_resp.status_code}"}), 500
 
         account_data = account_resp.json()
         all_plans = account_data.get('plan', [])
@@ -351,29 +458,20 @@ def get_brevo_stats():
         today_str = now_utc.strftime('%Y-%m-%d')
         month_start_str = now_utc.replace(day=1).strftime('%Y-%m-%d')
 
-        daily_sent = 0
-        monthly_sent = 0
+        daily_sent, monthly_sent = 0, 0
         try:
-            day_stats_resp = requests.get('https://api.brevo.com/v3/smtp/statistics/aggregatedReport',
-                                         headers=brevo_headers, params={'startDate': today_str, 'endDate': today_str}, timeout=10)
+            day_stats_resp = requests.get('https://api.brevo.com/v3/smtp/statistics/aggregatedReport', headers=brevo_headers, params={'startDate': today_str, 'endDate': today_str}, timeout=10)
             if day_stats_resp.status_code == 200: daily_sent = day_stats_resp.json().get('requests', 0)
-            
-            month_stats_resp = requests.get('https://api.brevo.com/v3/smtp/statistics/aggregatedReport',
-                                           headers=brevo_headers, params={'startDate': month_start_str, 'endDate': today_str}, timeout=10)
+            month_stats_resp = requests.get('https://api.brevo.com/v3/smtp/statistics/aggregatedReport', headers=brevo_headers, params={'startDate': month_start_str, 'endDate': today_str}, timeout=10)
             if month_stats_resp.status_code == 200: monthly_sent = month_stats_resp.json().get('requests', 0)
         except: pass
 
         if plan_type == 'free':
-            total_limit = 300
-            credits_used = daily_sent
-            usage_label = "today's free daily limit"
+            total_limit, credits_used, usage_label = 300, daily_sent, "today's free daily limit"
         else:
-            total_limit = credits_left + monthly_sent
-            credits_used = monthly_sent
-            usage_label = "monthly plan limit"
+            total_limit, credits_used, usage_label = credits_left + monthly_sent, monthly_sent, "monthly plan limit"
 
         usage_percentage = round((credits_used / total_limit) * 100, 2) if total_limit > 0 else 0.0
-        trigger_alert = usage_percentage >= 75
 
         return jsonify({
             'success': True,
@@ -381,7 +479,7 @@ def get_brevo_stats():
             'plan_details': {
                 'type': plan_type, 'total_limit': total_limit, 'credits_remaining': credits_left,
                 'credits_used': credits_used, 'usage_percent': usage_percentage,
-                'usage_label': usage_label, 'trigger_alert': trigger_alert,
+                'usage_label': usage_label, 'trigger_alert': usage_percentage >= 75,
                 'daily_sent': daily_sent, 'monthly_sent': monthly_sent,
                 'purchase_date': plan_info.get('startDate') or account_data.get('createdAt', 'N/A'),
                 'plan_end_date': plan_info.get('endDate') or 'N/A',
@@ -396,241 +494,113 @@ def get_brevo_stats():
 
 @admin_bp.route('/api/admin/users', methods=['GET'])
 def get_users():
-    try:
-        users = get_all_rows('users', 'select=*')
-        return jsonify({'count': len(users), 'users': users}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    try: return jsonify({'count': len(get_all_rows('users', 'select=*')), 'users': get_all_rows('users', 'select=*')}), 200
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/users/delete', methods=['POST'])
 def delete_user():
     try:
         data = request.json
-        email = data.get('email')
-        user_id = data.get('user_id')
-        admin_email = data.get('admin_email', 'system')
-        reason = data.get('reason', 'Admin deletion via dashboard')
-        
-        if not email:
-            return jsonify({'success': False, 'error': 'Email is required'}), 400
-        
-        deletion_summary = UserService.delete_user_data(
-            email=email, user_id=user_id, reason=reason, deleted_by=admin_email
-        )
-        
-        return jsonify({
-            'success': True,
-            'message': f'User {email} deleted',
-            'details': deletion_summary
-        }), 200
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        if not data.get('email'): return jsonify({'success': False, 'error': 'Email is required'}), 400
+        return jsonify({'success': True, 'message': f"User {data.get('email')} deleted", 'details': UserService.delete_user_data(email=data.get('email'), user_id=data.get('user_id'), reason=data.get('reason', 'Admin deletion'), deleted_by=data.get('admin_email', 'system'))}), 200
+    except Exception as e: return jsonify({'success': False, 'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/health', methods=['GET'])
 def get_health():
     try:
         supabase_status = "Healthy"
         try:
-            db_test = requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_get_headers(), timeout=5)
-            if db_test.status_code not in [200, 204]:
-                supabase_status = "Degraded"
-        except:
-            supabase_status = "Unreachable"
-
-        return jsonify({
-            'Database': supabase_status,
-            'Payments': "Configured" if os.getenv('STRIPE_SECRET_KEY') else "Missing",
-            'Email Service': "Configured" if (os.getenv('BREVO_API_KEY') or os.getenv('RESEND_API_KEY')) else "Missing",
-            'AI Service': "Configured" if os.getenv('ANTHROPIC_API_KEY') else "Missing",
-            'API': 'Online'
-        }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            if requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_get_headers(), timeout=5).status_code not in [200, 204]: supabase_status = "Degraded"
+        except: supabase_status = "Unreachable"
+        return jsonify({'Database': supabase_status, 'Payments': "Configured" if os.getenv('STRIPE_SECRET_KEY') else "Missing", 'Email Service': "Configured" if (os.getenv('BREVO_API_KEY') or os.getenv('RESEND_API_KEY')) else "Missing", 'AI Service': "Configured" if os.getenv('ANTHROPIC_API_KEY') else "Missing", 'API': 'Online'}), 200
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/server-status', methods=['GET'])
 def get_server_status():
     start_time = time.time()
     try:
         requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_get_headers(), timeout=2)
-        latency = round((time.time() - start_time) * 1000, 2)
-        
-        return jsonify({
-            'uptime': 'Running',
-            'services': {
-                'Database': {'status': 'Online', 'response_code': 200, 'latency': f"{latency}ms"},
-                'Server': {'status': 'Online', 'response_code': 200}
-            },
-            'configuration': {
-                'Stripe': 'Set' if os.getenv('STRIPE_SECRET_KEY') else 'Missing',
-                'Supabase': 'Set' if os.getenv('SUPABASE_URL') else 'Missing',
-                'Anthropic': 'Set' if os.getenv('ANTHROPIC_API_KEY') else 'Missing'
-            }
-        }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'uptime': 'Running', 'services': {'Database': {'status': 'Online', 'response_code': 200, 'latency': f"{round((time.time() - start_time) * 1000, 2)}ms"}, 'Server': {'status': 'Online', 'response_code': 200}}, 'configuration': {'Stripe': 'Set' if os.getenv('STRIPE_SECRET_KEY') else 'Missing', 'Supabase': 'Set' if os.getenv('SUPABASE_URL') else 'Missing', 'Anthropic': 'Set' if os.getenv('ANTHROPIC_API_KEY') else 'Missing'}}), 200
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/contact-submissions', methods=['GET'])
 def get_contact_submissions():
     try:
         filter_status = request.args.get('filter', 'all')
         query = 'select=*'
-        if filter_status == 'unread':
-            query += '&status=eq.unread'
-        elif filter_status == 'open':
-            query += '&status=eq.open'
-        elif filter_status == 'resolved':
-            query += '&status=eq.resolved'
-            
-        submissions = get_all_rows('support_tickets', query)
-        
-        mapped_submissions = []
-        for sub in submissions:
-            mapped_submissions.append({
-                'id': sub.get('id'),
-                'name': sub.get('user_name'),
-                'email': sub.get('user_email'),
-                'subject': sub.get('subject'),
-                'message': sub.get('message'),
-                'status': sub.get('status', 'open'),
-                'submitted_at': sub.get('created_at'),
-                'ticket_id': sub.get('ticket_id'),
-                'admin_notes': sub.get('admin_notes', '')
-            })
-            
-        return jsonify({'submissions': mapped_submissions}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        if filter_status == 'unread': query += '&status=eq.unread'
+        elif filter_status == 'open': query += '&status=eq.open'
+        elif filter_status == 'resolved': query += '&status=eq.resolved'
+        return jsonify({'submissions': [{'id': sub.get('id'), 'name': sub.get('user_name'), 'email': sub.get('user_email'), 'subject': sub.get('subject'), 'message': sub.get('message'), 'status': sub.get('status', 'open'), 'submitted_at': sub.get('created_at'), 'ticket_id': sub.get('ticket_id'), 'admin_notes': sub.get('admin_notes', '')} for sub in get_all_rows('support_tickets', query)]}), 200
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/contact-submissions/unread-count', methods=['GET'])
 def get_unread_count():
-    try:
-        unread_tickets = get_all_rows('support_tickets', 'select=id&status=eq.unread')
-        return jsonify({'unread_count': len(unread_tickets)}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    try: return jsonify({'unread_count': len(get_all_rows('support_tickets', 'select=id&status=eq.unread'))}), 200
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/contact-submissions/<ticket_id>/mark-read', methods=['PATCH'])
 def mark_contact_read(ticket_id):
     try:
-        url = f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}"
-        requests.patch(url, json={'status': 'open'}, headers=_get_headers())
+        requests.patch(f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}", json={'status': 'open'}, headers=_get_headers())
         return jsonify({'success': True}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/contact-submissions/<ticket_id>/resolve', methods=['PATCH'])
 def toggle_resolve_status(ticket_id):
     try:
-        data = request.json
-        new_status = data.get('status', 'resolved')
-        if new_status not in ['open', 'resolved']:
-            return jsonify({'error': 'Invalid status'}), 400
-        
-        url = f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}"
-        response = requests.patch(url, json={'status': new_status}, headers=_get_headers())
-        
-        if response.status_code in [200, 204]:
-            return jsonify({'success': True, 'status': new_status}), 200
-        else:
-            return jsonify({'error': 'Failed to update status'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        new_status = request.json.get('status', 'resolved')
+        if new_status not in ['open', 'resolved']: return jsonify({'error': 'Invalid status'}), 400
+        response = requests.patch(f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}", json={'status': new_status}, headers=_get_headers())
+        if response.status_code in [200, 204]: return jsonify({'success': True, 'status': new_status}), 200
+        else: return jsonify({'error': 'Failed to update status'}), 500
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/contact-submissions/<ticket_id>/notes', methods=['PATCH'])
 def update_contact_notes(ticket_id):
     try:
-        notes = request.json.get('admin_notes')
-        url = f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}"
-        requests.patch(url, json={'admin_notes': notes}, headers=_get_headers())
+        requests.patch(f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}", json={'admin_notes': request.json.get('admin_notes')}, headers=_get_headers())
         return jsonify({'success': True}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/stats', methods=['GET'])
 def get_stats():
     try:
-        users = get_all_rows('users', 'select=id')
-        active_users = get_all_rows('users', 'select=id&account_status=eq.active')
-        blasts = get_all_rows('blast_campaigns', 'select=id')
-        resumes = get_all_rows('resumes', 'select=id')
-        payments = get_all_rows('payments', 'select=amount,status')
-        
         def safe_float(val):
-            try: 
-                return float(val) if val is not None else 0.0
-            except: 
-                return 0.0
-
-        completed_payments = [p for p in payments if (p.get('status') or '').lower() in ['completed', 'paid', 'success', 'succeeded']]
-        revenue = sum(safe_float(p.get('amount')) for p in completed_payments) / 100
-        
-        return jsonify({
-            'total_users': len(users),
-            'active_users': len(active_users),
-            'total_blasts': len(blasts),
-            'total_resume_uploads': len(resumes),
-            'total_revenue': round(revenue, 2)
-        }), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+            try: return float(val) if val is not None else 0.0
+            except: return 0.0
+        payments = get_all_rows('payments', 'select=amount,status')
+        return jsonify({'total_users': len(get_all_rows('users', 'select=id')), 'active_users': len(get_all_rows('users', 'select=id&account_status=eq.active')), 'total_blasts': len(get_all_rows('blast_campaigns', 'select=id')), 'total_resume_uploads': len(get_all_rows('resumes', 'select=id')), 'total_revenue': round(sum(safe_float(p.get('amount')) for p in payments if (p.get('status') or '').lower() in ['completed', 'paid', 'success', 'succeeded']) / 100, 2)}), 200
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/recruiters/stats', methods=['GET'])
 def get_recruiters_stats():
     try:
         paid_res = requests.get(f"{SUPABASE_URL}/rest/v1/recruiters?select=id", headers=_get_headers())
-        paid_count = len(paid_res.json()) if paid_res.status_code == 200 else 0
-
         free_res = requests.get(f"{SUPABASE_URL}/rest/v1/freemium_recruiters?select=id", headers=_get_headers())
+        paid_count = len(paid_res.json()) if paid_res.status_code == 200 else 0
         free_count = len(free_res.json()) if free_res.status_code == 200 else 0
-
         return jsonify({'paid_count': paid_count, 'freemium_count': free_count, 'total_count': paid_count + free_count}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/recruiters/add', methods=['POST'])
 def add_recruiter():
     try:
         data = request.json
         target_table = data.get('target_table')
+        if target_table not in ['recruiters', 'freemium_recruiters', 'app_registered_recruiters']: return jsonify({'error': 'Invalid table'}), 400
         
-        if target_table not in ['recruiters', 'freemium_recruiters', 'app_registered_recruiters']:
-            return jsonify({'error': 'Invalid table'}), 400
-
-        if target_table == 'app_registered_recruiters':
-            recruiter_data = {
-                'id': data.get('id'),
-                'email': data.get('email'),
-                'is_active': True,
-                'created_at': datetime.utcnow().isoformat()
-            }
-        else:
-            recruiter_data = {
-                'email': data.get('email'),
-                'is_active': True,
-                'email_status': 'active',
-                'created_at': datetime.utcnow().isoformat()
-            }
-
-        if target_table == 'freemium_recruiters':
-            recruiter_data.update({
-                'name': data.get('name'),
-                'company': data.get('company'),
-                'industry': data.get('industry', 'Technology'),
-                'location': data.get('location', 'Remote')
-            })
-
-        if not recruiter_data.get('email'):
-            return jsonify({'error': 'Email required'}), 400
-
-        url = f"{SUPABASE_URL}/rest/v1/{target_table}"
-        resp = requests.post(url, json=recruiter_data, headers=_get_headers())
-
-        if resp.status_code in [200, 201]:
-            return jsonify({'success': True, 'message': 'Added'}), 200
-        else:
-            return jsonify({'error': f"Error: {resp.text}"}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        recruiter_data = {'email': data.get('email'), 'is_active': True, 'created_at': datetime.utcnow().isoformat()}
+        if target_table == 'app_registered_recruiters': recruiter_data['id'] = data.get('id')
+        else: recruiter_data['email_status'] = 'active'
+        
+        if target_table == 'freemium_recruiters': recruiter_data.update({'name': data.get('name'), 'company': data.get('company'), 'industry': data.get('industry', 'Technology'), 'location': data.get('location', 'Remote')})
+        if not recruiter_data.get('email'): return jsonify({'error': 'Email required'}), 400
+        
+        resp = requests.post(f"{SUPABASE_URL}/rest/v1/{target_table}", json=recruiter_data, headers=_get_headers())
+        if resp.status_code in [200, 201]: return jsonify({'success': True, 'message': 'Added'}), 200
+        else: return jsonify({'error': f"Error: {resp.text}"}), 500
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/recruiters/delete', methods=['DELETE', 'POST'])
 def delete_recruiter_by_email():
@@ -638,72 +608,35 @@ def delete_recruiter_by_email():
         data = request.json
         target_table = data.get('target_table')
         email = data.get('email')
-        reason = data.get('reason')
-        admin_email = data.get('admin_email', 'system')
         
-        if not email or target_table not in ['recruiters', 'freemium_recruiters']:
-            return jsonify({'error': 'Invalid data'}), 400
-
-        log_entry = {
-            'email': email,
-            'target_table': target_table,
-            'reason': reason,
-            'deleted_by': admin_email,
-            'deleted_at': datetime.utcnow().isoformat()
-        }
-        
-        requests.post(f"{SUPABASE_URL}/rest/v1/deleted_recruiters", json=log_entry, headers=_get_headers())
+        if not email or target_table not in ['recruiters', 'freemium_recruiters']: return jsonify({'error': 'Invalid data'}), 400
+        requests.post(f"{SUPABASE_URL}/rest/v1/deleted_recruiters", json={'email': email, 'target_table': target_table, 'reason': data.get('reason'), 'deleted_by': data.get('admin_email', 'system'), 'deleted_at': datetime.utcnow().isoformat()}, headers=_get_headers())
         resp = requests.delete(f"{SUPABASE_URL}/rest/v1/{target_table}?email=eq.{email}", headers=_get_headers())
-
-        if resp.status_code in [200, 204]:
-            return jsonify({'success': True, 'message': 'Deleted'}), 200
-        else:
-            return jsonify({'error': f"Error: {resp.text}"}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        
+        if resp.status_code in [200, 204]: return jsonify({'success': True, 'message': 'Deleted'}), 200
+        else: return jsonify({'error': f"Error: {resp.text}"}), 500
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/plans', methods=['GET'])
 def get_plans():
-    try:
-        resp = requests.get(f"{SUPABASE_URL}/rest/v1/plans?select=*", headers=_get_headers())
-        return jsonify({'plans': resp.json() if resp.status_code == 200 else []}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    try: return jsonify({'plans': requests.get(f"{SUPABASE_URL}/rest/v1/plans?select=*", headers=_get_headers()).json() if requests.get(f"{SUPABASE_URL}/rest/v1/plans?select=*", headers=_get_headers()).status_code == 200 else []}), 200
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/plans/update', methods=['PATCH'])
 def update_plan():
     try:
         data = request.json
-        plan_id = data.get('id')
-        
-        update_data = {
-            'price_cents': data.get('price_cents'),
-            'recruiter_limit': data.get('recruiter_limit'),
-            'display_name': data.get('display_name'),
-            'updated_at': datetime.utcnow().isoformat()
-        }
-        
-        resp = requests.patch(f"{SUPABASE_URL}/rest/v1/plans?id=eq.{plan_id}", json=update_data, headers=_get_headers())
-        
-        if resp.status_code in [200, 204]:
-            return jsonify({'success': True}), 200
-        else:
-            return jsonify({'error': resp.text}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        resp = requests.patch(f"{SUPABASE_URL}/rest/v1/plans?id=eq.{data.get('id')}", json={'price_cents': data.get('price_cents'), 'recruiter_limit': data.get('recruiter_limit'), 'display_name': data.get('display_name'), 'updated_at': datetime.utcnow().isoformat()}, headers=_get_headers())
+        if resp.status_code in [200, 204]: return jsonify({'success': True}), 200
+        else: return jsonify({'error': resp.text}), 500
+    except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/resumes/all', methods=['GET'])
 def get_all_resumes():
-    try:
-        resumes = get_all_rows('resumes', 'select=*')
-        return jsonify({'success': True, 'count': len(resumes), 'resumes': resumes}), 200
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+    try: return jsonify({'success': True, 'count': len(get_all_rows('resumes', 'select=*')), 'resumes': get_all_rows('resumes', 'select=*')}), 200
+    except Exception as e: return jsonify({'success': False, 'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/users/count', methods=['GET'])
 def get_user_count():
-    try:
-        users = get_all_rows('users', 'select=id')
-        return jsonify({'success': True, 'total_users': len(users)}), 200
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+    try: return jsonify({'success': True, 'total_users': len(get_all_rows('users', 'select=id'))}), 200
+    except Exception as e: return jsonify({'success': False, 'error': str(e)}), 500

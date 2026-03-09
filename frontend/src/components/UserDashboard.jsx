@@ -1,11 +1,4 @@
 // src/components/UserDashboard.jsx
-// ✅ CHANGES IN THIS FILE (all other original code preserved):
-//   1. DripDayUpdates now computes per-date email counts from blast_campaigns columns
-//   2. Added "Emails sent on [date]" breakdown using last_date columns
-//   3. Auto-refresh every 30s when a campaign is actively sending (not just 60s)
-//   4. Added blast_error query param handling to show error banner
-// ─────────────────────────────────────────────────────────────────────────────
-
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import jsPDF from 'jspdf'
@@ -157,7 +150,6 @@ function UserDashboard({ user, onStartBlast }) {
     }
   }, [data.blasts])
 
-  // ✅ IMPROVED: Refresh every 30s when actively sending (was 60s)
   useEffect(() => {
     const hasActiveSending = data.blasts.some(b =>
       b.status !== 'completed' &&
@@ -343,8 +335,6 @@ function UserDashboard({ user, onStartBlast }) {
         {/* ── RIGHT SIDEBAR ── */}
         {data.blasts.length > 0 && (
           <aside className="db-sidebar">
-            <PlanCard blasts={data.blasts} />
-            <RecruiterReachCard blasts={data.blasts} />
             <ActivityFeedCard blasts={data.blasts} />
           </aside>
         )}
@@ -387,42 +377,6 @@ function BlastRow({ blast, index, expanded, onToggle }) {
   const dateStr = new Date(blast.created_at || blast.initiated_at).toLocaleDateString('en-US', {
     month: 'short', day: 'numeric', year: 'numeric',
   })
-
-  const downloadReport = (e) => {
-    e.stopPropagation()
-    const doc = new jsPDF()
-    doc.setFillColor(220, 38, 38)
-    doc.rect(0, 0, 210, 22, 'F')
-    doc.setTextColor(255, 255, 255)
-    doc.setFontSize(16)
-    doc.text('ResumeBlast.ai — Campaign Report', 10, 14)
-    doc.setTextColor(0, 0, 0)
-    doc.setFontSize(11)
-    let y = 32
-    const line = (lbl, val) => { doc.text(`${lbl}: ${val}`, 10, y); y += 7 }
-    doc.setFont(undefined, 'bold'); doc.text('Campaign Summary', 10, y); y += 8; doc.setFont(undefined, 'normal')
-    line('Industry / Role', blast.industry || 'N/A')
-    line('Plan',            planInfo.label)
-    line('Date',            dateStr)
-    line('Recipients',      recipients.toLocaleString())
-    y += 4
-    doc.setFont(undefined, 'bold'); doc.text('Delivery Stats', 10, y); y += 8; doc.setFont(undefined, 'normal')
-    line('Delivered', `${delivered.toLocaleString()} (${deliveryPct}%)`)
-    line('Opened',    `${opened.toLocaleString()} (${openPct}%)`)
-    line('Clicked',   `${clicked.toLocaleString()} (${clickPct}%)`)
-    line('Bounced',   bounced.toLocaleString())
-    line('Spam',      spam.toString())
-    y += 4
-    doc.setFont(undefined, 'bold'); doc.text('Drip Email Schedule', 10, y); y += 8; doc.setFont(undefined, 'normal')
-    if (!isFreeBlast) {
-      line('Wave 1 (Initial)',    `${w1Sent.toLocaleString()} sent${w1Done ? ' — Complete' : ' — In progress'}`)
-      line('Wave 2 (Follow-up)', w1Done ? `${w2Sent.toLocaleString()} sent${w2Done ? ' — Complete' : ' — In progress'}` : 'Pending')
-      line('Wave 3 (Reminder)',  w2Done ? `${w3Sent.toLocaleString()} sent${w3Done ? ' — Complete' : ' — In progress'}` : 'Pending')
-      line('Total emails sent',  totalDripSent.toLocaleString())
-    }
-    if (health) { y += 4; doc.setFont(undefined, 'bold'); doc.text(`Campaign Health: ${health.label} (${openPct}% open rate)`, 10, y) }
-    doc.save(`campaign_report_${(blast.created_at || '').slice(0, 10)}.pdf`)
-  }
 
   return (
     <div className={`db-blast-row ${expanded ? 'db-blast-row--open' : ''}`} style={{ animationDelay: `${index * 60}ms` }}>
@@ -478,7 +432,6 @@ function BlastRow({ blast, index, expanded, onToggle }) {
             <MetricCard color="red"     icon={<Icon.Warn />}  label="Bounced"   value={bounced.toLocaleString()}    sub={spam > 0 ? `${spam} spam` : 'No spam'} />
           </div>
 
-          {/* ✅ REAL-TIME DAY-BY-DAY DRIP UPDATES */}
           <DripDayUpdates blast={blast} />
 
           {health && hasData && (
@@ -487,11 +440,6 @@ function BlastRow({ blast, index, expanded, onToggle }) {
               <span className={`db-health-badge ${health.cls}`}>{health.label} · {openPct}% open rate</span>
             </div>
           )}
-
-          <button className="db-report-btn" onClick={downloadReport}>
-            <Icon.Download />
-            Download Campaign Report
-          </button>
 
           <p className="db-detail-note">
             Stats refresh every 30 seconds when sending is active. Drip emails send automatically via Brevo.
@@ -505,8 +453,6 @@ function BlastRow({ blast, index, expanded, onToggle }) {
 
 // ═══════════════════════════════════════════════════════════
 // ✅ REAL-TIME DRIP UPDATES
-// Reads directly from blast_campaigns columns (no drip_email_logs needed).
-// Shows per-date breakdown: "Sent X emails on [date]"
 // ═══════════════════════════════════════════════════════════
 
 function buildWaveDays(waveNum, blast, planName) {
@@ -542,7 +488,7 @@ function buildWaveDays(waveNum, blast, planName) {
 
     let daySent   = 0
     let dayStatus = 'pending'
-    let dayDate   = null  // ✅ NEW: actual calendar date for this batch
+    let dayDate   = null
 
     if (!waveEligible) {
       dayStatus = 'locked'
@@ -551,9 +497,6 @@ function buildWaveDays(waveNum, blast, planName) {
     } else if (i < fullBatchesDone) {
       dayStatus = 'sent'
       daySent   = batchSize
-      // We only have lastDate for the most recent batch; earlier ones don't have per-day dates
-      // We can estimate: lastDate is the date of the most recent batch
-      // For display we show lastDate only on the last completed batch
       dayDate   = (i === fullBatchesDone - 1) ? lastDate : null
     } else if (i === fullBatchesDone && !waveComplete) {
       if (partialSent > 0) {
@@ -572,7 +515,6 @@ function buildWaveDays(waveNum, blast, planName) {
     if (waveComplete) {
       dayStatus = 'sent'
       daySent   = batchSize
-      // Only show date on the last day
       dayDate   = i === daysPerWave - 1 ? lastDate : null
     }
 
@@ -758,7 +700,6 @@ function DailyBatchRow({ day, waveColor, isLast }) {
         {sc.label}
       </div>
 
-      {/* ✅ NEW: Show actual send date */}
       {day.dayDate && (day.status === 'sent' || day.status === 'sending') && (
         <div className="db-batch-date" style={{ fontSize: '11px', color: '#9CA3AF', marginLeft: '4px' }}>
           {fmtDateShort(day.dayDate)}
@@ -791,117 +732,30 @@ function FreePlanStatus({ blast }) {
   )
 }
 
-
-// ─── Sidebar Cards ─────────────────────────────────────────
-function PlanCard({ blasts }) {
-  const latest = blasts[0]
-  if (!latest) return null
-  const planInfo       = getPlanLabel(latest)
-  const recipients     = parseInt(latest.recipients_count) || 0
-  const activeCount    = blasts.filter(b => b.status !== 'completed').length
-  const completedCount = blasts.filter(b => b.status === 'completed').length
-  return (
-    <div className="db-sidebar-card db-plan-card">
-      <div className="db-plan-card-top">
-        <div>
-          <div className="db-plan-card-label">Current Plan</div>
-          <div className="db-plan-card-tier" style={{ color: planInfo.color }}>{planInfo.label}</div>
-          <div className="db-plan-card-sub">{recipients.toLocaleString()} recruiters</div>
-        </div>
-        <div className="db-plan-card-icon" style={{ background: planInfo.color }}>
-          <Icon.Rocket />
-        </div>
-      </div>
-      <div className="db-plan-quota">
-        <div className="db-plan-quota-label">Campaign Activity</div>
-        <div className="db-plan-quota-row">
-          <span className="db-quota-chip db-quota-chip--active">{activeCount} active</span>
-          <span className="db-quota-chip db-quota-chip--done">{completedCount} completed</span>
-          <span className="db-quota-chip">{blasts.length} total</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function RecruiterReachCard({ blasts }) {
-  const total     = blasts.reduce((s, b) => s + (parseInt(b.recipients_count) || 0), 0)
-  const delivered = blasts.reduce((s, b) => s + (b.delivered_count || 0), 0)
-  const opened    = blasts.reduce((s, b) => s + (b.opened_count    || 0), 0)
-  const bounced   = blasts.reduce((s, b) => s + (b.bounced_count   || 0), 0)
-  if (total === 0) return null
-  const delivPct  = Math.round((delivered / total) * 100)
-  const openPct   = Math.round((opened    / total) * 100)
-  const bouncePct = Math.round((bounced   / total) * 100)
-  const pendPct   = Math.max(0, 100 - delivPct - bouncePct)
-  const d  = (delivPct  / 100) * 360
-  const o  = (openPct   / 100) * 360
-  const b2 = (bouncePct / 100) * 360
-  const pieStyle = { background: `conic-gradient(#10B981 0deg ${d}deg,#3B82F6 ${d}deg ${d+o}deg,#EF4444 ${d+o}deg ${d+o+b2}deg,#E5E7EB ${d+o+b2}deg 360deg)` }
-  return (
-    <div className="db-sidebar-card">
-      <div className="db-sidebar-card-header">
-        <span className="db-card-title-icon"><Icon.Users /></span>
-        <span className="db-sidebar-card-title">Recruiter Reach</span>
-        <span className="db-card-count">{total.toLocaleString()}</span>
-      </div>
-      <div className="db-pie-wrap">
-        <div className="db-pie-chart" style={pieStyle}>
-          <div className="db-pie-hole">
-            <div className="db-pie-hole-val">{delivPct}%</div>
-            <div className="db-pie-hole-lbl">reached</div>
-          </div>
-        </div>
-        <div className="db-pie-legend">
-          <LegendRow color="#10B981" label="Delivered" pct={delivPct}  />
-          <LegendRow color="#3B82F6" label="Opened"    pct={openPct}   />
-          <LegendRow color="#EF4444" label="Bounced"   pct={bouncePct} />
-          <LegendRow color="#E5E7EB" label="Pending"   pct={pendPct}   />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function LegendRow({ color, label, pct }) {
-  return (
-    <div className="db-legend-row">
-      <span className="db-legend-dot" style={{ background: color }} />
-      <span className="db-legend-label">{label}</span>
-      <span className="db-legend-pct">{pct}%</span>
-    </div>
-  )
-}
-
-// ✅ UPDATED: ActivityFeedCard now reads directly from blast_campaigns columns
 function ActivityFeedCard({ blasts }) {
   const events = []
 
   blasts.forEach(b => {
     const name = b.industry || b.plan_name || 'Campaign'
 
-    // Wave 1 last batch
     if (b.drip_day1_last_date) events.push({
       time:     b.drip_day1_sent_at || b.drip_day1_last_date,
       color:    '#DC2626',
       text:     `Wave 1 — ${(parseInt(b.drip_day1_delivered) || 0).toLocaleString()} emails sent`,
       campaign: name,
     })
-    // Wave 2 last batch
     if (b.drip_day2_last_date) events.push({
       time:     b.drip_day2_sent_at || b.drip_day2_last_date,
       color:    '#2563EB',
       text:     `Wave 2 — ${(parseInt(b.drip_day2_delivered) || 0).toLocaleString()} emails sent`,
       campaign: name,
     })
-    // Wave 3 last batch
     if (b.drip_day3_last_date) events.push({
       time:     b.drip_day3_sent_at || b.drip_day3_last_date,
       color:    '#059669',
       text:     `Wave 3 — ${(parseInt(b.drip_day3_delivered) || 0).toLocaleString()} emails sent`,
       campaign: name,
     })
-    // Campaign launch
     events.push({
       time:     b.created_at,
       color:    '#9CA3AF',

@@ -30,6 +30,25 @@ function AdminDashboard({ user, onExit }) {
   const [dripError, setDripError] = useState(null)
   const [pollingActive, setPollingActive] = useState(false)
 
+  // ✅ NEW: BREVO LOGS STATES
+  const [brevoLogs, setBrevoLogs] = useState([])
+  const [brevoSummary, setBrevoSummary] = useState(null)
+  const [brevoLogsLoading, setBrevoLogsLoading] = useState(false)
+  const [brevoLogsError, setBrevoLogsError] = useState(null)
+  const [brevoFilters, setBrevoFilters] = useState({
+    event_type: '',
+    email_to: '',
+    start_date: '',
+    end_date: '',
+    limit: 100,
+    offset: 0
+  })
+  const [brevoPagination, setBrevoPagination] = useState({
+    total: 0,
+    limit: 100,
+    offset: 0
+  })
+
   // ✅ FIXED: Real-time Polling for Drip Campaigns with proper cleanup
   useEffect(() => {
     let interval;
@@ -46,13 +65,22 @@ function AdminDashboard({ user, onExit }) {
     };
   }, [activeTab, dripEmail, dripUserId, dripData]);
 
+  // ✅ NEW: Auto-fetch Brevo logs when tab is active
+  useEffect(() => {
+    if (activeTab === 'brevo-logs') {
+      fetchBrevoLogs();
+      const interval = setInterval(fetchBrevoLogs, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [activeTab, brevoFilters]);
+
   useEffect(() => {
     if (!user) {
       if (onExit) onExit()
       return
     }
     
-    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip') {
+    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip' && activeTab !== 'brevo-logs') {
       fetchData(activeTab)
     } else {
       setLoading(false)
@@ -78,6 +106,135 @@ function AdminDashboard({ user, onExit }) {
     } catch (error) {
       console.error('Error fetching unread count:', error)
     }
+  }
+
+  // ✅ NEW: Fetch Brevo event logs
+  const fetchBrevoLogs = async () => {
+    setBrevoLogsLoading(true)
+    setBrevoLogsError(null)
+    
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    
+    try {
+      const queryParams = new URLSearchParams()
+      queryParams.append('limit', brevoFilters.limit.toString())
+      queryParams.append('offset', brevoFilters.offset.toString())
+      
+      if (brevoFilters.event_type) {
+        queryParams.append('event_type', brevoFilters.event_type)
+      }
+      if (brevoFilters.email_to) {
+        queryParams.append('email_to', brevoFilters.email_to)
+      }
+      if (brevoFilters.start_date) {
+        queryParams.append('start_date', brevoFilters.start_date)
+      }
+      if (brevoFilters.end_date) {
+        queryParams.append('end_date', brevoFilters.end_date)
+      }
+
+      console.log(`📡 Fetching Brevo Logs: ${API_URL}/api/admin/brevo-logs?${queryParams.toString()}`)
+
+      const response = await fetch(`${API_URL}/api/admin/brevo-logs?${queryParams.toString()}`)
+      
+      if (response.ok) {
+        const resData = await response.json()
+        console.log(`✅ brevo-logs data received:`, resData)
+        if (resData.success) {
+          setBrevoLogs(resData.logs || [])
+          setBrevoPagination({
+            total: resData.total || 0,
+            limit: resData.limit || 100,
+            offset: resData.offset || 0
+          })
+        }
+      } else {
+        setBrevoLogsError('Failed to fetch Brevo logs')
+      }
+    } catch (error) {
+      console.error('Error fetching Brevo logs:', error)
+      setBrevoLogsError(error.message)
+    } finally {
+      setBrevoLogsLoading(false)
+    }
+  }
+
+  // ✅ NEW: Fetch Brevo summary
+  const fetchBrevoSummary = async () => {
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    
+    try {
+      const queryParams = new URLSearchParams()
+      queryParams.append('days', '7')
+      
+      if (brevoFilters.email_to) {
+        queryParams.append('email_to', brevoFilters.email_to)
+      }
+
+      const response = await fetch(`${API_URL}/api/admin/brevo-logs/summary?${queryParams.toString()}`)
+      
+      if (response.ok) {
+        const resData = await response.json()
+        if (resData.success) {
+          setBrevoSummary(resData.summary)
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching Brevo summary:', error)
+    }
+  }
+
+  // ✅ NEW: Update filter and refetch
+  const handleBrevoFilterChange = (field, value) => {
+    setBrevoFilters(prev => ({
+      ...prev,
+      [field]: value,
+      offset: 0
+    }))
+  }
+
+  // ✅ NEW: Pagination handlers
+  const handleBrevoNextPage = () => {
+    setBrevoFilters(prev => ({
+      ...prev,
+      offset: prev.offset + prev.limit
+    }))
+  }
+
+  const handleBrevoPrevPage = () => {
+    setBrevoFilters(prev => ({
+      ...prev,
+      offset: Math.max(0, prev.offset - prev.limit)
+    }))
+  }
+
+  // ✅ NEW: Export to CSV
+  const exportBrevoLogsToCSV = () => {
+    if (brevoLogs.length === 0) {
+      alert('No logs to export')
+      return
+    }
+
+    const headers = ['Date', 'Event Type', 'From', 'To', 'Subject']
+    const rows = brevoLogs.map(log => [
+      new Date(log.timestamp).toLocaleString(),
+      log.event_type,
+      log.email_from,
+      log.email_to,
+      log.email_subject
+    ])
+
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `brevo-logs-${new Date().toISOString().split('T')[0]}.csv`
+    link.click()
   }
 
   // ✅ FIXED: Proper data fetching with real-time revenue analytics
@@ -343,6 +500,14 @@ function AdminDashboard({ user, onExit }) {
           >
             Drip Campaigns
           </button>
+
+          {/* ✅ NEW: Brevo Logs Tab Button */}
+          <button
+            className={`nav-item ${activeTab === 'brevo-logs' ? 'active' : ''}`}
+            onClick={() => setActiveTab('brevo-logs')}
+          >
+            📧 Brevo Logs
+          </button>
           
           <button
             className={`nav-item ${activeTab === 'recruiters' ? 'active' : ''}`}
@@ -417,6 +582,192 @@ function AdminDashboard({ user, onExit }) {
           </div>
         ) : (
           <>
+            {/* ✅ NEW: BREVO LOGS TAB */}
+            {activeTab === 'brevo-logs' && (
+              <div>
+                <h2>📧 Brevo Email Event Logs</h2>
+                <p style={{ color: '#6b7280', marginBottom: '20px' }}>Real-time logs of all email events from Brevo webhooks</p>
+
+                {/* Filters Section */}
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+                  gap: '15px', 
+                  marginBottom: '25px',
+                  padding: '15px',
+                  background: 'white',
+                  borderRadius: '6px',
+                  border: '1px solid #e0e0e0'
+                }}>
+                  <div>
+                    <label style={{ fontSize: '13px', fontWeight: '600', color: '#555' }}>Event Type</label>
+                    <select 
+                      value={brevoFilters.event_type}
+                      onChange={(e) => handleBrevoFilterChange('event_type', e.target.value)}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', marginTop: '5px' }}
+                    >
+                      <option value="">All Events</option>
+                      <option value="delivered">Delivered</option>
+                      <option value="opened">Opened</option>
+                      <option value="click">Clicked</option>
+                      <option value="hard_bounce">Hard Bounce</option>
+                      <option value="soft_bounce">Soft Bounce</option>
+                      <option value="blocked">Blocked</option>
+                      <option value="spam">Spam</option>
+                      <option value="unsubscribed">Unsubscribed</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '13px', fontWeight: '600', color: '#555' }}>Recipient Email</label>
+                    <input 
+                      type="text"
+                      placeholder="Filter by email..."
+                      value={brevoFilters.email_to}
+                      onChange={(e) => handleBrevoFilterChange('email_to', e.target.value)}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', marginTop: '5px' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '13px', fontWeight: '600', color: '#555' }}>Start Date</label>
+                    <input 
+                      type="date"
+                      value={brevoFilters.start_date}
+                      onChange={(e) => handleBrevoFilterChange('start_date', e.target.value)}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', marginTop: '5px' }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ fontSize: '13px', fontWeight: '600', color: '#555' }}>End Date</label>
+                    <input 
+                      type="date"
+                      value={brevoFilters.end_date}
+                      onChange={(e) => handleBrevoFilterChange('end_date', e.target.value)}
+                      style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', marginTop: '5px' }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                    <button 
+                      onClick={exportBrevoLogsToCSV}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontWeight: '600',
+                        fontSize: '13px',
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      📥 Export CSV
+                    </button>
+                  </div>
+                </div>
+
+                {/* Error Banner */}
+                {brevoLogsError && <p style={{ color: '#dc2626', padding: '15px', background: '#fee2e2', borderRadius: '4px', marginBottom: '15px' }}>⚠️ {brevoLogsError}</p>}
+
+                {/* Loading State */}
+                {brevoLogsLoading && <p style={{ color: '#666', marginBottom: '15px' }}>Loading events...</p>}
+
+                {/* Logs Table */}
+                {!brevoLogsLoading && brevoLogs.length > 0 && (
+                  <div style={{ marginBottom: '25px' }}>
+                    <div style={{ background: 'white', borderRadius: '6px', border: '1px solid #e0e0e0', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white' }}>
+                          <tr>
+                            <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>Date & Time</th>
+                            <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>Event Type</th>
+                            <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>From</th>
+                            <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>To</th>
+                            <th style={{ padding: '15px', textAlign: 'left', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase' }}>Subject</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {brevoLogs.map((log) => (
+                            <tr key={log.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                              <td style={{ padding: '12px 15px', fontSize: '13px', color: '#555' }}>{new Date(log.timestamp).toLocaleString()}</td>
+                              <td style={{ padding: '12px 15px', fontSize: '13px' }}>
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '4px 10px',
+                                  borderRadius: '20px',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
+                                  textTransform: 'uppercase',
+                                  backgroundColor: log.event_type === 'delivered' ? '#c8e6c9' : log.event_type === 'opened' ? '#bbdefb' : log.event_type === 'click' ? '#ffe0b2' : '#ffcdd2',
+                                  color: log.event_type === 'delivered' ? '#2e7d32' : log.event_type === 'opened' ? '#1565c0' : log.event_type === 'click' ? '#e65100' : '#c62828'
+                                }}>
+                                  {log.event_type}
+                                </span>
+                              </td>
+                              <td style={{ padding: '12px 15px', fontSize: '13px', color: '#555' }}>{log.email_from}</td>
+                              <td style={{ padding: '12px 15px', fontSize: '13px', color: '#555' }}>{log.email_to}</td>
+                              <td style={{ padding: '12px 15px', fontSize: '13px', color: '#555' }}>{log.email_subject}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Pagination */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', padding: '20px', background: 'white', borderTop: '1px solid #e0e0e0', marginTop: '0' }}>
+                      <button 
+                        onClick={handleBrevoPrevPage}
+                        disabled={brevoFilters.offset === 0}
+                        style={{
+                          padding: '10px 15px',
+                          background: brevoFilters.offset === 0 ? '#ccc' : '#667eea',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: brevoFilters.offset === 0 ? 'not-allowed' : 'pointer',
+                          fontWeight: '600',
+                          fontSize: '13px',
+                          opacity: brevoFilters.offset === 0 ? 0.6 : 1
+                        }}
+                      >
+                        ← Previous
+                      </button>
+                      <span style={{ fontSize: '14px', color: '#555', fontWeight: '500' }}>
+                        Page {Math.floor(brevoPagination.offset / brevoPagination.limit) + 1} 
+                        (Showing {brevoLogs.length} of {brevoPagination.total} total)
+                      </span>
+                      <button 
+                        onClick={handleBrevoNextPage}
+                        disabled={brevoFilters.offset + brevoFilters.limit >= brevoPagination.total}
+                        style={{
+                          padding: '10px 15px',
+                          background: brevoFilters.offset + brevoFilters.limit >= brevoPagination.total ? '#ccc' : '#667eea',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: brevoFilters.offset + brevoFilters.limit >= brevoPagination.total ? 'not-allowed' : 'pointer',
+                          fontWeight: '600',
+                          fontSize: '13px',
+                          opacity: brevoFilters.offset + brevoFilters.limit >= brevoPagination.total ? 0.6 : 1
+                        }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Empty State */}
+                {!brevoLogsLoading && brevoLogs.length === 0 && (
+                  <p style={{ padding: '50px', textAlign: 'center', color: '#999', background: 'white', borderRadius: '6px', border: '1px solid #e0e0e0' }}>📭 No events found. Check your filters.</p>
+                )}
+              </div>
+            )}
+
             {activeTab === 'drip' && (
               <div>
                 <h2>Drip Campaign Management</h2>
