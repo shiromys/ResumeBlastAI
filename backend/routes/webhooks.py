@@ -39,7 +39,7 @@ def _log_brevo_event(event_type, email_to, email_from, email_subject, timestamp,
 
         log_entry = {
             "campaign_id": campaign_id,
-            "email_from": email_from or "no-reply@brevo.com",
+            "email_from": email_from or "info@resumeblast.ai",
             "email_to": email_to,
             "email_subject": email_subject or "[No Subject]",
             "event_type": event_type,
