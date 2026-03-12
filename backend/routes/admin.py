@@ -42,7 +42,7 @@ def get_all_rows(table, query=''):
             
             resp = requests.get(url, headers=_get_headers())
             
-            if resp.status_code == 200:
+            if resp.status_code in [200, 206]:
                 data = resp.json()
                 if not isinstance(data, list) or len(data) == 0:
                     break
@@ -288,7 +288,7 @@ def force_drip_wave():
     try:
         url = f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}&select=id"
         resp = requests.get(url, headers=_get_headers())
-        if resp.status_code != 200 or len(resp.json()) == 0:
+        if resp.status_code not in [200, 206] or len(resp.json()) == 0:
             return jsonify({'error': 'Campaign not found'}), 404
         
         now = datetime.now(timezone.utc).isoformat()
@@ -307,7 +307,7 @@ def force_drip_wave():
         return jsonify({'error': str(e)}), 500
 
 # =========================================================
-# 3. BREVO LOGS ENDPOINTS (UPDATED)
+# 3. BREVO LOGS ENDPOINTS (UPDATED WITH DATE PARSING)
 # =========================================================
 @admin_bp.route('/api/admin/brevo-logs', methods=['GET'])
 def get_brevo_logs():
@@ -326,15 +326,27 @@ def get_brevo_logs():
         if email_to: params.append(("email_to", f"ilike.%{email_to}%"))
         if campaign_id: params.append(("campaign_id", f"eq.{campaign_id}"))
 
-        # ✅ FIXED: Provide pure YYYY-MM-DD format directly to Supabase to let PostgreSQL handle internal conversions perfectly.
-        if start_date:
-            params.append(("timestamp", f"gte.{start_date}"))
+        # ✅ FIXED: Robustly handle YYYY-MM-DD, DD-MM-YYYY, and MM/DD/YYYY to match the frontend
+        def parse_frontend_date(date_str, is_end_date=False):
+            if not date_str: 
+                return None
+            for fmt in ('%Y-%m-%d', '%d-%m-%Y', '%m-%d-%Y', '%Y/%m/%d'):
+                try:
+                    dt = datetime.strptime(date_str, fmt).replace(tzinfo=timezone.utc)
+                    if is_end_date: 
+                        dt += timedelta(days=1)
+                    return dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+                except ValueError: 
+                    pass
+            return None
 
-        if end_date:
-            try:
-                end_dt = datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)
-                params.append(("timestamp", f"lt.{end_dt.strftime('%Y-%m-%d')}"))
-            except Exception: pass
+        formatted_start = parse_frontend_date(start_date, False)
+        if formatted_start: 
+            params.append(("timestamp", f"gte.{formatted_start}"))
+
+        formatted_end = parse_frontend_date(end_date, True)
+        if formatted_end: 
+            params.append(("timestamp", f"lt.{formatted_end}"))
 
         params.append(("order", "timestamp.desc"))
         params.append(("limit", str(limit)))
@@ -343,7 +355,7 @@ def get_brevo_logs():
         base_url = f"{SUPABASE_URL}/rest/v1/brevo_event_logs"
         resp = requests.get(base_url, headers=_get_headers(), params=params)
 
-        if resp.status_code == 200:
+        if resp.status_code in [200, 206]:
             logs = resp.json()
             total = len(logs)
             content_range = resp.headers.get('content-range', '')
@@ -374,10 +386,9 @@ def get_brevo_logs_summary():
         now = datetime.now(timezone.utc)
         start_date = (now - timedelta(days=days))
         
-        # ✅ FIXED: Prevent complex formatting from breaking the URL
         params = [
             ("select", "*"),
-            ("timestamp", f"gte.{start_date.strftime('%Y-%m-%d')}"),
+            ("timestamp", f"gte.{start_date.strftime('%Y-%m-%dT%H:%M:%SZ')}"),
             ("order", "timestamp.desc"),
             ("limit", "5000")
         ]
@@ -387,7 +398,7 @@ def get_brevo_logs_summary():
         url = f"{SUPABASE_URL}/rest/v1/brevo_event_logs"
         resp = requests.get(url, headers=_get_headers(), params=params)
 
-        if resp.status_code != 200:
+        if resp.status_code not in [200, 206]:
             return jsonify({'success': False, 'error': 'Failed to fetch logs'}), 400
 
         logs = resp.json()
@@ -510,7 +521,7 @@ def get_health():
     try:
         supabase_status = "Healthy"
         try:
-            if requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_get_headers(), timeout=5).status_code not in [200, 204]: supabase_status = "Degraded"
+            if requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_get_headers(), timeout=5).status_code not in [200, 204, 206]: supabase_status = "Degraded"
         except: supabase_status = "Unreachable"
         return jsonify({'Database': supabase_status, 'Payments': "Configured" if os.getenv('STRIPE_SECRET_KEY') else "Missing", 'Email Service': "Configured" if (os.getenv('BREVO_API_KEY') or os.getenv('RESEND_API_KEY')) else "Missing", 'AI Service': "Configured" if os.getenv('ANTHROPIC_API_KEY') else "Missing", 'API': 'Online'}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
@@ -578,8 +589,8 @@ def get_recruiters_stats():
     try:
         paid_res = requests.get(f"{SUPABASE_URL}/rest/v1/recruiters?select=id", headers=_get_headers())
         free_res = requests.get(f"{SUPABASE_URL}/rest/v1/freemium_recruiters?select=id", headers=_get_headers())
-        paid_count = len(paid_res.json()) if paid_res.status_code == 200 else 0
-        free_count = len(free_res.json()) if free_res.status_code == 200 else 0
+        paid_count = len(paid_res.json()) if paid_res.status_code in [200, 206] else 0
+        free_count = len(free_res.json()) if free_res.status_code in [200, 206] else 0
         return jsonify({'paid_count': paid_count, 'freemium_count': free_count, 'total_count': paid_count + free_count}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
 
@@ -619,7 +630,9 @@ def delete_recruiter_by_email():
 
 @admin_bp.route('/api/admin/plans', methods=['GET'])
 def get_plans():
-    try: return jsonify({'plans': requests.get(f"{SUPABASE_URL}/rest/v1/plans?select=*", headers=_get_headers()).json() if requests.get(f"{SUPABASE_URL}/rest/v1/plans?select=*", headers=_get_headers()).status_code == 200 else []}), 200
+    try: 
+        resp = requests.get(f"{SUPABASE_URL}/rest/v1/plans?select=*", headers=_get_headers())
+        return jsonify({'plans': resp.json() if resp.status_code in [200, 206] else []}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/plans/update', methods=['PATCH'])

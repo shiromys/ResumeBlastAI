@@ -325,7 +325,7 @@ function LandingPage({ onGetStarted, user }) {
             background: 'white',
             padding: '40px',
             borderRadius: '16px',
-            border: '1px solid #E5E7EB',
+            border: '1px solid #DC2626',
             boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
             display: 'flex',
             flexDirection: 'row',
@@ -394,9 +394,9 @@ function LandingPage({ onGetStarted, user }) {
             <p>Access our premium recruiter database with 10,000+ contacts for targeted outreach campaigns.</p>
             <span className="learn-more">Learn More →</span>
           </a>
-          <a href="https://blastyourresume.com" target="_blank" rel="noopener noreferrer" className="upsell-card">
-            <h3>💼 BlastYourResume</h3>
-            <p>Automated job application system — apply to 100+ jobs per day on major job boards.</p>
+          <a href="https://www.rebuix.com/" target="_blank" rel="noopener noreferrer" className="upsell-card">
+            <h3>💼 Rebuix.com</h3>
+            <p>The only job board exclusively for geniune AI, ML AND GenAI positions. No AI washed roles.</p>
             <span className="learn-more">Learn More →</span>
           </a>
         </div>

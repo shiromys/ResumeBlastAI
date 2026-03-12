@@ -101,12 +101,21 @@ def create_checkout_session():
                 plan_amount = 1299
                 plan_limit = 500
 
-        # Use frontend amount if provided, else rely on DB plan amount
         if front_amount:
             plan_amount = front_amount
 
         is_guest = GuestService.is_guest(str(user_id))
         
+        # ✅ FIX: Synchronize metadata keys for the Webhook to read successfully
+        # Added 'plan' and 'guest_id' keys to match payment_webhook.py expectations
+        metadata = {
+            'plan': plan_type, 
+            'plan_name': plan_type,
+            'user_id': str(user_id) if not is_guest else "",
+            'guest_id': str(user_id) if is_guest else "",
+            'disclaimer_accepted': str(disclaimer_accepted)
+        }
+
         if is_guest:
             success_url = (
                 f'{frontend_url}?payment=success'
@@ -141,15 +150,15 @@ def create_checkout_session():
             mode='payment',
             customer_email=user_email,
             client_reference_id=str(user_id),
-            metadata={'plan_name': plan_type, 'user_id': str(user_id)},
-            # ✅ NEW: This tells Stripe to automatically generate a formal Bill/Invoice
+            metadata=metadata,
             invoice_creation={"enabled": True}, 
             success_url=success_url,
             cancel_url=f'{frontend_url}?payment=cancelled',
         )
 
         payment_record = {
-            "user_id": user_id,
+            "user_id": user_id if not is_guest else None,
+            "guest_id": user_id if is_guest else None,
             "user_email": user_email,
             "user_name": user_email.split('@')[0] if user_email else "unknown",
             "stripe_session_id": checkout_session.id,

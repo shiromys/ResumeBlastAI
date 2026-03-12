@@ -1,23 +1,3 @@
-"""
-payment_webhook.py — PATCH INSTRUCTIONS
-========================================
-
-Find your existing checkout.session.completed handler and add the invoice
-email call shown below.  The rest of your webhook file is UNCHANGED.
-
-SEARCH FOR in your payment_webhook.py:
-    def handle_checkout_completed(session):
-
-ADD this import at the TOP of payment_webhook.py:
-    from services.invoice_email_service import InvoiceEmailService
-    _invoice_service = InvoiceEmailService()
-
-THEN inside handle_checkout_completed(), after you save the payment record,
-ADD the block below (marked ✅ NEW):
-
-─────────────────────────────────────────────────────────────────────────────
-"""
-
 import os
 import stripe
 import requests
@@ -26,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-# ✅ NEW import — add this alongside your existing imports
+# ✅ NEW import
 from services.invoice_email_service import InvoiceEmailService
 
 _env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -64,7 +44,8 @@ def handle_checkout_completed(session: dict):
     currency     = session.get("currency", "usd")
     payment_status = session.get("payment_status", "")
 
-    plan_name    = metadata.get("plan", "")
+    # ✅ UPDATED: Look for both possible keys to ensure database match
+    plan_name    = metadata.get("plan") or metadata.get("plan_name", "")
     user_id      = metadata.get("user_id", "")
     guest_id     = metadata.get("guest_id", "")
 
@@ -97,41 +78,47 @@ def handle_checkout_completed(session: dict):
     # ── Save payment record to Supabase ─────────────────────────────────────
     payment_record = {
         "stripe_session_id": session_id,
-        "user_id":           user_id or None,
-        "guest_id":          guest_id or None,
+        "user_id":           user_id if user_id else None,
+        "guest_id":          guest_id if guest_id else None,
         "plan_name":         plan_name,
         "amount":            amount_total,
         "currency":          currency,
         "status":            "completed",
         "customer_email":    customer_email,
         "customer_name":     customer_name,
-        "created_at":        datetime.utcnow().isoformat(),
+        "completed_at":      datetime.utcnow().isoformat(), # Using completed_at for success
     }
 
     try:
-        # Prevent duplicate inserts
+        # Check if we should update an existing 'initiated' record or insert new
         existing = requests.get(
             f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}&select=id",
             headers=_headers()
         )
+        
         if existing.status_code == 200 and existing.json():
-            print(f"[Webhook] Payment already recorded for session {session_id} — skipping insert")
+            # ✅ UPDATE existing record
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}",
+                json=payment_record,
+                headers=_headers()
+            )
+            print(f"[Webhook] Payment record updated for session {session_id}")
         else:
+            # INSERT new record if not found
             resp = requests.post(
                 f"{SUPABASE_URL}/rest/v1/payments",
                 json=payment_record,
                 headers=_headers()
             )
             if resp.status_code in [200, 201]:
-                print(f"[Webhook] Payment record saved")
+                print(f"[Webhook] Payment record saved (new insert)")
             else:
                 print(f"[Webhook] Failed to save payment: {resp.status_code} {resp.text}")
     except Exception as e:
         print(f"[Webhook] DB error saving payment: {e}")
 
-    # ── ✅ NEW: Send receipt email via Brevo ─────────────────────────────────
-    # Works in both sandbox (test mode) and production.
-    # Stripe does NOT send invoice emails in test mode, so we do it ourselves.
+    # ── ✅ Receipt email via Brevo ─────────────────────────────────
     if customer_email:
         try:
             receipt_result = _invoice_service.send_payment_receipt(
@@ -148,31 +135,27 @@ def handle_checkout_completed(session: dict):
             else:
                 print(f"[Webhook] ⚠️ Receipt email failed: {receipt_result.get('error')}")
         except Exception as e:
-            # Non-blocking — payment is already saved
             print(f"[Webhook] ⚠️ Receipt email exception (non-blocking): {e}")
     else:
         print(f"[Webhook] ⚠️ No customer email available — skipping receipt")
 
+# ── ROUTE WITH SIGNATURE VERIFICATION ───────────────────────────────────────
+@payment_webhook_bp.route("/api/webhooks/stripe", methods=["POST"])
+def stripe_webhook():
+    payload = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+    # Ensure this matches your Railway/Production environment variable
+    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# IMPORTANT: Your existing webhook route stays as-is.
-# Just make sure it calls handle_checkout_completed(session) for the
-# "checkout.session.completed" event type.
-#
-# Example of what your existing route likely looks like:
-#
-# @payment_webhook_bp.route("/api/webhooks/stripe", methods=["POST"])
-# def stripe_webhook():
-#     payload = request.get_data()
-#     sig     = request.headers.get("Stripe-Signature", "")
-#     secret  = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-#     try:
-#         event = stripe.Webhook.construct_event(payload, sig, secret)
-#     except Exception:
-#         return jsonify({"error": "Invalid signature"}), 400
-#
-#     if event["type"] == "checkout.session.completed":
-#         handle_checkout_completed(event["data"]["object"])
-#
-#     return jsonify({"received": True}), 200
-# ─────────────────────────────────────────────────────────────────────────────
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except Exception as e:
+        print(f"❌ Webhook Signature Verification Failed: {str(e)}")
+        return jsonify({"error": "Invalid signature"}), 400
+
+    if event["type"] == "checkout.session.completed":
+        handle_checkout_completed(event["data"]["object"])
+
+    return jsonify({"received": True}), 200

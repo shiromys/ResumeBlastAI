@@ -209,6 +209,37 @@ function UserDashboard({ user, onStartBlast }) {
   return (
     <div className="db-wrap">
 
+      <style>{`
+        .db-welcome { font-size: 1.6rem !important; }
+        .db-subtitle { font-size: 1rem !important; }
+        .db-card-title { font-size: 1.05rem !important; }
+        .db-card-count { font-size: 0.9rem !important; }
+        .db-blast-industry { font-size: 1rem !important; }
+        .db-blast-date { font-size: 0.85rem !important; }
+        .db-info-chip { font-size: 0.85rem !important; }
+        .db-badge { font-size: 0.85rem !important; }
+        .db-wave-label { font-size: 0.95rem !important; }
+        .db-wave-count { font-size: 0.88rem !important; }
+        .db-wave-status-pill { font-size: 0.85rem !important; }
+        .db-wave-completed-bar { font-size: 0.9rem !important; }
+        .db-wave-schedule-bar { font-size: 0.88rem !important; }
+        .db-batch-day-num { font-size: 0.88rem !important; }
+        .db-batch-range { font-size: 0.88rem !important; }
+        .db-batch-status { font-size: 0.85rem !important; }
+        .db-batch-count { font-size: 0.82rem !important; }
+        .db-drip-section-title { font-size: 0.95rem !important; }
+        .db-drip-meta-chip { font-size: 0.85rem !important; }
+        .db-activity-campaign { font-size: 0.88rem !important; }
+        .db-activity-text { font-size: 0.82rem !important; }
+        .db-activity-time { font-size: 0.78rem !important; }
+        .db-resume-filename { font-size: 0.9rem !important; }
+        .db-resume-meta { font-size: 0.82rem !important; }
+        .db-sidebar-card-title { font-size: 1rem !important; }
+        .db-detail-note { font-size: 0.85rem !important; }
+        .db-free-blast-label { font-size: 0.95rem !important; }
+        .db-free-blast-sub { font-size: 0.85rem !important; }
+      `}</style>
+
       {/* ── ERROR BANNER ── */}
       {blastError && (
         <div style={{
@@ -242,12 +273,6 @@ function UserDashboard({ user, onStartBlast }) {
             </div>
           </div>
           <div className="db-header-right">
-            {planInfo && (
-              <div className="db-plan-badge" style={{ '--plan-color': planInfo.color }}>
-                <span className="db-plan-badge-dot" />
-                {planInfo.label} Plan
-              </div>
-            )}
             <div className="db-refresh-label">
               <span className="db-refresh-icon"><Icon.Refresh /></span>
               {refreshLabel}
@@ -259,17 +284,25 @@ function UserDashboard({ user, onStartBlast }) {
           </div>
         </div>
 
-        <div className="db-stat-strip">
-          <StatPill icon={<Icon.Rocket />}  label="Campaigns"     value={data.blasts.length}             />
-          <div className="db-stat-divider" />
-          <StatPill icon={<Icon.Users />}   label="Reached"       value={totalReached.toLocaleString()}   />
-          <div className="db-stat-divider" />
-          <StatPill icon={<Icon.Check />}   label="Delivered"     value={totalDelivered.toLocaleString()} />
-          <div className="db-stat-divider" />
-          <StatPill icon={<Icon.Eye />}     label="Avg Open Rate" value={`${avgOpenRate}%`}               />
-          <div className="db-stat-divider" />
-          <StatPill icon={<Icon.Doc />}     label="Resumes"       value={data.resumes.length}             />
-        </div>
+
+      </div>
+
+      {/* ── NOTICE BANNER ── */}
+      <div style={{
+        background: 'linear-gradient(135deg, #FFF7ED 0%, #FEF3C7 100%)',
+        border: '1.5px solid #FCD34D',
+        borderRadius: '10px',
+        padding: '16px 22px',
+        marginBottom: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        fontSize: '15px',
+        color: '#92400E',
+        fontWeight: '500',
+      }}>
+        <span style={{ fontSize: '20px' }}>🚧</span>
+        <span>The dashboard you see will be updated in the future. Stay tuned!!</span>
       </div>
 
       <div className="db-body">
@@ -424,15 +457,7 @@ function BlastRow({ blast, index, expanded, onToggle }) {
 
       {expanded && (
         <div className="db-blast-detail">
-          <div className="db-metrics-grid">
-            <MetricCard color="default" icon={<Icon.Send />}  label="Sent"      value={recipients.toLocaleString()} sub="Total"               />
-            <MetricCard color="green"   icon={<Icon.Check />} label="Delivered" value={delivered.toLocaleString()}  sub={`${deliveryPct}% rate`} />
-            <MetricCard color="blue"    icon={<Icon.Eye />}   label="Opened"    value={opened.toLocaleString()}     sub={`${openPct}% rate`}     />
-            <MetricCard color="amber"   icon={<Icon.Click />} label="Clicked"   value={clicked.toLocaleString()}    sub={`${clickPct}% rate`}    />
-            <MetricCard color="red"     icon={<Icon.Warn />}  label="Bounced"   value={bounced.toLocaleString()}    sub={spam > 0 ? `${spam} spam` : 'No spam'} />
-          </div>
-
-          <DripDayUpdates blast={blast} />
+<DripDayUpdates blast={blast} />
 
           {health && hasData && (
             <div className="db-health-row">

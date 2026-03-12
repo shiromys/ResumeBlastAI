@@ -506,7 +506,7 @@ function AdminDashboard({ user, onExit }) {
             className={`nav-item ${activeTab === 'brevo-logs' ? 'active' : ''}`}
             onClick={() => setActiveTab('brevo-logs')}
           >
-            📧 Brevo Logs
+            Brevo Logs
           </button>
           
           <button
