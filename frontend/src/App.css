@@ -41,6 +41,14 @@ body {
   color: var(--text-main);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  
+  /* ✅ FIX: Removes the typewriter (I-beam) cursor globally across all pages */
+  cursor: default; 
+}
+
+/* ✅ FIX: Ensures the text cursor still appears when typing in forms/inputs */
+input, textarea {
+  cursor: text;
 }
 
 /* --- Global Button Styles --- */

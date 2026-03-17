@@ -32,7 +32,7 @@ function Footer({ onViewChange }) {
         <div className="footer-section">
           <h4>Contact</h4>
           <a href="mailto:support@resumeblast.ai" className="footer-link">
-            support@resumeblast.ai
+            info@resumeblast.ai
           </a>
           <a href="tel:8009718013" className="footer-link">
             (800)971-8013

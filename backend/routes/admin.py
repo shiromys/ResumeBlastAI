@@ -326,7 +326,6 @@ def get_brevo_logs():
         if email_to: params.append(("email_to", f"ilike.%{email_to}%"))
         if campaign_id: params.append(("campaign_id", f"eq.{campaign_id}"))
 
-        # ✅ FIXED: Robustly handle YYYY-MM-DD, DD-MM-YYYY, and MM/DD/YYYY to match the frontend
         def parse_frontend_date(date_str, is_end_date=False):
             if not date_str: 
                 return None
@@ -653,3 +652,110 @@ def get_all_resumes():
 def get_user_count():
     try: return jsonify({'success': True, 'total_users': len(get_all_rows('users', 'select=id'))}), 200
     except Exception as e: return jsonify({'success': False, 'error': str(e)}), 500
+
+# =========================================================
+# 5. APP REGISTERED RECRUITERS
+# =========================================================
+
+# ✅ NEW: Count endpoint for the notification badge
+@admin_bp.route('/api/admin/app-registered-recruiters/pending-count', methods=['GET'])
+def get_pending_recruiters_count():
+    try:
+        # Fetch status to count non-added rows
+        res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?select=id,status",
+            headers=_get_headers()
+        )
+        
+        if res.status_code in [200, 206]:
+            data = res.json()
+            # Count anything where status is NOT 'added' (handles nulls gracefully)
+            count = sum(1 for r in data if r.get('status') != 'added')
+            return jsonify({'pending_count': count}), 200
+            
+        return jsonify({'pending_count': 0}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
+@admin_bp.route('/api/admin/app-registered-recruiters', methods=['GET'])
+def get_app_registered_recruiters():
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?select=*&order=created_at.desc",
+            headers=_get_headers()
+        )
+        if response.status_code in [200, 206]:
+            return jsonify({"success": True, "data": response.json()}), 200
+            
+        return jsonify({"success": False, "error": response.text}), response.status_code
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@admin_bp.route('/api/admin/app-registered-recruiters/<string:recruiter_id>/approve', methods=['POST'])
+def approve_app_registered_recruiter(recruiter_id):
+    try:
+        # 1. Get the recruiter details
+        rec_response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?id=eq.{recruiter_id}&select=*",
+            headers=_get_headers()
+        )
+        if rec_response.status_code not in [200, 206] or not rec_response.json():
+            return jsonify({"success": False, "error": "Recruiter not found"}), 404
+            
+        recruiter = rec_response.json()[0]
+        
+        email = recruiter.get('work_email') or recruiter.get('email')
+        
+        if not email:
+            return jsonify({"success": False, "error": "No email found for this recruiter"}), 400
+
+        # 2. Check if the email already exists in the main recruiters table
+        existing_response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/recruiters?email=eq.{email}&select=*",
+            headers=_get_headers()
+        )
+        if existing_response.status_code in [200, 206] and existing_response.json():
+            # Already exists, just mark as added
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?id=eq.{recruiter_id}",
+                json={'status': 'added'},
+                headers=_get_headers()
+            )
+            return jsonify({"success": True, "message": "Recruiter already exists. Status updated."}), 200
+             
+        # 3. Insert into the main `recruiters` table 
+        # ✅ FIXED: Removing `company` as it doesn't exist in the recruiters table
+        new_recruiter = {
+            'email': email,
+            'is_active': True,
+            'email_status': 'active',
+            'created_at': datetime.now(timezone.utc).isoformat()
+        }
+        insert_response = requests.post(
+            f"{SUPABASE_URL}/rest/v1/recruiters",
+            json=new_recruiter,
+            headers=_get_headers()
+        )
+        
+        if insert_response.status_code not in [200, 201, 204]:
+            return jsonify({"success": False, "error": f"Failed to add to recruiters: {insert_response.text}"}), 500
+        
+        # 4. Update the status in the app_registered_recruiters table
+        update_response = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?id=eq.{recruiter_id}",
+            json={'status': 'added'},
+            headers=_get_headers()
+        )
+        
+        if update_response.status_code in [200, 204]:
+            return jsonify({"success": True, "message": "Recruiter approved and added successfully"}), 200
+        else:
+            return jsonify({"success": False, "error": "Added recruiter, but failed to update status. Have you added the 'status' column to the database?"}), 500
+            
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500

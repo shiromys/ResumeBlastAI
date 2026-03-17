@@ -341,7 +341,7 @@ function LandingPage({ onGetStarted, user }) {
                 {PLAN_CONFIG.free.label}
               </h3>
               <p style={{ fontSize: '15px', color: '#4B5563', margin: '0 0 24px', lineHeight: '1.5' }}>
-                $0 free forever – the perfect plan to get your job search started with basic delivery.
+                free forever – the perfect plan to get your job search started with basic delivery.
               </p>
               <button 
                 onClick={() => handlePlanSelection('free')}
@@ -405,7 +405,7 @@ function LandingPage({ onGetStarted, user }) {
       {/* ── FINAL CTA ── */}
       <section className="final-cta">
         <h2>Ready to Land Your Dream Job?</h2>
-        <p>Join 1,000+ professionals who found their next opportunity with ResumeBlast.ai</p>
+        <p>Join our community of professionals who advanced their careers using ResumeBlast.ai.</p>
         <button className="cta-button large" onClick={onGetStarted}>Start Your Job Search Now</button>
         <p className="cta-subtext">🔒 Secure checkout via Stripe</p>
       </section>

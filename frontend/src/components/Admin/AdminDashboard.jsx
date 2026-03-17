@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import ContactSubmissions from './ContactSubmissions'
 import RecruitersManager from './RecruitersManager' 
 import './AdminStyles.css'
+import AppRegisteredRecruiters from './AppRegisteredRecruiters';
 
 function AdminDashboard({ user, onExit }) {
   const [activeTab, setActiveTab] = useState('monitoring')
@@ -21,6 +22,9 @@ function AdminDashboard({ user, onExit }) {
   const [endDate, setEndDate] = useState('')
   
   const [unreadCount, setUnreadCount] = useState(0)
+  
+  // ✅ NEW: State for pending employer signups
+  const [pendingSignupsCount, setPendingSignupsCount] = useState(0)
 
   // Drip Campaign States
   const [dripEmail, setDripEmail] = useState('')
@@ -80,7 +84,7 @@ function AdminDashboard({ user, onExit }) {
       return
     }
     
-    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip' && activeTab !== 'brevo-logs') {
+    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip' && activeTab !== 'brevo-logs' && activeTab !== 'app-registered') {
       fetchData(activeTab)
     } else {
       setLoading(false)
@@ -98,13 +102,21 @@ function AdminDashboard({ user, onExit }) {
   const fetchUnreadCount = async () => {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
     try {
+      // 1. Fetch support tickets count
       const response = await fetch(`${API_URL}/api/admin/contact-submissions/unread-count`)
       if (response.ok) {
         const data = await response.json()
         setUnreadCount(data.unread_count || 0)
       }
+
+      // 2. ✅ NEW: Fetch pending signups count
+      const signupsResponse = await fetch(`${API_URL}/api/admin/app-registered-recruiters/pending-count`)
+      if (signupsResponse.ok) {
+        const signupsData = await signupsResponse.json()
+        setPendingSignupsCount(signupsData.pending_count || 0)
+      }
     } catch (error) {
-      console.error('Error fetching unread count:', error)
+      console.error('Error fetching counts:', error)
     }
   }
 
@@ -514,6 +526,20 @@ function AdminDashboard({ user, onExit }) {
             onClick={() => setActiveTab('recruiters')}
           >
             Recruiters & Plans
+          </button>
+
+          {/* ✅ NEW: Employer Signups Tab with Badge */}
+          <button 
+            className={`nav-item ${activeTab === 'app-registered' ? 'active' : ''}`} 
+            onClick={() => setActiveTab('app-registered')}
+            style={{ position: 'relative' }}
+          >
+            Employer Signups
+            {pendingSignupsCount > 0 && (
+              <span className="support-unread-badge">
+                {pendingSignupsCount}
+              </span>
+            )}
           </button>
 
           <button
@@ -1238,6 +1264,11 @@ function AdminDashboard({ user, onExit }) {
                   ⚠️ {data.brevoStats.error || 'Unable to load Brevo data. Ensure BREVO_API_KEY is set correctly in your .env file.'}
                 </div>
               </div>
+            )}
+
+            {/* ✅ NEW COMPONENT RENDER BLOCK FOR EMPLOYER SIGNUPS */}
+            {activeTab === 'app-registered' && (
+              <AppRegisteredRecruiters onUpdate={fetchUnreadCount} />
             )}
 
             {activeTab === 'recruiters' && (
