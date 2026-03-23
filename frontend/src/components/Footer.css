@@ -1,7 +1,7 @@
 .footer {
-  background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+  background: #111827; /* Solid dark background matching the screenshot */
   color: white;
-  padding: 60px 20px 30px;
+  padding: 60px 20px 60px;
   margin-top: 80px;
 }
 
@@ -9,7 +9,7 @@
   max-width: 1200px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  grid-template-columns: repeat(4, 1fr); /* Enforces the 4-column layout */
   gap: 40px;
 }
 
@@ -24,6 +24,7 @@
   color: #D1D5DB;
   line-height: 1.6;
   font-size: 14px;
+  margin: 0;
 }
 
 .footer-link {
@@ -42,16 +43,22 @@
 }
 
 .footer-link:hover {
-  color: #DC2626;
+  color: #DC2626; /* Keeps the red highlight on hover */
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .footer-content {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr); /* 2 columns on tablets */
+  }
+}
+
+@media (max-width: 600px) {
+  .footer-content {
+    grid-template-columns: 1fr; /* 1 column on mobile */
     gap: 30px;
   }
   
   .footer {
-    padding: 40px 20px 20px;
+    padding: 40px 20px;
   }
 }

@@ -1,0 +1,135 @@
+/* src/components/ComplianceBanner.css */
+.compliance-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background-color: #0B0F19;
+  border-top: 1px solid #1F2937;
+  z-index: 99999;
+  padding: 16px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.4);
+  font-family: 'Inter', sans-serif;
+}
+
+.compliance-content {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.compliance-icon {
+  background-color: #1E293B;
+  color: #DC2626;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.compliance-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.compliance-text {
+  flex: 1;
+}
+
+.compliance-text p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #D1D5DB;
+}
+
+.compliance-text .text-white {
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+.compliance-text a {
+  color: #DC2626;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.compliance-text a:hover {
+  text-decoration: underline;
+}
+
+.compliance-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px; /* Space between the two buttons */
+  flex-shrink: 0;
+}
+
+/* New Outline Button for "Reject Optional" */
+.compliance-btn-outline {
+  background-color: transparent;
+  color: #FFFFFF;
+  border: 1px solid #4B5563; /* Subtle gray border */
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.compliance-btn-outline:hover {
+  background-color: #1F2937;
+  border-color: #6B7280;
+}
+
+/* Primary Button for "Accept All" */
+.compliance-btn {
+  background-color: #DC2626;
+  color: #FFFFFF;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+  white-space: nowrap;
+}
+
+.compliance-btn:hover {
+  background-color: #B91C1C;
+}
+
+.compliance-btn:active, 
+.compliance-btn-outline:active {
+  transform: scale(0.98);
+}
+
+@media (min-width: 900px) {
+  .compliance-banner {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    padding: 16px 40px;
+  }
+  
+  .compliance-content {
+    flex: 1;
+    margin: 0;
+  }
+
+  .compliance-actions {
+    margin-left: 20px;
+  }
+}

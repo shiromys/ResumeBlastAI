@@ -23,6 +23,7 @@ import EmployerNetwork from './components/EmployerNetwork' // ✅ NEW
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
+import ComplianceBanner from './components/ComplianceBanner'
 
 // ✅ FIX: Modified to accept isAuth parameter. 
 // If a user is logged in, we ignore guest logic to prevent session conflicts.
@@ -424,6 +425,9 @@ function App() {
               onSuccess={(u) => { setUser(u); setShowSignup(false); navigate('/workbench') }}
             />
       )}
+
+      {/* Add the Compliance Banner Here */}
+      <ComplianceBanner />
     </div>
   )
 }

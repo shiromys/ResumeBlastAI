@@ -1,12 +1,13 @@
 import os
 import stripe
 import requests
+import traceback
 from flask import Blueprint, request, jsonify
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 
-# ✅ NEW import
+# Import invoice service
 from services.invoice_email_service import InvoiceEmailService
 
 _env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -19,9 +20,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
 
-# ✅ NEW — invoice service instance
-_invoice_service = InvoiceEmailService()
-
+# Safely initialize invoice service
+try:
+    _invoice_service = InvoiceEmailService()
+except Exception as e:
+    print(f"⚠️ Warning: InvoiceEmailService failed to initialize: {e}")
+    _invoice_service = None
 
 def _headers():
     return {
@@ -35,16 +39,18 @@ def _headers():
 def handle_checkout_completed(session: dict):
     """
     Called when Stripe fires checkout.session.completed.
-    Saves payment record + ✅ sends receipt email via Brevo.
+    Saves payment record + sends receipt email via Brevo.
     """
     session_id   = session.get("id", "")
-    metadata     = session.get("metadata", {})
-    customer     = session.get("customer_details", {})
+    
+    # ✅ FIX: Safely fallback to {} if the payload explicitly sends `null`
+    metadata     = session.get("metadata") or {}
+    customer     = session.get("customer_details") or {}
+    
     amount_total = session.get("amount_total", 0)           # cents
     currency     = session.get("currency", "usd")
     payment_status = session.get("payment_status", "")
 
-    # ✅ UPDATED: Look for both possible keys to ensure database match
     plan_name    = metadata.get("plan") or metadata.get("plan_name", "")
     user_id      = metadata.get("user_id", "")
     guest_id     = metadata.get("guest_id", "")
@@ -65,7 +71,7 @@ def handle_checkout_completed(session: dict):
         except Exception as e:
             print(f"[Webhook] Could not fetch user email: {e}")
 
-    print(f"[Webhook] checkout.session.completed")
+    print(f"\n[Webhook] checkout.session.completed")
     print(f"  session_id={session_id!r}")
     print(f"  plan={plan_name!r} user_id={user_id!r} guest_id={guest_id!r}")
     print(f"  amount={amount_total} {currency.upper()} status={payment_status}")
@@ -86,18 +92,16 @@ def handle_checkout_completed(session: dict):
         "status":            "completed",
         "customer_email":    customer_email,
         "customer_name":     customer_name,
-        "completed_at":      datetime.utcnow().isoformat(), # Using completed_at for success
+        "completed_at":      datetime.utcnow().isoformat(),
     }
 
     try:
-        # Check if we should update an existing 'initiated' record or insert new
         existing = requests.get(
             f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}&select=id",
             headers=_headers()
         )
         
         if existing.status_code == 200 and existing.json():
-            # ✅ UPDATE existing record
             requests.patch(
                 f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}",
                 json=payment_record,
@@ -105,7 +109,6 @@ def handle_checkout_completed(session: dict):
             )
             print(f"[Webhook] Payment record updated for session {session_id}")
         else:
-            # INSERT new record if not found
             resp = requests.post(
                 f"{SUPABASE_URL}/rest/v1/payments",
                 json=payment_record,
@@ -118,8 +121,8 @@ def handle_checkout_completed(session: dict):
     except Exception as e:
         print(f"[Webhook] DB error saving payment: {e}")
 
-    # ── ✅ Receipt email via Brevo ─────────────────────────────────
-    if customer_email:
+    # ── Receipt email via Brevo ─────────────────────────────────
+    if customer_email and _invoice_service:
         try:
             receipt_result = _invoice_service.send_payment_receipt(
                 recipient_email   = customer_email,
@@ -136,26 +139,43 @@ def handle_checkout_completed(session: dict):
                 print(f"[Webhook] ⚠️ Receipt email failed: {receipt_result.get('error')}")
         except Exception as e:
             print(f"[Webhook] ⚠️ Receipt email exception (non-blocking): {e}")
-    else:
-        print(f"[Webhook] ⚠️ No customer email available — skipping receipt")
+
 
 # ── ROUTE WITH SIGNATURE VERIFICATION ───────────────────────────────────────
 @payment_webhook_bp.route("/api/webhooks/stripe", methods=["POST"])
 def stripe_webhook():
     payload = request.get_data()
     sig_header = request.headers.get("Stripe-Signature", "")
-    # Ensure this matches your Railway/Production environment variable
     endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+    # ✅ Fail fast if webhook secret is missing (often the cause of live-mode errors)
+    if not endpoint_secret:
+        print("❌ CRITICAL: STRIPE_WEBHOOK_SECRET is not set in environment!")
+        return jsonify({"error": "Webhook secret missing"}), 500
 
     try:
         event = stripe.Webhook.construct_event(
             payload, sig_header, endpoint_secret
         )
-    except Exception as e:
-        print(f"❌ Webhook Signature Verification Failed: {str(e)}")
+    except ValueError as e:
+        print("❌ Webhook Error: Invalid payload")
+        return jsonify({"error": "Invalid payload"}), 400
+    except stripe.error.SignatureVerificationError as e:
+        print("❌ Webhook Error: Invalid signature (Check your STRIPE_WEBHOOK_SECRET)")
         return jsonify({"error": "Invalid signature"}), 400
+    except Exception as e:
+        print(f"❌ Webhook Exception: {str(e)}")
+        return jsonify({"error": str(e)}), 400
 
-    if event["type"] == "checkout.session.completed":
-        handle_checkout_completed(event["data"]["object"])
+    # ✅ Wrap internal processing in a try/except to prevent 500 crashes
+    try:
+        if event["type"] == "checkout.session.completed":
+            handle_checkout_completed(event["data"]["object"])
+    except Exception as e:
+        print(f"❌ CRITICAL ERROR processing checkout.session.completed:")
+        traceback.print_exc()
+        # Returning 500 forces Stripe to retry. If we don't want retries on bad code, return 200.
+        # But generally, 500 is correct for server errors so we don't drop the transaction entirely.
+        return jsonify({"error": "Internal processing error"}), 500
 
     return jsonify({"received": True}), 200
