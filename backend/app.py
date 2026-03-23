@@ -10,7 +10,7 @@ BASE_DIR = Path(__file__).resolve().parent
 manual_env_path = BASE_DIR / '.env'
 
 if manual_env_path.exists():
-    load_dotenv(dotenv_path=manual_env_path, override=True)
+    load_dotenv(dotenv_path=manual_env_path, override=False)
     print(f"✅ Success: Environment loaded from {manual_env_path}")
 else:
     print(f"❌ CRITICAL ERROR: .env not found at: {manual_env_path}")
