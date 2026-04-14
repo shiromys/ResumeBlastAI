@@ -151,7 +151,7 @@ function ContactPage({ onBack }) {
           <div className="contact-info-card">
             <div className="contact-icon">📧</div>
             <h3>Email Us</h3>
-            <p>support@resumeblast.ai</p>
+            <p>info@resumeblast.ai</p>
           </div>
 
           <div className="contact-info-card">
