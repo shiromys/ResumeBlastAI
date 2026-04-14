@@ -133,15 +133,18 @@ function ContactPage({ onBack }) {
           </p>
           {user && (
             <p style={{
-              background: '#DBEAFE',
-              color: '#1E40AF',
-              padding: '10px 15px',
-              borderRadius: '6px',
-              fontSize: '14px',
-              marginTop: '15px',
-              border: '1px solid #3B82F6'
+              backgroundColor: '#D1FAE5',
+              color: '#065F46',
+              padding: '12px 20px',
+              borderRadius: '8px',
+              fontSize: '15px',
+              fontWeight: '600',
+              marginTop: '20px',
+              border: '2px solid #10B981',
+              display: 'inline-block',
+              boxShadow: '0 2px 4px rgba(16, 185, 129, 0.15)'
             }}>
-              ✓ Logged in as: <strong>{user.email}</strong>
+              ✓ Logged in as: <strong style={{ color: '#000000' }}>{user.email}</strong>
             </p>
           )}
         </div>

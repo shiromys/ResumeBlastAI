@@ -900,14 +900,15 @@ function AdminDashboard({ user, onExit }) {
                     <div className="stat-card">
                       <h3>📜 Campaign Metadata</h3>
                       <div style={{ marginTop: '10px', fontSize: '14px', lineHeight: '2' }}>
-                        <p><strong>User ID:</strong> <code style={{background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{dripData.user_id}</code></p>
-                        <p><strong>Campaign ID:</strong> <code style={{background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{dripData.id}</code></p>
-                        <p><strong>User Email:</strong> {dripData.user_email}</p>
-                        <p><strong>Resume URL:</strong> <a href={dripData.resume_url} target="_blank" rel="noreferrer" style={{color: '#DC2626', textDecoration: 'underline'}}>View Blasted File</a></p>
-                        <p><strong>Plan Name:</strong> <span style={{textTransform: 'capitalize'}}>{dripData.plan_name}</span></p>
-                        <p><strong>Started At:</strong> {new Date(dripData.created_at).toLocaleString()}</p>
-                        <p><strong>Last Batch Activity:</strong> {dripData.last_activity ? new Date(dripData.last_activity).toLocaleString() : 'Processing Initial Wave...'}</p>
-                        <p><strong>Data Refreshed:</strong> {dripData.fetched_at ? new Date(dripData.fetched_at).toLocaleTimeString() : 'Just now'}</p>
+                        {/* ✅ EXPLICITLY SET STRONG TAGS TO BLACK SO THEY DON'T TURN WHITE */}
+                        <p><strong style={{ color: '#000000' }}>User ID:</strong> <code style={{background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{dripData.user_id}</code></p>
+                        <p><strong style={{ color: '#000000' }}>Campaign ID:</strong> <code style={{background: '#f3f4f6', padding: '4px 8px', borderRadius: '4px', fontSize: '12px'}}>{dripData.id}</code></p>
+                        <p><strong style={{ color: '#000000' }}>User Email:</strong> {dripData.user_email}</p>
+                        <p><strong style={{ color: '#000000' }}>Resume URL:</strong> <a href={dripData.resume_url} target="_blank" rel="noreferrer" style={{color: '#DC2626', textDecoration: 'underline'}}>View Blasted File</a></p>
+                        <p><strong style={{ color: '#000000' }}>Plan Name:</strong> <span style={{textTransform: 'capitalize'}}>{dripData.plan_name}</span></p>
+                        <p><strong style={{ color: '#000000' }}>Started At:</strong> {new Date(dripData.created_at).toLocaleString()}</p>
+                        <p><strong style={{ color: '#000000' }}>Last Batch Activity:</strong> {dripData.last_activity ? new Date(dripData.last_activity).toLocaleString() : 'Processing Initial Wave...'}</p>
+                        <p><strong style={{ color: '#000000' }}>Data Refreshed:</strong> {dripData.fetched_at ? new Date(dripData.fetched_at).toLocaleTimeString() : 'Just now'}</p>
                       </div>
                     </div>
                   </>
@@ -1032,13 +1033,13 @@ function AdminDashboard({ user, onExit }) {
                   }}>
                     <span style={{ fontSize: '26px', lineHeight: '1', flexShrink: 0 }}>⚠️</span>
                     <div>
-                      <strong style={{ display: 'block', fontSize: '16px', marginBottom: '5px' }}>
+                      <strong style={{ display: 'block', fontSize: '16px', marginBottom: '5px', color: '#000000' }}>
                         Email Credits Usage Alert — Action Required
                       </strong>
                       <span style={{ fontSize: '14px', lineHeight: '1.6' }}>
-                        <strong>{data.brevoStats.plan_details.usage_percent}%</strong> of your {data.brevoStats.plan_details.usage_label} has been consumed
+                        <strong style={{ color: '#000000' }}>{data.brevoStats.plan_details.usage_percent}%</strong> of your {data.brevoStats.plan_details.usage_label} has been consumed
                         ({data.brevoStats.plan_details.credits_used.toLocaleString()} used
-                        out of {data.brevoStats.plan_details.total_limit.toLocaleString()} total).
+                        out of <strong style={{ color: '#000000' }}>{data.brevoStats.plan_details.total_limit.toLocaleString()}</strong> total).
                         Please top up your Brevo plan to prevent email service interruption.
                       </span>
                     </div>
@@ -1100,10 +1101,10 @@ function AdminDashboard({ user, onExit }) {
                       {data.brevoStats.plan_details.credits_remaining.toLocaleString()}
                     </div>
                     <p style={{ marginTop: '10px', fontSize: '13px' }}>
-                      out of <strong>{data.brevoStats.plan_details.total_limit.toLocaleString()}</strong> total
+                      out of <strong style={{ color: '#000000' }}>{data.brevoStats.plan_details.total_limit.toLocaleString()}</strong> total
                     </p>
                     <p style={{ marginTop: '10px', fontSize: '13px' }}>
-                      <strong>{data.brevoStats.plan_details.credits_used.toLocaleString()}</strong> used this cycle
+                      <strong style={{ color: '#000000' }}>{data.brevoStats.plan_details.credits_used.toLocaleString()}</strong> used this cycle
                     </p>
                   </div>
 
