@@ -173,10 +173,25 @@ def _start_drip_scheduler():
         print(f"⚠️ Could not start drip scheduler: {e}")
         return None
 
+
 # Start scheduler when the app starts (not during import/test)
+# ✅ FIXED: Cross-platform fix for Gunicorn double-scheduler issue
 _drip_scheduler = None
 if os.getenv('FLASK_ENV') != 'testing':
-    _drip_scheduler = _start_drip_scheduler()
+    try:
+        import fcntl
+        # Linux / Railway behavior: Apply file lock to prevent double Gunicorn workers
+        scheduler_lock_file = open("drip_scheduler.lock", "w")
+        fcntl.flock(scheduler_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        
+        _drip_scheduler = _start_drip_scheduler()
+    except ImportError:
+        # Windows / Local behavior: fcntl doesn't exist, safely bypass the lock
+        print("ℹ️ Windows environment detected. Starting scheduler without fcntl lock.")
+        _drip_scheduler = _start_drip_scheduler()
+    except BlockingIOError:
+        # Railway behavior: The lock is already held by Worker #1, do nothing here
+        print("ℹ️ Scheduler already running in another Gunicorn worker. Skipping duplicate start.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
