@@ -2,10 +2,12 @@
 import { useState } from 'react'
 import './LandingPage.css'
 import EmployerNetworkBanner from './EmployerNetworkBanner'
+import PageMeta from './SEO/PageMeta'
 
 function RecruiterLanding({ onBackToJobSeeker, onLogin, onViewChange }) { 
   return (
     <div className="landing-page">
+     <PageMeta page="recruiter" />
       {/* Recruiter Hero Section */}
       <section className="hero" style={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div className="hero-content">

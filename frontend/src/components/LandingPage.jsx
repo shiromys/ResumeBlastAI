@@ -2,6 +2,8 @@ import { useEffect, useState, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { initiateCheckout } from '../services/paymentService'
 import './LandingPage.css'
+import { Helmet } from 'react-helmet-async'
+import PageMeta from './SEO/PageMeta'
 
 // --- CountUp ---
 const CountUp = ({ end, duration = 500, suffix = '' }) => {
@@ -93,6 +95,36 @@ const PLAN_CONFIG = {
 
 const PAID_KEYS = ['starter', 'basic', 'professional', 'growth', 'advanced', 'premium']
 
+// ── SEO: FAQ data for homepage schema + visible FAQ section ──────────────────
+// These questions target Tier 1 + Tier 2 keywords from the SEO plan.
+// The same data feeds both the visible FAQ section AND the FAQPage JSON-LD schema.
+const FAQS = [
+  {
+    q: 'What is ResumeBlast.ai?',
+    a: 'ResumeBlast.ai sends your resume directly to verified recruiters via automated 3-wave email drip campaigns. Unlike job boards, we deliver to human recruiters — not algorithm-gated listings.'
+  },
+  {
+    q: 'How does the 3-wave recruiter drip campaign work?',
+    a: 'Wave 1 fires on Day 1, a follow-up Wave 2 on Day 4, and a final Wave 3 on Day 8 — all to verified recruiters in your field. The multi-touch approach increases response rates compared to a single email.'
+  },
+  {
+    q: 'How many recruiters will receive my resume?',
+    a: 'Free plan: 11 recruiters at no cost. Starter ($9.99/month): 250 recruiters. Basic ($14.99/month): 500 recruiters. All verified and matched to your role and industry.'
+  },
+  {
+    q: 'Is ResumeBlast.ai different from applying on job boards?',
+    a: 'Yes. Job boards submit your application to an ATS that filters 75%+ of applicants before a human sees them. ResumeBlast.ai emails your resume directly to a recruiter inbox, bypassing ATS entirely.'
+  },
+  {
+    q: 'Do I need LinkedIn Premium to use ResumeBlast.ai?',
+    a: 'No. ResumeBlast.ai gives you direct recruiter contact without LinkedIn Premium. Our AI identifies and emails verified recruiters on your behalf — reaching hundreds of hiring professionals at no extra cost.'
+  },
+  {
+    q: 'Does ResumeBlast.ai analyse my resume with AI?',
+    a: 'Yes. We use Claude AI by Anthropic to extract skills, detect target roles, compute an ATS compatibility score, and match you to the most relevant recruiters in our network.'
+  },
+]
+
 function LandingPage({ onGetStarted, user }) {
   const [plans, setPlans] = useState({})
   const location = useLocation()
@@ -115,9 +147,6 @@ function LandingPage({ onGetStarted, user }) {
 
     if (scrollTarget) {
       sessionStorage.removeItem('scrollTarget')
-      // Use multiple attempts — first reset scroll to top ourselves,
-      // then after the page fully renders, scroll to the target section.
-      // This prevents React Router scroll restoration from interfering.
       window.scrollTo(0, 0)
       const timer = setTimeout(() => {
         const el = document.getElementById(scrollTarget)
@@ -155,6 +184,28 @@ function LandingPage({ onGetStarted, user }) {
 
   return (
     <div className="landing-page">
+
+      {/* ── SEO: per-page title + meta description ────────────────────────────
+          Sets unique <title> and <meta description> for the homepage.
+          Without this, every page on the site shares the same title from index.html. */}
+      <PageMeta page="home" />
+
+      {/* ── SEO: FAQPage JSON-LD schema ───────────────────────────────────────
+          Tells Google to show FAQ answers expanded directly in search results.
+          The questions here must match the visible FAQ section below. */}
+      <Helmet>
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            "mainEntity": FAQS.map(f => ({
+              "@type": "Question",
+              "name": f.q,
+              "acceptedAnswer": { "@type": "Answer", "text": f.a }
+            }))
+          })}
+        </script>
+      </Helmet>
 
       {/* ── HERO ── */}
       <section id="home" className="hero">
@@ -214,8 +265,6 @@ function LandingPage({ onGetStarted, user }) {
               const c = PLAN_CONFIG[key]
               const p = getPriceParts(key)
               const limit = getLimit(key)
-              
-              // Only Starter and Basic are enabled
               const isDisabled = key !== 'starter' && key !== 'basic'
               
               return (
@@ -400,6 +449,27 @@ function LandingPage({ onGetStarted, user }) {
             <span className="learn-more">Learn More →</span>
           </a>
         </div>
+      </section>
+
+      {/* ── FAQ SECTION ──────────────────────────────────────────────────────────
+          This visible FAQ section is required alongside the FAQPage JSON-LD schema.
+          Google checks that the questions in the schema match visible page content.
+          Also captures "how does X work" and "what is X" search queries directly. */}
+      <section style={{ maxWidth: '780px', margin: '0 auto', padding: '60px 20px' }}>
+        <h2 style={{ fontSize: '1.8rem', fontWeight: '800', textAlign: 'center', marginBottom: '10px' }}>
+          Frequently Asked Questions
+        </h2>
+        <p style={{ textAlign: 'center', color: '#6B7280', marginBottom: '36px' }}>
+          Everything you need to know about AI-powered recruiter outreach
+        </p>
+        <dl>
+          {FAQS.map((f, i) => (
+            <div key={i} style={{ borderBottom: '1px solid #E5E7EB', paddingBottom: '18px', marginBottom: '18px' }}>
+              <dt style={{ fontSize: '1rem', fontWeight: '700', color: '#111827', marginBottom: '6px' }}>{f.q}</dt>
+              <dd style={{ fontSize: '0.95rem', color: '#4B5563', lineHeight: '1.7', margin: 0 }}>{f.a}</dd>
+            </div>
+          ))}
+        </dl>
       </section>
 
       {/* ── FINAL CTA ── */}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'  // Import supabase client
 import './ContactPage.css'
+import PageMeta from './SEO/PageMeta'
 
 function ContactPage({ onBack }) {
   const [formData, setFormData] = useState({
@@ -117,6 +118,7 @@ function ContactPage({ onBack }) {
 
   return (
     <div className="contact-page">
+      <PageMeta page="contact" />
       <div className="contact-container">
         {/* Back Button */}
         {onBack && (

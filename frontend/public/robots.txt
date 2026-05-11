@@ -1,0 +1,16 @@
+User-agent: *
+
+Allow: /
+Allow: /employer-network
+Allow: /recruiter
+Allow: /contact
+Allow: /privacy
+Allow: /terms
+Allow: /refund
+
+Disallow: /dashboard
+Disallow: /workbench
+Disallow: /admin
+Disallow: /api
+
+Sitemap: https://resumeblast.ai/sitemap.xml

@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import './Footer.css'
 
 function Footer({ onViewChange }) {
@@ -10,24 +11,14 @@ function Footer({ onViewChange }) {
         </div>
         <div className="footer-section">
           <h4>Product</h4>
-          <button onClick={() => onViewChange('how-it-works')} className="footer-link">
-            How It Works
-          </button>
-          <button onClick={() => onViewChange('pricing')} className="footer-link">
-            Pricing
-          </button>
+          <a href="/#how-it-works" className="footer-link">How It Works</a>
+          <a href="/#pricing" className="footer-link">Pricing</a>
         </div>
         <div className="footer-section">
           <h4>Legal</h4>
-          <button onClick={() => onViewChange('privacy')} className="footer-link">
-            Privacy Policy
-          </button>
-          <button onClick={() => onViewChange('terms')} className="footer-link">
-            Terms of Service
-          </button>
-          <button onClick={() => onViewChange('refund')} className="footer-link">
-            Refund Policy
-          </button>
+          <Link to="/privacy" className="footer-link">Privacy Policy</Link>
+          <Link to="/terms" className="footer-link">Terms of Service</Link>
+          <Link to="/refund" className="footer-link">Refund Policy</Link>
         </div>
         <div className="footer-section">
           <h4>Contact</h4>
@@ -37,12 +28,12 @@ function Footer({ onViewChange }) {
           <a href="tel:8009718013" className="footer-link">
             (800)971-8013
           </a>
-          <div style={{ marginTop: '12px', color: '#D1D5DB', fontSize: '14px', lineHeight: '1.5' }}>
+          <div style={{marginTop:'12px',color:'#D1D5DB',fontSize:'14px',lineHeight:'1.5'}}>
             <strong>Address:</strong><br />
             5080 Spectrum Drive,<br />
             Suite 575E, Addison TX 75001
           </div>
-          <p style={{ marginTop: '15px', color: '#9CA3AF', fontSize: '14px' }}>
+          <p style={{marginTop:'15px',color:'#9CA3AF',fontSize:'14px'}}>
             © 2026 ResumeBlast.ai - All rights reserved
           </p>
         </div>

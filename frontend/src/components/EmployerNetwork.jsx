@@ -1,6 +1,7 @@
 // src/components/EmployerNetwork.jsx
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase' // ✅ IMPORTED SUPABASE
+import PageMeta from './SEO/PageMeta'
 
 // Inline design tokens matching app theme
 const t = {
@@ -141,7 +142,7 @@ function EmployerNetwork({ onLogin, onViewChange }) {
 
   return (
     <div style={{ background: t.white, color: t.gray900, fontFamily: 'Inter, -apple-system, sans-serif', fontSize: '16px', lineHeight: '1.6', overflowX: 'hidden' }}>
-
+<PageMeta page="employer-network" />
       {/* FORM SECTION */}
       <div id="employer-access" style={{ background: t.gray50, borderBottom: `1px solid ${t.gray200}`, padding: '2rem 2rem 4rem' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
