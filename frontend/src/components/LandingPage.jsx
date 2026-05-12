@@ -451,25 +451,50 @@ function LandingPage({ onGetStarted, user }) {
         </div>
       </section>
 
-      {/* ── FAQ SECTION ──────────────────────────────────────────────────────────
-          This visible FAQ section is required alongside the FAQPage JSON-LD schema.
-          Google checks that the questions in the schema match visible page content.
-          Also captures "how does X work" and "what is X" search queries directly. */}
-      <section style={{ maxWidth: '780px', margin: '0 auto', padding: '60px 20px' }}>
-        <h2 style={{ fontSize: '1.8rem', fontWeight: '800', textAlign: 'center', marginBottom: '10px' }}>
-          Frequently Asked Questions
-        </h2>
-        <p style={{ textAlign: 'center', color: '#6B7280', marginBottom: '36px' }}>
-          Everything you need to know about AI-powered recruiter outreach
-        </p>
-        <dl>
-          {FAQS.map((f, i) => (
-            <div key={i} style={{ borderBottom: '1px solid #E5E7EB', paddingBottom: '18px', marginBottom: '18px' }}>
-              <dt style={{ fontSize: '1rem', fontWeight: '700', color: '#111827', marginBottom: '6px' }}>{f.q}</dt>
-              <dd style={{ fontSize: '0.95rem', color: '#4B5563', lineHeight: '1.7', margin: 0 }}>{f.a}</dd>
-            </div>
-          ))}
-        </dl>
+      {/* ── FAQ SECTION ── SEO: FAQPage schema match + keyword capture */}
+      <section style={{
+        background: 'linear-gradient(135deg, #FFF5F5 0%, #FFFFFF 50%, #FFF5F5 100%)',
+        padding: '20px 20px 60px',
+        marginTop: '-20px'
+      }}>
+        <div style={{ maxWidth: '780px', margin: '0 auto' }}>
+
+          {/* Section label */}
+          <p style={{ textAlign: 'center', fontSize: '13px', fontWeight: '700', color: '#DC2626', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: '10px' }}>
+            Got Questions?
+          </p>
+
+          <h2 style={{ fontSize: 'clamp(1.5rem, 3vw, 2rem)', fontWeight: '800', textAlign: 'center', marginBottom: '10px', color: '#111827' }}>
+            Frequently Asked Questions about ResumeBlast.ai
+          </h2>
+
+          <p style={{ textAlign: 'center', color: '#6B7280', marginBottom: '40px', fontSize: '1rem' }}>
+            Everything you need to know about AI-powered recruiter outreach
+          </p>
+
+          <dl style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {FAQS.map((f, i) => (
+              <div key={i} style={{
+                background: '#FFFFFF',
+                border: '1px solid #FEE2E2',
+                borderLeft: '4px solid #DC2626',
+                borderRadius: '10px',
+                padding: '18px 22px',
+                boxShadow: '0 2px 8px rgba(220,38,38,0.06)',
+                transition: 'box-shadow 0.2s'
+              }}>
+                <dt style={{ fontSize: '1rem', fontWeight: '700', color: '#111827', marginBottom: '8px', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                  <span style={{ color: '#DC2626', fontWeight: '800', fontSize: '1.1rem', flexShrink: 0, marginTop: '1px' }}>Q</span>
+                  {f.q}
+                </dt>
+                <dd style={{ fontSize: '0.93rem', color: '#4B5563', lineHeight: '1.75', margin: 0, paddingLeft: '22px' }}>
+                  {f.a}
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+        </div>
       </section>
 
       {/* ── FINAL CTA ── */}
