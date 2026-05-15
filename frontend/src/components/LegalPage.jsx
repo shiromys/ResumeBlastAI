@@ -1,6 +1,7 @@
 // src/components/LegalPage.jsx
 import { useEffect } from 'react'
 import './LegalPage.css'
+import PageMeta from './SEO/PageMeta'
 
 function LegalPage({ type, onBack }) {
   
@@ -128,6 +129,7 @@ function LegalPage({ type, onBack }) {
 
   return (
     <div className="legal-page">
+      <PageMeta page={type} />
       <div className="legal-nav-header">
         <div className="legal-nav-content">
           <button className="back-link" onClick={onBack}>

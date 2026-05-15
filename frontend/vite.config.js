@@ -16,6 +16,7 @@ export default defineConfig({
         '/terms',
         '/refund',
       ],
+      generateRobotsTxt: false,
     }),
   ],
 })
