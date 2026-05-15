@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "serve dist --single --listen $PORT"
+    "start": "serve dist --listen $PORT"
   },
   "dependencies": {
     "@stripe/stripe-js": "^8.6.0",

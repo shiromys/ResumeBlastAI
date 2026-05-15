@@ -1,7 +1,7 @@
 [build]
 builder = "nixpacks"
-buildCommand = "npm install --legacy-peer-deps && npm run build"
+buildCommand = "npm install --legacy-peer-deps && npm run build && cp serve.json dist/serve.json"
 
 [deploy]
-startCommand = "npx serve dist --single --listen $PORT"
+startCommand = "npx serve dist --listen $PORT"
 restartPolicyType = "always"
