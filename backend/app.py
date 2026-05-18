@@ -183,7 +183,7 @@ if os.getenv('FLASK_ENV') != 'testing':
         # Linux / Railway behavior: Apply file lock to prevent double Gunicorn workers
         scheduler_lock_file = open("drip_scheduler.lock", "w")
         fcntl.flock(scheduler_lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        
+
         _drip_scheduler = _start_drip_scheduler()
     except ImportError:
         # Windows / Local behavior: fcntl doesn't exist, safely bypass the lock
@@ -219,6 +219,78 @@ def health():
 def test_cors():
     origin = request.headers.get('Origin', 'no-origin')
     return jsonify({'success': True, 'origin': origin, 'allowed': _is_allowed(origin)})
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SEO — robots.txt and sitemap.xml
+# Served directly from Flask so they work regardless of frontend config.
+# ─────────────────────────────────────────────────────────────────────────────
+@app.route('/robots.txt')
+def robots():
+    content = """User-agent: *
+
+Allow: /
+Allow: /employer-network
+Allow: /recruiter
+Allow: /contact
+Allow: /privacy
+Allow: /terms
+Allow: /refund
+
+Disallow: /dashboard
+Disallow: /workbench
+Disallow: /admin
+Disallow: /api
+
+Sitemap: https://www.resumeblast.ai/sitemap.xml"""
+    response = make_response(content)
+    response.headers['Content-Type'] = 'text/plain'
+    return response
+
+
+@app.route('/sitemap.xml')
+def sitemap():
+    content = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://www.resumeblast.ai/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://www.resumeblast.ai/employer-network</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://www.resumeblast.ai/recruiter</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://www.resumeblast.ai/contact</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://www.resumeblast.ai/privacy</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://www.resumeblast.ai/terms</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://www.resumeblast.ai/refund</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>"""
+    response = make_response(content)
+    response.headers['Content-Type'] = 'application/xml'
+    return response
 
 
 if __name__ == '__main__':
