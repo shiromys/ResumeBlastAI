@@ -43,7 +43,7 @@ def handle_checkout_completed(session: dict):
     """
     session_id   = session.get("id", "")
     
-    # ✅ FIX: Safely fallback to {} if the payload explicitly sends `null`
+    # Safely fallback to {} if the payload explicitly sends `null`
     metadata     = session.get("metadata") or {}
     customer     = session.get("customer_details") or {}
     
@@ -55,7 +55,7 @@ def handle_checkout_completed(session: dict):
     user_id      = metadata.get("user_id", "")
     guest_id     = metadata.get("guest_id", "")
 
-    # ✅ FIX: Read blast metadata stored by payment.py at checkout creation
+    # Read blast metadata stored by payment.py at checkout creation
     resume_url     = metadata.get("resume_url", "")
     candidate_name = metadata.get("candidate_name", "")
     job_role       = metadata.get("job_role", "")
@@ -66,7 +66,7 @@ def handle_checkout_completed(session: dict):
     customer_name  = customer.get("name", "")
 
     # Fallback: fetch email from Supabase if we have user_id
-    if not customer_email and user_id:
+    if not customer_email and user_id and str(user_id).strip() not in ["None", "null", "undefined"]:
         try:
             resp = requests.get(
                 f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}&select=email",
@@ -115,12 +115,16 @@ def handle_checkout_completed(session: dict):
             print(f"[Webhook] Payment record patched to 'completed' for session {session_id}")
         else:
             # No record at all — insert a full new completed record
+            # We enforce checking that UUID inputs are valid strings, otherwise we pass None
+            db_user_id = user_id if (user_id and str(user_id).strip() not in ["None", "null", "undefined"]) else None
+            db_guest_id = guest_id if (guest_id and str(guest_id).strip() not in ["None", "null", "undefined"]) else None
+            
             resp = requests.post(
                 f"{SUPABASE_URL}/rest/v1/payments",
                 json={
                     "stripe_session_id": session_id,
-                    "user_id":           user_id if user_id else None,
-                    "guest_id":          guest_id if guest_id else None,
+                    "user_id":           db_user_id,
+                    "guest_id":          db_guest_id,
                     **payment_completed,
                 },
                 headers=_headers()
@@ -153,8 +157,12 @@ def handle_checkout_completed(session: dict):
 
     # ── ✅ FIX 2: Resolve User and Resume Context For Historical Resends ──────
     active_user_id = user_id or guest_id or ""
+    
+    # Sanitize variable inputs to weed out corrupted text tokens from old frontends
+    if str(active_user_id).strip() in ["None", "null", "undefined"]:
+        active_user_id = ""
 
-    # Fallback A: If metadata lacks an internal user_id mapping, look up user ID via email
+    # Fallback A: If metadata lacks an internal user identity, look up user ID via email
     if not active_user_id and customer_email:
         try:
             print(f"[Webhook] Missing user identity metadata. Querying profile matching: {customer_email}...")
