@@ -141,3 +141,45 @@
     transform: scale(1.4);
   }
 }
+
+/* ── User badge — Option A: avatar + name with border ─────────────────────── */
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px 5px 5px;
+  border-radius: 8px;
+  border: 1px solid #E5E7EB;
+  background: #FFFFFF;
+  cursor: default;
+  transition: border-color 0.2s;
+}
+
+.user-badge:hover {
+  border-color: #DC2626;
+}
+
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #DC2626;
+  color: #FFFFFF;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  letter-spacing: 0.03em;
+}
+
+.user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

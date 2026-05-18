@@ -20,6 +20,8 @@ import PaymentBlastTrigger from './components/PaymentBlastTrigger'
 import ContactPage from './components/ContactPage'
 import LegalPage from './components/LegalPage'
 import EmployerNetwork from './components/EmployerNetwork' // ✅ NEW
+import HowItWorksPage from './pages/HowItWorksPage'
+import PricingPage from './pages/PricingPage'
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
@@ -277,17 +279,13 @@ function App() {
         else alert('You do not have admin privileges')
         break
       case 'how-it-works':
-      case 'pricing': {
-        const alreadyOnHome = location.pathname === '/'
-        if (alreadyOnHome) {
-          const el = document.getElementById(view)
-          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
-        } else {
-          sessionStorage.setItem('scrollTarget', view)
-          navigate('/', { state: { skipScrollReset: true } })
-        }
+        window.scrollTo(0, 0)
+        navigate('/how-it-works')
         break
-      }
+      case 'pricing':
+        window.scrollTo(0, 0)
+        navigate('/pricing')
+        break
       default: break
     }
   }
@@ -400,6 +398,14 @@ function App() {
                 onViewChange={handleViewChange}
               />
             )
+          } />
+
+          <Route path="/how-it-works" element={
+            <HowItWorksPage onGetStarted={handleStartBlast} />
+          } />
+
+          <Route path="/pricing" element={
+            <PricingPage onGetStarted={handleStartBlast} user={user} />
           } />
 
           <Route path="/contact" element={<ContactPage onBack={() => navigate(user ? '/dashboard' : '/')} />} />

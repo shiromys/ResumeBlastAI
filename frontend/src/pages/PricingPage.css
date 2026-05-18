@@ -1,0 +1,263 @@
+/* frontend/src/pages/PricingPage.css */
+
+.pricing-page {
+  min-height: 100vh;
+  background: #fff;
+  font-family: Inter, -apple-system, sans-serif;
+}
+
+/* Header */
+.pp-header {
+  text-align: center;
+  padding: 80px 20px 60px;
+  background: linear-gradient(135deg, #FFF5F5 0%, #FFFFFF 100%);
+  border-bottom: 1px solid #FEE2E2;
+}
+
+.pp-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #DC2626;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.pp-title {
+  font-size: clamp(2rem, 5vw, 3rem);
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 16px;
+  line-height: 1.15;
+}
+
+.pp-subtitle {
+  font-size: 1.05rem;
+  color: #6B7280;
+  max-width: 560px;
+  margin: 0 auto;
+  line-height: 1.65;
+}
+
+/* Cards */
+.pp-cards-wrapper {
+  padding: 60px 20px;
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.pp-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  align-items: stretch;
+}
+
+.pp-card {
+  background: #fff;
+  border: 1.5px solid #E5E7EB;
+  border-radius: 16px;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: box-shadow 0.2s;
+}
+
+.pp-card:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+
+.pp-card-featured {
+  border-color: #DC2626;
+  border-width: 2px;
+  box-shadow: 0 12px 32px rgba(220,38,38,0.12);
+}
+
+.pp-badge {
+  position: absolute;
+  top: -13px;
+  left: 24px;
+  background: #DC2626;
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 20px;
+  letter-spacing: 0.06em;
+}
+
+.pp-card-header { margin-bottom: 20px; }
+
+.pp-plan-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 12px;
+}
+
+.pp-price {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.pp-price-main {
+  font-size: 40px;
+  font-weight: 800;
+  color: #111827;
+  line-height: 1;
+}
+
+.pp-price-period {
+  font-size: 14px;
+  color: #6B7280;
+}
+
+.pp-plan-desc {
+  font-size: 14px;
+  color: #6B7280;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.pp-btn {
+  width: 100%;
+  padding: 13px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: 24px;
+  transition: all 0.2s;
+  border: none;
+}
+
+.pp-btn-primary {
+  background: #DC2626;
+  color: white;
+}
+
+.pp-btn-primary:hover {
+  background: #B91C1C;
+}
+
+.pp-btn-outline {
+  background: white;
+  color: #374151;
+  border: 1.5px solid #D1D5DB;
+}
+
+.pp-btn-outline:hover {
+  background: #F9FAFB;
+}
+
+.pp-features {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.pp-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  color: #4B5563;
+  line-height: 1.45;
+}
+
+.pp-check {
+  color: #059669;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* FAQ */
+.pp-faq {
+  background: #F9FAFB;
+  padding: 60px 20px;
+}
+
+.pp-faq h2 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: #111827;
+  text-align: center;
+  margin-bottom: 36px;
+}
+
+.pp-faq-list {
+  max-width: 680px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pp-faq-item {
+  border-bottom: 1px solid #E5E7EB;
+  padding: 18px 0;
+}
+
+.pp-faq-item dt {
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 8px;
+}
+
+.pp-faq-item dd {
+  font-size: 14px;
+  color: #4B5563;
+  line-height: 1.7;
+  margin: 0;
+}
+
+/* CTA */
+.pp-cta {
+  text-align: center;
+  padding: 70px 20px;
+}
+
+.pp-cta h2 {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 800;
+  color: #111827;
+  margin-bottom: 10px;
+}
+
+.pp-cta p {
+  font-size: 1rem;
+  color: #6B7280;
+  margin-bottom: 28px;
+}
+
+.pp-cta-buttons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.pp-secondary-btn {
+  font-size: 15px;
+  font-weight: 600;
+  color: #DC2626;
+  text-decoration: none;
+  padding: 12px 20px;
+  border: 2px solid #DC2626;
+  border-radius: 8px;
+  transition: all 0.2s;
+}
+
+.pp-secondary-btn:hover {
+  background: #DC2626;
+  color: white;
+}
