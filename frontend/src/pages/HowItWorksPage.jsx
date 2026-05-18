@@ -59,9 +59,9 @@ function HowItWorksPage({ onGetStarted }) {
             <div className="hiw-step-icon">🤖</div>
             <h2 className="hiw-step-title">AI Analysis</h2>
             <p className="hiw-step-desc">
-              Claude AI (by Anthropic) scans your resume to detect your target role,
-              seniority level, and best-fit industry. It then matches you to the most
-              relevant verified recruiters in our network.
+              AI scans your resume to detect your target role,
+              seniority level, and best-fit industry automatically.
+        
             </p>
           </div>
 
@@ -85,9 +85,7 @@ function HowItWorksPage({ onGetStarted }) {
             <div className="hiw-step-icon">📊</div>
             <h2 className="hiw-step-title">Track Results</h2>
             <p className="hiw-step-desc">
-              Your real-time dashboard shows delivered, opened, clicked, and bounced
-              emails across all 3 waves — so you always know exactly how your campaign
-              is performing.
+             Real-time dashboard showing your campaign status across all 3 waves.
             </p>
           </div>
 
