@@ -88,16 +88,14 @@ def handle_checkout_completed(session: dict):
         return
 
     # ── ✅ FIX 1: Update payments table status to 'completed' ────────────────
-    # The frontend creates the record as status='initiated' at checkout start.
-    # This PATCH ensures it becomes 'completed' via the reliable server-to-server
-    # webhook path — regardless of whether the frontend's /api/payment/verify fired.
+    # Changed 'customer_email' -> 'user_email' and 'customer_name' -> 'user_name' to resolve PGRST204 Schema Cache mismatch.
     payment_completed = {
         "status":         "completed",
         "plan_name":      plan_name,
         "amount":         amount_total,
         "currency":       currency,
-        "customer_email": customer_email,
-        "customer_name":  customer_name,
+        "user_email":     customer_email,
+        "user_name":      customer_name or (customer_email.split("@")[0] if customer_email else "unknown"),
         "completed_at":   datetime.utcnow().isoformat(),
     }
 
@@ -153,21 +151,49 @@ def handle_checkout_completed(session: dict):
         except Exception as e:
             print(f"[Webhook] ⚠️ Receipt email exception (non-blocking): {e}")
 
-    # ── ✅ FIX 2: Trigger blast campaign server-side ──────────────────────────
-    # This is the authoritative blast trigger — runs server-to-server, cannot be
-    # killed by a localStorage wipe, browser close, or redirect timing issue.
-    # send_blast_internal() deduplication guard (stripe_session_id check against
-    # blast_campaigns) makes this safe: if the frontend already triggered the blast,
-    # this call returns already_processed=True and is a no-op.
-    #
-    # resume_url must be present in Stripe metadata — payment.py now sets it from
-    # the value BlastConfig passes to paymentService.js → /api/create-checkout-session.
+    # ── ✅ FIX 2: Resolve User and Resume Context For Historical Resends ──────
+    active_user_id = user_id or guest_id or ""
+
+    # Fallback A: If metadata lacks an internal user_id mapping, look up user ID via email
+    if not active_user_id and customer_email:
+        try:
+            print(f"[Webhook] Missing user identity metadata. Querying profile matching: {customer_email}...")
+            user_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/users?email=eq.{customer_email}&select=id",
+                headers=_headers()
+            )
+            if user_resp.status_code == 200 and user_resp.json():
+                active_user_id = user_resp.json()[0].get("id", "")
+                print(f"[Webhook] Dynamic Recovery successful! Found User ID: {active_user_id}")
+        except Exception as e:
+            print(f"[Webhook] ⚠️ Profile mapping lookup fault (non-blocking): {e}")
+
+    # Fallback B: If metadata lacks a resume_url, locate the latest record they uploaded before checking out
+    if not resume_url and active_user_id:
+        try:
+            print(f"[Webhook] Missing resume_url asset string. Scanning user document database logs...")
+            resume_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/resumes?user_id=eq.{active_user_id}&order=created_at.desc&limit=1",
+                headers=_headers()
+            )
+            if resume_resp.status_code == 200 and resume_resp.json():
+                found_resume_record = resume_resp.json()[0]
+                resume_url = found_resume_record.get("file_url", "")
+                
+                # Rehydrate metadata attributes if empty
+                analysis_data = found_resume_record.get("analysis_data", {})
+                if not candidate_name: candidate_name = analysis_data.get("candidate_name", "")
+                if not job_role:       job_role = analysis_data.get("detected_role", "")
+                print(f"[Webhook] Dynamic Recovery successful! Pulled target asset: {resume_url}")
+        except Exception as e:
+            print(f"[Webhook] ⚠️ Asset collection lookup fault (non-blocking): {e}")
+
+    # ── Authoritative blast campaign runner ──
     FREE_PLANS_WH = {"free", "freemium"}
     if resume_url and plan_name and plan_name.lower() not in FREE_PLANS_WH:
         try:
             from routes.blast import send_blast_internal  # import here to avoid circular import
 
-            active_user_id = user_id or guest_id or ""
             print(f"[Webhook] 🚀 Triggering blast: plan={plan_name} user={active_user_id!r}")
 
             blast_result = send_blast_internal(
@@ -192,7 +218,7 @@ def handle_checkout_completed(session: dict):
             print(f"[Webhook] ⚠️ Blast trigger exception (non-blocking): {e}")
             traceback.print_exc()
     elif not resume_url:
-        print(f"[Webhook] ℹ️  No resume_url in Stripe metadata — blast deferred to frontend")
+        print(f"[Webhook] ❌ Operation Aborted: Unable to map a valid resume file path string for user target.")
 
 
 # ── ROUTE WITH SIGNATURE VERIFICATION ───────────────────────────────────────
@@ -228,8 +254,6 @@ def stripe_webhook():
     except Exception as e:
         print(f"❌ CRITICAL ERROR processing checkout.session.completed:")
         traceback.print_exc()
-        # Returning 500 forces Stripe to retry. If we don't want retries on bad code, return 200.
-        # But generally, 500 is correct for server errors so we don't drop the transaction entirely.
         return jsonify({"error": "Internal processing error"}), 500
 
     return jsonify({"received": True}), 200
