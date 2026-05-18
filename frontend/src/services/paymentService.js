@@ -20,7 +20,13 @@ export const initiateCheckout = async (user, priceId, amount) => {
       disclaimer_accepted: user.disclaimer_accepted,
       // ✅ NEW: Passing Stripe price ID and amount to backend
       price_id: priceId,
-      amount: amount
+      amount: amount,
+      // ✅ FIX: Blast metadata — stored in Stripe session so the webhook can
+      // trigger the campaign server-side even if localStorage is cleared.
+      resume_url:     user.resume_url     || '',
+      candidate_name: user.candidate_name || '',
+      job_role:       user.job_role       || '',
+      location:       user.location       || 'Remote',
     })
   });
 

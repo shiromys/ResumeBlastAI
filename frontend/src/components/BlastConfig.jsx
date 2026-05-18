@@ -132,8 +132,22 @@ function BlastConfig({ resumeId, resumeUrl, resumeText, userData, isGuest, payme
       if (!isGuest) await trackPaymentInitiated(userData.id, planKey)
       
       // ✅ MODIFIED: Pass stripePriceId and amountToCharge to initiateCheckout
+      // ✅ FIX: Also pass blast metadata so the Stripe webhook can trigger the
+      // campaign server-side — these fields survive the browser redirect because
+      // they are stored on the Stripe session, not in localStorage.
+      // userData already has candidate_name, email, targetRole from ResumeAnalysis.
       await initiateCheckout(
-        { email: userData.email, user_id: userData.id, plan: planKey, disclaimer_accepted: disclaimerAccepted },
+        {
+          email: userData.email,
+          user_id: userData.id,
+          plan: planKey,
+          disclaimer_accepted: disclaimerAccepted,
+          // Webhook blast fields
+          resume_url:     resumeUrl,
+          candidate_name: userData.name       || '',
+          job_role:       userData.targetRole  || '',
+          location:       blastConfig.location || 'Remote',
+        },
         stripePriceId,
         amountToCharge
       )

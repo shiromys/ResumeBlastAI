@@ -55,6 +55,12 @@ def handle_checkout_completed(session: dict):
     user_id      = metadata.get("user_id", "")
     guest_id     = metadata.get("guest_id", "")
 
+    # ✅ FIX: Read blast metadata stored by payment.py at checkout creation
+    resume_url     = metadata.get("resume_url", "")
+    candidate_name = metadata.get("candidate_name", "")
+    job_role       = metadata.get("job_role", "")
+    location       = metadata.get("location", "Remote")
+
     # ── Determine the customer email ────────────────────────────────────────
     customer_email = customer.get("email", "")
     customer_name  = customer.get("name", "")
@@ -81,41 +87,48 @@ def handle_checkout_completed(session: dict):
         print(f"[Webhook] Payment not paid (status={payment_status}) — skipping")
         return
 
-    # ── Save payment record to Supabase ─────────────────────────────────────
-    payment_record = {
-        "stripe_session_id": session_id,
-        "user_id":           user_id if user_id else None,
-        "guest_id":          guest_id if guest_id else None,
-        "plan_name":         plan_name,
-        "amount":            amount_total,
-        "currency":          currency,
-        "status":            "completed",
-        "customer_email":    customer_email,
-        "customer_name":     customer_name,
-        "completed_at":      datetime.utcnow().isoformat(),
+    # ── ✅ FIX 1: Update payments table status to 'completed' ────────────────
+    # The frontend creates the record as status='initiated' at checkout start.
+    # This PATCH ensures it becomes 'completed' via the reliable server-to-server
+    # webhook path — regardless of whether the frontend's /api/payment/verify fired.
+    payment_completed = {
+        "status":         "completed",
+        "plan_name":      plan_name,
+        "amount":         amount_total,
+        "currency":       currency,
+        "customer_email": customer_email,
+        "customer_name":  customer_name,
+        "completed_at":   datetime.utcnow().isoformat(),
     }
 
     try:
         existing = requests.get(
-            f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}&select=id",
+            f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}&select=id,status",
             headers=_headers()
         )
         
         if existing.status_code == 200 and existing.json():
+            # Record exists as 'initiated' — patch it to 'completed'
             requests.patch(
                 f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}",
-                json=payment_record,
+                json=payment_completed,
                 headers=_headers()
             )
-            print(f"[Webhook] Payment record updated for session {session_id}")
+            print(f"[Webhook] Payment record patched to 'completed' for session {session_id}")
         else:
+            # No record at all — insert a full new completed record
             resp = requests.post(
                 f"{SUPABASE_URL}/rest/v1/payments",
-                json=payment_record,
+                json={
+                    "stripe_session_id": session_id,
+                    "user_id":           user_id if user_id else None,
+                    "guest_id":          guest_id if guest_id else None,
+                    **payment_completed,
+                },
                 headers=_headers()
             )
             if resp.status_code in [200, 201]:
-                print(f"[Webhook] Payment record saved (new insert)")
+                print(f"[Webhook] Payment record inserted (new)")
             else:
                 print(f"[Webhook] Failed to save payment: {resp.status_code} {resp.text}")
     except Exception as e:
@@ -139,6 +152,47 @@ def handle_checkout_completed(session: dict):
                 print(f"[Webhook] ⚠️ Receipt email failed: {receipt_result.get('error')}")
         except Exception as e:
             print(f"[Webhook] ⚠️ Receipt email exception (non-blocking): {e}")
+
+    # ── ✅ FIX 2: Trigger blast campaign server-side ──────────────────────────
+    # This is the authoritative blast trigger — runs server-to-server, cannot be
+    # killed by a localStorage wipe, browser close, or redirect timing issue.
+    # send_blast_internal() deduplication guard (stripe_session_id check against
+    # blast_campaigns) makes this safe: if the frontend already triggered the blast,
+    # this call returns already_processed=True and is a no-op.
+    #
+    # resume_url must be present in Stripe metadata — payment.py now sets it from
+    # the value BlastConfig passes to paymentService.js → /api/create-checkout-session.
+    FREE_PLANS_WH = {"free", "freemium"}
+    if resume_url and plan_name and plan_name.lower() not in FREE_PLANS_WH:
+        try:
+            from routes.blast import send_blast_internal  # import here to avoid circular import
+
+            active_user_id = user_id or guest_id or ""
+            print(f"[Webhook] 🚀 Triggering blast: plan={plan_name} user={active_user_id!r}")
+
+            blast_result = send_blast_internal(
+                plan_name      = plan_name,
+                user_id        = active_user_id,
+                resume_url     = resume_url,
+                candidate_name = candidate_name,
+                job_role       = job_role,
+                location       = location,
+                stripe_session = session_id,
+            )
+
+            if blast_result.get("already_processed"):
+                print(f"[Webhook] ℹ️  Blast already handled by frontend — skipped (idempotent)")
+            elif blast_result.get("success"):
+                print(f"[Webhook] ✅ Blast triggered: campaign={blast_result.get('drip_campaign_id')} sent={blast_result.get('successful_sends', 0)}")
+            else:
+                print(f"[Webhook] ⚠️ Blast trigger failed (non-blocking): {blast_result.get('error')}")
+
+        except Exception as e:
+            # Non-blocking — never let a blast failure return 500 to Stripe (causes retries)
+            print(f"[Webhook] ⚠️ Blast trigger exception (non-blocking): {e}")
+            traceback.print_exc()
+    elif not resume_url:
+        print(f"[Webhook] ℹ️  No resume_url in Stripe metadata — blast deferred to frontend")
 
 
 # ── ROUTE WITH SIGNATURE VERIFICATION ───────────────────────────────────────

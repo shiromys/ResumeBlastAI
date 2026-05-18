@@ -105,15 +105,28 @@ def create_checkout_session():
             plan_amount = front_amount
 
         is_guest = GuestService.is_guest(str(user_id))
+
+        # ✅ FIX: Read blast metadata sent by BlastConfig → paymentService.
+        # These are stored on the Stripe session server-side and survive the
+        # browser redirect — the webhook reads them to trigger the blast without
+        # needing localStorage. Stripe metadata values must be strings ≤500 chars.
+        resume_url     = str(data.get('resume_url', ''))[:500]
+        candidate_name = str(data.get('candidate_name', ''))[:100]
+        job_role       = str(data.get('job_role', ''))[:100]
+        location       = str(data.get('location', 'Remote'))[:100]
         
-        # ✅ FIX: Synchronize metadata keys for the Webhook to read successfully
-        # Added 'plan' and 'guest_id' keys to match payment_webhook.py expectations
+        # ✅ FIX: Added blast fields to Stripe metadata so webhook can trigger
+        # the campaign server-side — independent of frontend localStorage.
         metadata = {
             'plan': plan_type, 
             'plan_name': plan_type,
             'user_id': str(user_id) if not is_guest else "",
             'guest_id': str(user_id) if is_guest else "",
-            'disclaimer_accepted': str(disclaimer_accepted)
+            'disclaimer_accepted': str(disclaimer_accepted),
+            'resume_url':     resume_url,
+            'candidate_name': candidate_name,
+            'job_role':       job_role,
+            'location':       location,
         }
 
         if is_guest:

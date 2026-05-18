@@ -54,6 +54,30 @@ function PaymentBlastTrigger() {
     }
 
     // ── REGISTERED USER WORKFLOW ─────────────────────────────────────────────
+    // ✅ FIX: Before reading localStorage, check if the Stripe webhook already
+    // created the blast_campaign for this session. The webhook now fires
+    // send_blast_internal() server-side on every payment — so by the time the
+    // user's browser lands on this page, the campaign is often already running.
+    // If so, skip the frontend blast entirely and go straight to dashboard.
+    try {
+      const checkResp = await fetch(
+        `${API_URL}/api/blast/check-session?session_id=${encodeURIComponent(sessionId)}`
+      );
+      if (checkResp.ok) {
+        const checkData = await checkResp.json();
+        if (checkData.already_processed) {
+          console.log('[PaymentBlastTrigger] Webhook already fired blast — going to dashboard');
+          localStorage.removeItem('pending_blast_resume_data');
+          localStorage.removeItem('pending_blast_config');
+          window.location.href = '/dashboard';
+          return;
+        }
+      }
+    } catch (checkErr) {
+      // Non-blocking — if the check fails, fall through to the localStorage path
+      console.warn('[PaymentBlastTrigger] Session check failed, trying localStorage path:', checkErr);
+    }
+
     // Registered users upload resume BEFORE payment.
     // pending_blast_resume_data must be set by BlastConfig before Stripe redirect.
     const savedResumeData = localStorage.getItem('pending_blast_resume_data');

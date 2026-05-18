@@ -109,28 +109,19 @@ def verify_stripe_session(session_id):
 @blast_bp.route("/api/blast/send", methods=["POST"])
 def send_blast():
     """
-    Main blast endpoint. Called after payment success.
-    Works for both registered users and guests.
-    
-    ✅ FIX: Added stripe_session_id deduplication guard.
-    ✅ FIX: Falls back gracefully when session_id not provided (e.g. sandbox).
-    ✅ FIX: Properly handles user_id=None for guests vs registered users.
+    Main blast endpoint. Called after payment success by PaymentBlastTrigger.jsx.
+    Delegates to send_blast_internal() — same function the Stripe webhook calls,
+    so both paths are guaranteed identical behaviour.
     """
     try:
         blast_data = request.json
         if not blast_data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        plan_name       = blast_data.get("plan_name", "starter").lower()
-        user_id         = blast_data.get("user_id", "")
-        resume_url      = blast_data.get("resume_url", "")
-        resume_name     = blast_data.get("resume_name", "Resume.pdf")
-        stripe_session  = blast_data.get("stripe_session_id", "")
-
-        print(f"\n[Blast] ========================================")
-        print(f"[Blast] Incoming blast request")
-        print(f"[Blast] plan={plan_name} user_id={user_id!r} session={stripe_session!r}")
-        print(f"[Blast] resume_url={resume_url!r}")
+        plan_name      = blast_data.get("plan_name", "starter").lower()
+        user_id        = blast_data.get("user_id", "")
+        resume_url     = blast_data.get("resume_url", "")
+        stripe_session = blast_data.get("stripe_session_id", "")
 
         if plan_name in FREE_PLANS:
             return jsonify({"success": False, "error": "Use /api/blast/freemium for free plan"}), 400
@@ -138,26 +129,77 @@ def send_blast():
         if not resume_url:
             return jsonify({"success": False, "error": "Resume URL is required"}), 400
 
+        result = send_blast_internal(
+            plan_name        = plan_name,
+            user_id          = user_id,
+            resume_url       = resume_url,
+            resume_name      = blast_data.get("resume_name", "Resume.pdf"),
+            stripe_session   = stripe_session,
+            candidate_name   = blast_data.get("candidate_name", ""),
+            candidate_email  = blast_data.get("candidate_email", ""),
+            candidate_phone  = blast_data.get("candidate_phone", ""),
+            job_role         = blast_data.get("job_role", "Professional"),
+            years_experience = blast_data.get("years_experience", "0"),
+            key_skills       = blast_data.get("key_skills", "Professional Skills"),
+            location         = blast_data.get("location", "Remote"),
+        )
+
+        status_code = 200 if result.get("success") else 500
+        return jsonify(result), status_code
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ✅ FIX: Core blast logic extracted as an importable function.
+# Called by send_blast() route (frontend path) AND handle_checkout_completed()
+# in payment_webhook.py (server-side path).
+# The stripe_session deduplication guard makes both paths safe to call — whichever
+# fires first wins; the second call is a no-op that returns already_processed=True.
+def send_blast_internal(
+    plan_name,
+    user_id,
+    resume_url,
+    resume_name       = "Resume.pdf",
+    stripe_session    = "",
+    candidate_name    = "",
+    candidate_email   = "",
+    candidate_phone   = "",
+    job_role          = "Professional",
+    years_experience  = "0",
+    key_skills        = "Professional Skills",
+    location          = "Remote",
+):
+    """Returns a plain dict (not a Flask response object)."""
+    try:
+        plan_name = (plan_name or "starter").lower()
+
+        print(f"\n[Blast] ========================================")
+        print(f"[Blast] Incoming blast request")
+        print(f"[Blast] plan={plan_name} user_id={user_id!r} session={stripe_session!r}")
+        print(f"[Blast] resume_url={resume_url!r}")
+
         # ── Deduplication guard: prevent double-blast on webhook retries ──
         if stripe_session:
             _, _, already_processed = verify_stripe_session(stripe_session)
             if already_processed:
                 print(f"[Blast] Session {stripe_session} already processed — returning cached result")
-                # Fetch the existing campaign
                 existing = requests.get(
                     f"{SUPABASE_URL}/rest/v1/blast_campaigns?stripe_session_id=eq.{stripe_session}&select=*",
                     headers=get_db_headers()
                 )
                 if existing.status_code == 200 and existing.json():
                     camp = existing.json()[0]
-                    return jsonify({
+                    return {
                         "success": True,
                         "drip_mode": True,
                         "drip_campaign_id": camp["id"],
                         "message": "Blast already initiated for this payment session.",
                         "already_processed": True,
                         "plan_used": plan_name,
-                    }), 200
+                    }
 
         # ── Determine user type ──
         is_guest    = str(user_id).startswith("guest_")
@@ -166,36 +208,36 @@ def send_blast():
         # ── Get plan limit ──
         plan_limit = get_plan_limit(plan_name)
 
-        # ── Fetch candidate details from DB (overrides frontend data if found) ──
+        # ── Fetch candidate details from DB (overrides caller data if found) ──
         db_name, db_email, db_role = fetch_candidate_details_from_db(resume_url)
-        final_name  = db_name  or blast_data.get("candidate_name", "Professional Candidate")
-        final_email = db_email or blast_data.get("candidate_email", "")
-        final_role  = db_role  or blast_data.get("job_role", "Professional")
+        final_name  = db_name  or candidate_name or "Professional Candidate"
+        final_email = db_email or candidate_email or ""
+        final_role  = db_role  or job_role or "Professional"
 
         print(f"[Blast] Candidate: {final_name} | {final_role} | {final_email}")
         print(f"[Blast] User type: {user_type} | Plan limit: {plan_limit}")
 
         # ── Create drip campaign record ──
         drip_result = create_drip_campaign({
-            "user_id":         user_id,
-            "user_type":       user_type,
+            "user_id":           user_id,
+            "user_type":         user_type,
             "stripe_session_id": stripe_session,
-            "plan_name":       plan_name,
-            "candidate_name":  final_name,
-            "candidate_email": final_email,
-            "candidate_phone": blast_data.get("candidate_phone", ""),
-            "job_role":        final_role,
-            "resume_url":      resume_url,
-            "resume_name":     resume_name,
-            "years_experience": blast_data.get("years_experience", "0"),
-            "key_skills":      blast_data.get("key_skills", "Professional Skills"),
-            "location":        blast_data.get("location", "Remote"),
-            "total_recruiters": plan_limit,
+            "plan_name":         plan_name,
+            "candidate_name":    final_name,
+            "candidate_email":   final_email,
+            "candidate_phone":   candidate_phone,
+            "job_role":          final_role,
+            "resume_url":        resume_url,
+            "resume_name":       resume_name,
+            "years_experience":  years_experience,
+            "key_skills":        key_skills,
+            "location":          location,
+            "total_recruiters":  plan_limit,
         })
 
         if not drip_result.get("success"):
             print(f"[Blast] Failed to create drip campaign: {drip_result.get('error')}")
-            return jsonify({"success": False, "error": "Failed to create drip campaign record"}), 500
+            return {"success": False, "error": "Failed to create drip campaign record"}
 
         drip_campaign_id = drip_result["campaign_id"]
         print(f"[Blast] Campaign created: {drip_campaign_id}")
@@ -203,35 +245,35 @@ def send_blast():
         # ── Fire Day 1 blast immediately ──
         day1_result = run_day1_blast(drip_campaign_id)
 
-        s     = day1_result.get("stats", {"sent": 0, "failed": 0, "total": plan_limit})
-        sent  = s.get("sent", 0)
+        s      = day1_result.get("stats", {"sent": 0, "failed": 0, "total": plan_limit})
+        sent   = s.get("sent", 0)
         failed = s.get("failed", 0)
-        total = s.get("total", plan_limit)
+        total  = s.get("total", plan_limit)
 
         print(f"[Blast] Day 1 complete: sent={sent} failed={failed} total={total}")
 
-        return jsonify({
-            "success":          True,
-            "drip_mode":        True,
-            "drip_campaign_id": drip_campaign_id,
-            "message":          f"Day 1 blast sent to {sent} recruiters. Follow-ups scheduled automatically.",
-            "total_recipients": total,
-            "successful_sends": sent,
-            "failed_sends":     failed,
-            "plan_used":        plan_name,
+        return {
+            "success":             True,
+            "drip_mode":           True,
+            "drip_campaign_id":    drip_campaign_id,
+            "message":             f"Day 1 blast sent to {sent} recruiters. Follow-ups scheduled automatically.",
+            "total_recipients":    total,
+            "successful_sends":    sent,
+            "failed_sends":        failed,
+            "plan_used":           plan_name,
             "plan_limit_enforced": plan_limit,
-            "success_rate":     f"{(sent / total * 100):.1f}%" if total > 0 else "0%",
+            "success_rate":        f"{(sent / total * 100):.1f}%" if total > 0 else "0%",
             "schedule": {
                 "day1": "Sent now",
                 "day4": "Follow-up — next wave starts after Wave 1 completes",
                 "day8": "Reminder — starts after Wave 2 completes"
             }
-        }), 200
+        }
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
+        return {"success": False, "error": str(e)}
 
 
 @blast_bp.route("/api/blast/freemium", methods=["POST"])
@@ -379,3 +421,35 @@ def test_single_email():
         return jsonify({"success": False, "error": result["error"]}), 500
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@blast_bp.route("/api/blast/check-session", methods=["GET"])
+def check_blast_session():
+    """
+    Called by PaymentBlastTrigger.jsx to check if the webhook already created
+    a blast_campaign for this Stripe session — so the frontend can skip its
+    own blast attempt and go straight to the dashboard.
+    Returns: { already_processed: bool, campaign_id?: string }
+    """
+    try:
+        session_id = request.args.get("session_id", "")
+        if not session_id:
+            return jsonify({"already_processed": False}), 200
+
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/blast_campaigns?stripe_session_id=eq.{session_id}&select=id,status",
+            headers=get_db_headers()
+        )
+        if resp.status_code == 200 and resp.json():
+            campaign = resp.json()[0]
+            return jsonify({
+                "already_processed": True,
+                "campaign_id":       campaign["id"],
+                "campaign_status":   campaign.get("status"),
+            }), 200
+
+        return jsonify({"already_processed": False}), 200
+
+    except Exception as e:
+        # Return False on any error — PaymentBlastTrigger falls through to localStorage path
+        return jsonify({"already_processed": False, "error": str(e)}), 200
