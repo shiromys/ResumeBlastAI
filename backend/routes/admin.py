@@ -98,7 +98,7 @@ def get_revenue():
                 f"{SUPABASE_URL}/rest/v1/payments"
                 f"?select=id,amount,status,created_at,initiated_at,"
                 f"completed_at,refund_amount,user_email,"
-                f"stripe_payment_intent_id,plan_name"
+                f"payment_intent_id,plan_name"
                 f"&limit={limit}&offset={offset}"
             )
             resp = requests.get(url, headers=_read_headers(), timeout=15)
