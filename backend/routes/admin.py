@@ -13,14 +13,27 @@ SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 BREVO_WEBHOOK_SECRET = os.getenv('BREVO_WEBHOOK_SECRET')
 
+# ── CHANGE 1: split into write headers and read headers ──────────────────────
+# Old _get_headers() used 'Prefer: count=exact' on ALL requests including GETs.
+# With some PostgREST/Supabase versions this causes get_all_rows to receive a
+# non-list response, silently breaking all revenue / stats queries.
 def _get_headers():
+    """For write operations (POST / PATCH / DELETE)."""
     return {
-        'apikey': SUPABASE_KEY,
+        'apikey':        SUPABASE_KEY,
         'Authorization': f'Bearer {SUPABASE_KEY}',
-        'Content-Type': 'application/json',
-        'Prefer': 'count=exact'
+        'Content-Type':  'application/json',
+        'Prefer':        'return=representation',
     }
 
+def _read_headers():
+    """For read operations (GET) — no Prefer header to avoid PostgREST quirks."""
+    return {
+        'apikey':        SUPABASE_KEY,
+        'Authorization': f'Bearer {SUPABASE_KEY}',
+    }
+
+# ── CHANGE 2: use _read_headers() inside get_all_rows ────────────────────────
 def get_all_rows(table, query=''):
     """
     Standard query parameter pagination to prevent timeouts and fetch all real-time data.
@@ -40,11 +53,15 @@ def get_all_rows(table, query=''):
             params.append(f"offset={offset}")
             url = base_url + "?" + "&".join(params)
             
-            resp = requests.get(url, headers=_get_headers())
+            # ✅ FIX: use _read_headers() — no Prefer:count=exact on GETs
+            resp = requests.get(url, headers=_read_headers())
             
             if resp.status_code in [200, 206]:
                 data = resp.json()
-                if not isinstance(data, list) or len(data) == 0:
+                if not isinstance(data, list):
+                    print(f"[Admin] get_all_rows unexpected response for {table}: {type(data)} — {str(data)[:200]}")
+                    break
+                if len(data) == 0:
                     break
                 all_results.extend(data)
                 
@@ -52,6 +69,7 @@ def get_all_rows(table, query=''):
                     break
                 offset += limit
             else:
+                print(f"[Admin] get_all_rows failed for {table}: {resp.status_code} — {resp.text[:200]}")
                 break
                 
         return all_results
@@ -62,15 +80,23 @@ def get_all_rows(table, query=''):
 # =========================================================
 # 1. REVENUE ANALYTICS
 # =========================================================
+# ── CHANGE 3: revenue function uses initiated_at as authoritative date ────────
+# Recovery script set created_at = now() for all historical payments.
+# initiated_at holds the real original payment date from Stripe.
 @admin_bp.route('/api/admin/revenue', methods=['GET'])
 def get_revenue():
     try:
         start_date_str = request.args.get('start_date')
         end_date_str = request.args.get('end_date')
 
-        # Memory optimization: Only fetch required columns to prevent API timeouts
-        query = 'select=id,amount,status,created_at,refund_amount,user_email,stripe_payment_intent_id'
+        # ✅ FIX: also fetch initiated_at and completed_at for date logic
+        query = (
+            'select=id,amount,status,created_at,initiated_at,'
+            'completed_at,refund_amount,user_email,'
+            'stripe_payment_intent_id,plan_name'
+        )
         all_payments = get_all_rows('payments', query)
+        print(f"[Revenue] Fetched {len(all_payments)} total payment rows")
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -86,10 +112,8 @@ def get_revenue():
             if not date_str: 
                 return None
             try: 
-                # Robust parsing for Stripe Unix Epochs AND Supabase ISO strings
                 if isinstance(date_str, (int, float)) or (isinstance(date_str, str) and date_str.replace('.','',1).isdigit()):
                     return datetime.fromtimestamp(float(date_str), tz=timezone.utc)
-                
                 date_str = str(date_str).replace('Z', '+00:00')
                 dt = datetime.fromisoformat(date_str)
                 if dt.tzinfo is None:
@@ -98,18 +122,30 @@ def get_revenue():
             except: 
                 return None
 
+        def best_date(p):
+            """
+            Use initiated_at as the real payment date.
+            Falls back to completed_at then created_at.
+            Ensures recovered historical payments appear on their
+            actual date, not the recovery script run date.
+            """
+            return (
+                parse_date(p.get('initiated_at'))
+                or parse_date(p.get('completed_at'))
+                or parse_date(p.get('created_at'))
+            )
+
         filtered_payments = all_payments
         if start_date_str and end_date_str:
             try:
                 start_dt = datetime.strptime(start_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc)
                 end_dt = datetime.strptime(end_date_str, '%Y-%m-%d').replace(tzinfo=timezone.utc) + timedelta(days=1)
-                
                 filtered_payments = [
                     p for p in all_payments 
-                    if parse_date(p.get('created_at')) and start_dt <= parse_date(p.get('created_at')) < end_dt
+                    if best_date(p) and start_dt <= best_date(p) < end_dt
                 ]
             except Exception as e:
-                pass
+                print(f"[Revenue] Date filter error: {e}")
 
         valid_success = ['completed', 'paid', 'success', 'succeeded']
         
@@ -122,21 +158,23 @@ def get_revenue():
         failed = [p for p in filtered_payments if (p.get('status') or '').lower() in ['failed', 'error', 'canceled', 'cancelled']]
         refunded = [p for p in filtered_payments if (p.get('status') or '').lower() == 'refunded']
 
+        print(f"[Revenue] completed={len(completed)} failed={len(failed)} refunded={len(refunded)}")
+
         total_revenue = sum(safe_float(p.get('amount')) for p in completed) / 100
         
         today_payments = [
             p for p in all_payments 
             if (p.get('status') or '').lower() in valid_success 
-            and parse_date(p.get('created_at')) 
-            and parse_date(p.get('created_at')) >= today_start
+            and best_date(p)
+            and best_date(p) >= today_start
         ]
         today_revenue = sum(safe_float(p.get('amount')) for p in today_payments) / 100
 
         last_7_payments = [
             p for p in all_payments 
             if (p.get('status') or '').lower() in valid_success 
-            and parse_date(p.get('created_at')) 
-            and parse_date(p.get('created_at')) >= seven_days_ago
+            and best_date(p)
+            and best_date(p) >= seven_days_ago
         ]
         last_7_revenue = sum(safe_float(p.get('amount')) for p in last_7_payments) / 100
 
@@ -148,8 +186,8 @@ def get_revenue():
             day_payments_list = [
                 p for p in all_payments 
                 if (p.get('status') or '').lower() in valid_success 
-                and parse_date(p.get('created_at')) 
-                and day_start <= parse_date(p.get('created_at')) < day_end
+                and best_date(p)
+                and day_start <= best_date(p) < day_end
             ]
             
             daily_breakdown.append({
@@ -287,7 +325,7 @@ def force_drip_wave():
 
     try:
         url = f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}&select=id"
-        resp = requests.get(url, headers=_get_headers())
+        resp = requests.get(url, headers=_read_headers())
         if resp.status_code not in [200, 206] or len(resp.json()) == 0:
             return jsonify({'error': 'Campaign not found'}), 404
         
@@ -352,7 +390,7 @@ def get_brevo_logs():
         params.append(("offset", str(offset)))
 
         base_url = f"{SUPABASE_URL}/rest/v1/brevo_event_logs"
-        resp = requests.get(base_url, headers=_get_headers(), params=params)
+        resp = requests.get(base_url, headers=_read_headers(), params=params)
 
         if resp.status_code in [200, 206]:
             logs = resp.json()
@@ -395,7 +433,7 @@ def get_brevo_logs_summary():
         if email_to: params.append(("email_to", f"ilike.%{email_to}%"))
 
         url = f"{SUPABASE_URL}/rest/v1/brevo_event_logs"
-        resp = requests.get(url, headers=_get_headers(), params=params)
+        resp = requests.get(url, headers=_read_headers(), params=params)
 
         if resp.status_code not in [200, 206]:
             return jsonify({'success': False, 'error': 'Failed to fetch logs'}), 400
@@ -520,7 +558,7 @@ def get_health():
     try:
         supabase_status = "Healthy"
         try:
-            if requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_get_headers(), timeout=5).status_code not in [200, 204, 206]: supabase_status = "Degraded"
+            if requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_read_headers(), timeout=5).status_code not in [200, 204, 206]: supabase_status = "Degraded"
         except: supabase_status = "Unreachable"
         return jsonify({'Database': supabase_status, 'Payments': "Configured" if os.getenv('STRIPE_SECRET_KEY') else "Missing", 'Email Service': "Configured" if (os.getenv('BREVO_API_KEY') or os.getenv('RESEND_API_KEY')) else "Missing", 'AI Service': "Configured" if os.getenv('ANTHROPIC_API_KEY') else "Missing", 'API': 'Online'}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
@@ -529,7 +567,7 @@ def get_health():
 def get_server_status():
     start_time = time.time()
     try:
-        requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_get_headers(), timeout=2)
+        requests.get(f"{SUPABASE_URL}/rest/v1/", headers=_read_headers(), timeout=2)
         return jsonify({'uptime': 'Running', 'services': {'Database': {'status': 'Online', 'response_code': 200, 'latency': f"{round((time.time() - start_time) * 1000, 2)}ms"}, 'Server': {'status': 'Online', 'response_code': 200}}, 'configuration': {'Stripe': 'Set' if os.getenv('STRIPE_SECRET_KEY') else 'Missing', 'Supabase': 'Set' if os.getenv('SUPABASE_URL') else 'Missing', 'Anthropic': 'Set' if os.getenv('ANTHROPIC_API_KEY') else 'Missing'}}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
 
@@ -586,8 +624,8 @@ def get_stats():
 @admin_bp.route('/api/admin/recruiters/stats', methods=['GET'])
 def get_recruiters_stats():
     try:
-        paid_res = requests.get(f"{SUPABASE_URL}/rest/v1/recruiters?select=id", headers=_get_headers())
-        free_res = requests.get(f"{SUPABASE_URL}/rest/v1/freemium_recruiters?select=id", headers=_get_headers())
+        paid_res = requests.get(f"{SUPABASE_URL}/rest/v1/recruiters?select=id", headers=_read_headers())
+        free_res = requests.get(f"{SUPABASE_URL}/rest/v1/freemium_recruiters?select=id", headers=_read_headers())
         paid_count = len(paid_res.json()) if paid_res.status_code in [200, 206] else 0
         free_count = len(free_res.json()) if free_res.status_code in [200, 206] else 0
         return jsonify({'paid_count': paid_count, 'freemium_count': free_count, 'total_count': paid_count + free_count}), 200
@@ -630,7 +668,7 @@ def delete_recruiter_by_email():
 @admin_bp.route('/api/admin/plans', methods=['GET'])
 def get_plans():
     try: 
-        resp = requests.get(f"{SUPABASE_URL}/rest/v1/plans?select=*", headers=_get_headers())
+        resp = requests.get(f"{SUPABASE_URL}/rest/v1/plans?select=*", headers=_read_headers())
         return jsonify({'plans': resp.json() if resp.status_code in [200, 206] else []}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
 
@@ -661,15 +699,13 @@ def get_user_count():
 @admin_bp.route('/api/admin/app-registered-recruiters/pending-count', methods=['GET'])
 def get_pending_recruiters_count():
     try:
-        # Fetch status to count non-added rows
         res = requests.get(
             f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?select=id,status",
-            headers=_get_headers()
+            headers=_read_headers()
         )
         
         if res.status_code in [200, 206]:
             data = res.json()
-            # Count anything where status is NOT 'added' (handles nulls gracefully)
             count = sum(1 for r in data if r.get('status') != 'added')
             return jsonify({'pending_count': count}), 200
             
@@ -684,7 +720,7 @@ def get_app_registered_recruiters():
     try:
         response = requests.get(
             f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?select=*&order=created_at.desc",
-            headers=_get_headers()
+            headers=_read_headers()
         )
         if response.status_code in [200, 206]:
             return jsonify({"success": True, "data": response.json()}), 200
@@ -698,28 +734,24 @@ def get_app_registered_recruiters():
 @admin_bp.route('/api/admin/app-registered-recruiters/<string:recruiter_id>/approve', methods=['POST'])
 def approve_app_registered_recruiter(recruiter_id):
     try:
-        # 1. Get the recruiter details
         rec_response = requests.get(
             f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?id=eq.{recruiter_id}&select=*",
-            headers=_get_headers()
+            headers=_read_headers()
         )
         if rec_response.status_code not in [200, 206] or not rec_response.json():
             return jsonify({"success": False, "error": "Recruiter not found"}), 404
             
         recruiter = rec_response.json()[0]
-        
         email = recruiter.get('work_email') or recruiter.get('email')
         
         if not email:
             return jsonify({"success": False, "error": "No email found for this recruiter"}), 400
 
-        # 2. Check if the email already exists in the main recruiters table
         existing_response = requests.get(
             f"{SUPABASE_URL}/rest/v1/recruiters?email=eq.{email}&select=*",
-            headers=_get_headers()
+            headers=_read_headers()
         )
         if existing_response.status_code in [200, 206] and existing_response.json():
-            # Already exists, just mark as added
             requests.patch(
                 f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?id=eq.{recruiter_id}",
                 json={'status': 'added'},
@@ -727,8 +759,6 @@ def approve_app_registered_recruiter(recruiter_id):
             )
             return jsonify({"success": True, "message": "Recruiter already exists. Status updated."}), 200
              
-        # 3. Insert into the main `recruiters` table 
-        # ✅ FIXED: Removing `company` as it doesn't exist in the recruiters table
         new_recruiter = {
             'email': email,
             'is_active': True,
@@ -744,7 +774,6 @@ def approve_app_registered_recruiter(recruiter_id):
         if insert_response.status_code not in [200, 201, 204]:
             return jsonify({"success": False, "error": f"Failed to add to recruiters: {insert_response.text}"}), 500
         
-        # 4. Update the status in the app_registered_recruiters table
         update_response = requests.patch(
             f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?id=eq.{recruiter_id}",
             json={'status': 'added'},
