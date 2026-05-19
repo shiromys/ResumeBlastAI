@@ -72,8 +72,8 @@ function HowItWorksPage({ onGetStarted }) {
             <div className="hiw-step-icon">📧</div>
             <h2 className="hiw-step-title">3-Wave Drip Campaign</h2>
             <p className="hiw-step-desc">
-              Your resume is sent in three strategic waves — Day 1 introduction,
-              Day 4 follow-up, Day 8 final reminder. This multi-touch approach
+              Your resume is sent in three automatic waves — an introduction,
+              a follow-up, and a final reminder. This multi-touch approach
               dramatically increases recruiter response rates vs a single email.
             </p>
           </div>
@@ -99,34 +99,55 @@ function HowItWorksPage({ onGetStarted }) {
           Your unique competitive advantage — no other resume service does this
         </p>
         <div className="hiw-waves">
+
           <div className="hiw-wave">
             <div className="hiw-wave-badge">Wave 1</div>
-            <div className="hiw-wave-day">Day 1</div>
+            <div className="hiw-wave-trigger">
+              <span className="hiw-wave-trigger-icon">▶</span>
+              Starts immediately after payment
+            </div>
             <h3>First Impression</h3>
             <p>
-              Professional introductory email sent to all matched recruiters.
-              Your resume is attached and your key skills are highlighted.
+              Your resume is introduced to every recruiter in your plan — professionally
+              formatted, with your key skills and role highlighted.
             </p>
           </div>
+
+          <div className="hiw-wave-arrow" aria-hidden="true">→</div>
+
           <div className="hiw-wave">
             <div className="hiw-wave-badge">Wave 2</div>
-            <div className="hiw-wave-day">Day 4</div>
+            <div className="hiw-wave-trigger">
+              <span className="hiw-wave-trigger-icon">◷</span>
+              After Wave 1 completes
+            </div>
             <h3>Strategic Follow-Up</h3>
             <p>
-              A personalised follow-up goes to recruiters who have not yet responded,
-              keeping you top-of-mind without any manual effort from you.
+              A personalised follow-up reaches the same recruiters, keeping you
+              top-of-mind without any manual effort on your part.
             </p>
           </div>
+
+          <div className="hiw-wave-arrow" aria-hidden="true">→</div>
+
           <div className="hiw-wave">
             <div className="hiw-wave-badge">Wave 3</div>
-            <div className="hiw-wave-day">Day 8</div>
+            <div className="hiw-wave-trigger">
+              <span className="hiw-wave-trigger-icon">◷</span>
+              After Wave 2 completes
+            </div>
             <h3>Final Touchpoint</h3>
             <p>
               A concise final reminder closes the campaign loop, giving recruiters
-              one last opportunity to engage before the wave ends.
+              one last opportunity to engage before the campaign ends.
             </p>
           </div>
+
         </div>
+        <p className="hiw-wave-footnote">
+          All waves run automatically — no manual action needed after payment.
+          Campaign duration varies by plan.
+        </p>
       </div>
 
       {/* CTA */}

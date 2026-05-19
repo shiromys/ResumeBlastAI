@@ -127,20 +127,47 @@
 }
 
 .hiw-waves {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 20px;
-  max-width: 900px;
-  margin: 0 auto;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0;
+  max-width: 960px;
+  margin: 0 auto 20px;
 }
 
 .hiw-wave {
+  flex: 1;
   background: #fff;
   border: 1px solid #FEE2E2;
   border-left: 4px solid #DC2626;
-  border-radius: 12px;
+  border-radius: 12px 0 0 12px;
   padding: 24px;
   text-align: left;
+}
+
+.hiw-wave + .hiw-wave-arrow + .hiw-wave {
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+}
+
+.hiw-wave:last-child {
+  border-radius: 0 12px 12px 0;
+  border-right: 1px solid #FEE2E2;
+  border-left: none;
+}
+
+.hiw-wave-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  flex-shrink: 0;
+  font-size: 18px;
+  color: #DC2626;
+  background: #FFF5F5;
+  border-top: 1px solid #FEE2E2;
+  border-bottom: 1px solid #FEE2E2;
 }
 
 .hiw-wave-badge {
@@ -151,19 +178,30 @@
   font-weight: 700;
   padding: 3px 10px;
   border-radius: 20px;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
   letter-spacing: 0.05em;
 }
 
-.hiw-wave-day {
-  font-size: 13px;
+.hiw-wave-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
   color: #6B7280;
-  margin-bottom: 10px;
-  font-weight: 500;
+  background: #F9FAFB;
+  border-radius: 6px;
+  padding: 4px 10px;
+  margin-bottom: 14px;
+  width: fit-content;
+}
+
+.hiw-wave-trigger-icon {
+  font-size: 10px;
+  color: #9CA3AF;
 }
 
 .hiw-wave h3 {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: #111827;
   margin-bottom: 8px;
@@ -174,6 +212,29 @@
   color: #4B5563;
   line-height: 1.65;
   margin: 0;
+}
+
+.hiw-wave-footnote {
+  font-size: 13px;
+  color: #9CA3AF;
+  margin-top: 16px;
+}
+
+@media (max-width: 768px) {
+  .hiw-waves {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .hiw-wave,
+  .hiw-wave + .hiw-wave-arrow + .hiw-wave,
+  .hiw-wave:last-child {
+    border-radius: 12px;
+    border: 1px solid #FEE2E2;
+    border-left: 4px solid #DC2626;
+  }
+  .hiw-wave-arrow {
+    display: none;
+  }
 }
 
 /* CTA */
