@@ -25,27 +25,40 @@ def get_db_headers():
         "Prefer": "return=representation"
     }
 
+# ── CHANGE 1: returns 6 values with correct field names ──────────────────────
 def fetch_candidate_details_from_db(resume_url):
-    """Fetch candidate details from DB using resume URL."""
+    """
+    Fetch ALL candidate details from DB using resume URL.
+    Returns 6 values: name, email, role, skills, years, location.
+    Uses correct field names as stored by analyze.py:
+      top_skills, years_of_experience (NOT key_skills / years_experience)
+    """
+    def clean(v):
+        return None if v in [None, "", "Not Found", "Not Specified"] else v
+
     try:
         if not resume_url:
-            return None, None, None
+            return None, None, None, None, None, None
         r = requests.get(
             f"{SUPABASE_URL}/rest/v1/resumes?file_url=eq.{resume_url}&select=analysis_data",
             headers=get_db_headers()
         )
         if r.status_code == 200 and r.json():
-            a = r.json()[0].get("analysis_data", {})
-            n  = a.get("candidate_name")
-            e  = a.get("candidate_email")
-            ro = a.get("detected_role")
-            if n  in ["Not Found", None, ""]: n  = None
-            if e  in ["Not Found", None, ""]: e  = None
-            if ro in ["Not Found", None, ""]: ro = None
-            return n, e, ro
-        return None, None, None
+            a  = r.json()[0].get("analysis_data", {})
+            n  = clean(a.get("candidate_name"))
+            e  = clean(a.get("candidate_email"))
+            ro = clean(a.get("detected_role"))
+            # correct field names matching analyze.py output
+            sk = clean(a.get("top_skills"))           # was missing
+            yr = clean(a.get("years_of_experience"))  # was missing
+            lo = clean(a.get("location"))             # was missing
+            # top_skills is a list in the DB — join to string for email template
+            if isinstance(sk, list):
+                sk = ", ".join(sk) if sk else None
+            return n, e, ro, sk, yr, lo
+        return None, None, None, None, None, None
     except:
-        return None, None, None
+        return None, None, None, None, None, None
 
 def get_plan_limit(plan_name):
     """Get recruiter limit for a plan, with fallback defaults."""
@@ -208,16 +221,20 @@ def send_blast_internal(
         # ── Get plan limit ──
         plan_limit = get_plan_limit(plan_name)
 
-        # ── Fetch candidate details from DB (overrides caller data if found) ──
-        db_name, db_email, db_role = fetch_candidate_details_from_db(resume_url)
-        final_name  = db_name  or candidate_name or "Professional Candidate"
-        final_email = db_email or candidate_email or ""
-        final_role  = db_role  or job_role or "Professional"
+        # ── CHANGE 2: unpack 6 values from fetch_candidate_details_from_db ──
+        db_name, db_email, db_role, db_skills, db_years, db_location = \
+            fetch_candidate_details_from_db(resume_url)
+        final_name     = db_name     or candidate_name  or "Professional Candidate"
+        final_email    = db_email    or candidate_email or ""
+        final_role     = db_role     or job_role        or "Professional"
+        final_skills   = db_skills   or key_skills      or ""
+        final_years    = db_years    or years_experience or ""
+        final_location = db_location or location        or "Remote"
 
         print(f"[Blast] Candidate: {final_name} | {final_role} | {final_email}")
         print(f"[Blast] User type: {user_type} | Plan limit: {plan_limit}")
 
-        # ── Create drip campaign record ──
+        # ── CHANGE 3: pass final_* values to create_drip_campaign ────────────
         drip_result = create_drip_campaign({
             "user_id":           user_id,
             "user_type":         user_type,
@@ -229,9 +246,9 @@ def send_blast_internal(
             "job_role":          final_role,
             "resume_url":        resume_url,
             "resume_name":       resume_name,
-            "years_experience":  years_experience,
-            "key_skills":        key_skills,
-            "location":          location,
+            "years_experience":  final_years,
+            "key_skills":        final_skills,
+            "location":          final_location,
             "total_recruiters":  plan_limit,
         })
 
@@ -300,7 +317,7 @@ def send_freemium_blast():
         if len(cr.json()) > 0:
             return jsonify({"success": False, "error": "Free blast already used. Please upgrade."}), 403
 
-        db_name, db_email, db_role = fetch_candidate_details_from_db(resume_url)
+        db_name, db_email, db_role, _, _, _ = fetch_candidate_details_from_db(resume_url)
         candidate_data = {
             "candidate_name":  db_name  or data.get("candidate_name", "Candidate"),
             "candidate_email": db_email or data.get("candidate_email", ""),
