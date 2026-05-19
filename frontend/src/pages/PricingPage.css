@@ -6,14 +6,13 @@
   font-family: Inter, -apple-system, sans-serif;
 }
 
-/* Header */
+/* ── Header ── */
 .pp-header {
   text-align: center;
   padding: 80px 20px 60px;
   background: linear-gradient(135deg, #FFF5F5 0%, #FFFFFF 100%);
   border-bottom: 1px solid #FEE2E2;
 }
-
 .pp-label {
   font-size: 13px;
   font-weight: 700;
@@ -22,7 +21,6 @@
   text-transform: uppercase;
   margin-bottom: 12px;
 }
-
 .pp-title {
   font-size: clamp(2rem, 5vw, 3rem);
   font-weight: 800;
@@ -30,7 +28,6 @@
   margin-bottom: 16px;
   line-height: 1.15;
 }
-
 .pp-subtitle {
   font-size: 1.05rem;
   color: #6B7280;
@@ -39,151 +36,260 @@
   line-height: 1.65;
 }
 
-/* Cards */
+/* ── Sections ── */
+.pp-section {
+  padding: 56px 20px 40px;
+}
+.pp-section-power {
+  background: #F9FAFB;
+  border-top: 1px solid #E5E7EB;
+  border-bottom: 1px solid #E5E7EB;
+}
+.pp-section-label {
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #DC2626;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.pp-section-sub {
+  text-align: center;
+  font-size: 14px;
+  color: #6B7280;
+  margin: 0 auto 32px;
+  max-width: 480px;
+}
+
+/* ── Card wrapper grids ── */
 .pp-cards-wrapper {
-  padding: 60px 20px;
-  max-width: 1000px;
+  max-width: 1100px;
   margin: 0 auto;
 }
-
 .pp-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 24px;
+  gap: 22px;
   align-items: stretch;
 }
+.pp-cards-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+.pp-cards-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
 
+/* ── Individual card ── */
 .pp-card {
   background: #fff;
   border: 1.5px solid #E5E7EB;
   border-radius: 16px;
-  padding: 32px 24px;
+  padding: 28px 22px;
   display: flex;
   flex-direction: column;
   position: relative;
   transition: box-shadow 0.2s;
 }
-
 .pp-card:hover {
   box-shadow: 0 8px 24px rgba(0,0,0,0.08);
 }
-
 .pp-card-featured {
   border-color: #DC2626;
   border-width: 2px;
   box-shadow: 0 12px 32px rgba(220,38,38,0.12);
+  background: #DC2626;
+}
+.pp-card-featured .pp-plan-name,
+.pp-card-featured .pp-price-main,
+.pp-card-featured .pp-plan-desc,
+.pp-card-featured .pp-features li {
+  color: #fff;
+}
+.pp-card-featured .pp-price-period {
+  color: #FCA5A5;
+}
+.pp-card-disabled {
+  opacity: 0.72;
+}
+.pp-card-disabled:hover {
+  box-shadow: none;
 }
 
+/* ── Badges ── */
 .pp-badge {
   position: absolute;
   top: -13px;
-  left: 24px;
-  background: #DC2626;
-  color: white;
+  left: 22px;
   font-size: 11px;
   font-weight: 700;
   padding: 4px 12px;
   border-radius: 20px;
   letter-spacing: 0.06em;
 }
-
-.pp-card-header { margin-bottom: 20px; }
-
-.pp-plan-name {
-  font-size: 20px;
-  font-weight: 700;
-  color: #111827;
-  margin-bottom: 12px;
+.pp-badge-featured {
+  background: #fff;
+  color: #DC2626;
+}
+.pp-badge-alt {
+  background: #DC2626;
+  color: #fff;
 }
 
+/* ── Card header ── */
+.pp-card-header { margin-bottom: 18px; }
+.pp-plan-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111827;
+  margin-bottom: 10px;
+}
 .pp-price {
   display: flex;
   align-items: baseline;
   gap: 6px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
-
 .pp-price-main {
-  font-size: 40px;
+  font-size: 36px;
   font-weight: 800;
   color: #111827;
   line-height: 1;
 }
-
 .pp-price-period {
-  font-size: 14px;
+  font-size: 13px;
   color: #6B7280;
 }
-
 .pp-plan-desc {
-  font-size: 14px;
+  font-size: 13px;
   color: #6B7280;
   line-height: 1.55;
   margin: 0;
 }
 
+/* ── Buttons ── */
 .pp-btn {
   width: 100%;
-  padding: 13px;
+  padding: 12px;
   border-radius: 8px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   transition: all 0.2s;
   border: none;
 }
-
 .pp-btn-primary {
   background: #DC2626;
-  color: white;
+  color: #fff;
 }
-
-.pp-btn-primary:hover {
-  background: #B91C1C;
+.pp-btn-primary:hover { background: #B91C1C; }
+.pp-btn-featured {
+  background: #fff;
+  color: #DC2626;
 }
-
+.pp-btn-featured:hover { background: #FEE2E2; }
 .pp-btn-outline {
-  background: white;
+  background: #fff;
   color: #374151;
   border: 1.5px solid #D1D5DB;
 }
-
-.pp-btn-outline:hover {
-  background: #F9FAFB;
+.pp-btn-outline:hover { background: #F9FAFB; }
+.pp-btn-disabled {
+  background: #E5E7EB;
+  color: #9CA3AF;
+  cursor: not-allowed;
 }
 
+/* ── Feature list ── */
 .pp-features {
   list-style: none;
   padding: 0;
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 9px;
   flex: 1;
 }
-
 .pp-features li {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  font-size: 14px;
+  gap: 9px;
+  font-size: 13px;
   color: #4B5563;
   line-height: 1.45;
 }
+.pp-check { color: #059669; font-weight: 700; flex-shrink: 0; }
+.pp-check-white { color: #fff; }
 
-.pp-check {
-  color: #059669;
+/* ── Recruiter reach comparison ── */
+.pp-compare {
+  padding: 56px 20px;
+  max-width: 700px;
+  margin: 0 auto;
+}
+.pp-compare-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #111827;
+  text-align: center;
+  margin-bottom: 32px;
+}
+.pp-compare-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pp-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.pp-bar-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  min-width: 90px;
+}
+.pp-bar-track {
+  flex: 1;
+  background: #F3F4F6;
+  border-radius: 6px;
+  height: 10px;
+  overflow: hidden;
+}
+.pp-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.4s ease;
+}
+.pp-bar-active { background: #DC2626; }
+.pp-bar-soon   { background: #D1D5DB; }
+.pp-bar-count {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  min-width: 60px;
+  text-align: right;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.pp-bar-tag {
+  font-size: 10px;
   font-weight: 700;
-  flex-shrink: 0;
+  color: #9CA3AF;
+  background: #F3F4F6;
+  padding: 2px 6px;
+  border-radius: 10px;
+  letter-spacing: 0.04em;
 }
 
-/* FAQ */
+/* ── FAQ ── */
 .pp-faq {
   background: #F9FAFB;
   padding: 60px 20px;
 }
-
 .pp-faq h2 {
   font-size: 1.75rem;
   font-weight: 800;
@@ -191,27 +297,22 @@
   text-align: center;
   margin-bottom: 36px;
 }
-
 .pp-faq-list {
   max-width: 680px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 0;
 }
-
 .pp-faq-item {
   border-bottom: 1px solid #E5E7EB;
   padding: 18px 0;
 }
-
 .pp-faq-item dt {
   font-size: 15px;
   font-weight: 700;
   color: #111827;
   margin-bottom: 8px;
 }
-
 .pp-faq-item dd {
   font-size: 14px;
   color: #4B5563;
@@ -219,25 +320,22 @@
   margin: 0;
 }
 
-/* CTA */
+/* ── CTA ── */
 .pp-cta {
   text-align: center;
   padding: 70px 20px;
 }
-
 .pp-cta h2 {
   font-size: clamp(1.5rem, 3vw, 2rem);
   font-weight: 800;
   color: #111827;
   margin-bottom: 10px;
 }
-
 .pp-cta p {
   font-size: 1rem;
   color: #6B7280;
   margin-bottom: 28px;
 }
-
 .pp-cta-buttons {
   display: flex;
   align-items: center;
@@ -245,7 +343,6 @@
   gap: 16px;
   flex-wrap: wrap;
 }
-
 .pp-secondary-btn {
   font-size: 15px;
   font-weight: 600;
@@ -256,8 +353,13 @@
   border-radius: 8px;
   transition: all 0.2s;
 }
+.pp-secondary-btn:hover { background: #DC2626; color: #fff; }
 
-.pp-secondary-btn:hover {
-  background: #DC2626;
-  color: white;
+/* ── Responsive ── */
+@media (max-width: 1024px) {
+  .pp-cards-4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+  .pp-cards-3 { grid-template-columns: 1fr; }
+  .pp-cards-4 { grid-template-columns: 1fr; }
 }
