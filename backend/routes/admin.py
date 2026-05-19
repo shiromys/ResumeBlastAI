@@ -27,10 +27,11 @@ def _get_headers():
     }
 
 def _read_headers():
-    """For read operations (GET) — no Prefer header to avoid PostgREST quirks."""
+    """For read operations (GET) — Accept:application/json required by PostgREST."""
     return {
         'apikey':        SUPABASE_KEY,
         'Authorization': f'Bearer {SUPABASE_KEY}',
+        'Accept':        'application/json',
     }
 
 # ── CHANGE 2: use _read_headers() inside get_all_rows ────────────────────────
@@ -80,23 +81,41 @@ def get_all_rows(table, query=''):
 # =========================================================
 # 1. REVENUE ANALYTICS
 # =========================================================
-# ── CHANGE 3: revenue function uses initiated_at as authoritative date ────────
-# Recovery script set created_at = now() for all historical payments.
-# initiated_at holds the real original payment date from Stripe.
+# 1. REVENUE ANALYTICS
+# =========================================================
 @admin_bp.route('/api/admin/revenue', methods=['GET'])
 def get_revenue():
     try:
         start_date_str = request.args.get('start_date')
-        end_date_str = request.args.get('end_date')
+        end_date_str   = request.args.get('end_date')
 
-        # ✅ FIX: also fetch initiated_at and completed_at for date logic
-        query = (
-            'select=id,amount,status,created_at,initiated_at,'
-            'completed_at,refund_amount,user_email,'
-            'stripe_payment_intent_id,plan_name'
-        )
-        all_payments = get_all_rows('payments', query)
-        print(f"[Revenue] Fetched {len(all_payments)} total payment rows")
+        # Direct Supabase query with full logging
+        all_payments = []
+        offset = 0
+        limit  = 1000
+        while True:
+            url = (
+                f"{SUPABASE_URL}/rest/v1/payments"
+                f"?select=id,amount,status,created_at,initiated_at,"
+                f"completed_at,refund_amount,user_email,"
+                f"stripe_payment_intent_id,plan_name"
+                f"&limit={limit}&offset={offset}"
+            )
+            resp = requests.get(url, headers=_read_headers(), timeout=15)
+            print(f"[Revenue] Supabase GET status={resp.status_code} offset={offset}")
+            if resp.status_code not in [200, 206]:
+                print(f"[Revenue] ERROR: {resp.status_code} {resp.text[:300]}")
+                break
+            batch = resp.json()
+            if not isinstance(batch, list):
+                print(f"[Revenue] Unexpected type: {type(batch)} {str(batch)[:200]}")
+                break
+            all_payments.extend(batch)
+            print(f"[Revenue] Batch {len(batch)}, total {len(all_payments)}")
+            if len(batch) < limit:
+                break
+            offset += limit
+        print(f"[Revenue] Total rows: {len(all_payments)}")
 
         now = datetime.now(timezone.utc)
         today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
