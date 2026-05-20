@@ -54,29 +54,48 @@ function PaymentBlastTrigger() {
     }
 
     // ── REGISTERED USER WORKFLOW ─────────────────────────────────────────────
-    // ✅ FIX: Before reading localStorage, check if the Stripe webhook already
-    // created the blast_campaign for this session. The webhook now fires
-    // send_blast_internal() server-side on every payment — so by the time the
-    // user's browser lands on this page, the campaign is often already running.
-    // If so, skip the frontend blast entirely and go straight to dashboard.
-    try {
-      const checkResp = await fetch(
-        `${API_URL}/api/blast/check-session?session_id=${encodeURIComponent(sessionId)}`
-      );
-      if (checkResp.ok) {
-        const checkData = await checkResp.json();
-        if (checkData.already_processed) {
-          console.log('[PaymentBlastTrigger] Webhook already fired blast — going to dashboard');
-          localStorage.removeItem('pending_blast_resume_data');
-          localStorage.removeItem('pending_blast_config');
-          window.location.href = '/dashboard';
-          return;
+    // The Stripe webhook fires server-side and writes a campaign record within
+    // seconds of payment. We wait 8 seconds then check 3 times (5s apart)
+    // before falling through to the localStorage frontend-blast path.
+    // This prevents the race condition where both webhook + frontend blast
+    // simultaneously because the frontend checked before the webhook wrote.
+    const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+    // Wait 8 seconds — gives webhook time to write its placeholder record
+    setStatusText('Confirming your payment...');
+    await sleep(8000);
+
+    let webhookProcessed = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const checkResp = await fetch(
+          `${API_URL}/api/blast/check-session?session_id=${encodeURIComponent(sessionId)}`
+        );
+        if (checkResp.ok) {
+          const checkData = await checkResp.json();
+          if (checkData.already_processed) {
+            console.log(`[PaymentBlastTrigger] Webhook confirmed (attempt ${attempt}) — going to dashboard`);
+            webhookProcessed = true;
+            break;
+          }
         }
+      } catch (checkErr) {
+        console.warn(`[PaymentBlastTrigger] Session check attempt ${attempt} failed:`, checkErr);
       }
-    } catch (checkErr) {
-      // Non-blocking — if the check fails, fall through to the localStorage path
-      console.warn('[PaymentBlastTrigger] Session check failed, trying localStorage path:', checkErr);
+      if (attempt < 3) {
+        console.log(`[PaymentBlastTrigger] Webhook not yet confirmed (attempt ${attempt}) — retrying in 5s`);
+        await sleep(5000);
+      }
     }
+
+    if (webhookProcessed) {
+      localStorage.removeItem('pending_blast_resume_data');
+      localStorage.removeItem('pending_blast_config');
+      window.location.href = '/dashboard';
+      return;
+    }
+
+    console.log('[PaymentBlastTrigger] Webhook did not fire after 23s — using frontend fallback path');
 
     // Registered users upload resume BEFORE payment.
     // pending_blast_resume_data must be set by BlastConfig before Stripe redirect.

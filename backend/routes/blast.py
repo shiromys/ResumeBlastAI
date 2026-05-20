@@ -214,6 +214,39 @@ def send_blast_internal(
                         "plan_used": plan_name,
                     }
 
+        # ── SECOND GUARD: user_id + recent timestamp ─────────────────────────
+        # Catches cases where stripe_session_id might differ between webhook
+        # and frontend (e.g. webhook has session, frontend call does not).
+        # Checks for any campaign created for same user in last 10 minutes.
+        if user_id and str(user_id).strip() not in ["", "None", "null", "undefined"]:
+            from datetime import datetime, timedelta, timezone
+            ten_min_ago = (
+                datetime.now(timezone.utc) - timedelta(minutes=10)
+            ).isoformat()
+            recent = requests.get(
+                f"{SUPABASE_URL}/rest/v1/blast_campaigns"
+                f"?user_id=eq.{user_id}"
+                f"&initiated_at=gte.{ten_min_ago}"
+                f"&select=id,status,stripe_session_id",
+                headers=get_db_headers()
+            )
+            if recent.status_code == 200 and recent.json():
+                existing_camp = recent.json()[0]
+                # Only skip if it is not just our own placeholder (status=processing)
+                # or if it belongs to a DIFFERENT session (real duplicate)
+                existing_session = existing_camp.get("stripe_session_id", "")
+                if (existing_session and existing_session != stripe_session) or                    existing_camp.get("status") not in ["processing", None, ""]:
+                    print(f"[Blast] ⛔ Recent campaign found for user {user_id} "
+                          f"(id={existing_camp['id']}, session={existing_session[:20] if existing_session else 'none'}) "
+                          f"— duplicate blast prevented")
+                    return {
+                        "success":          True,
+                        "already_processed": True,
+                        "drip_campaign_id":  existing_camp["id"],
+                        "message":           "Blast already initiated for this user recently.",
+                        "plan_used":         plan_name,
+                    }
+
         # ── Determine user type ──
         is_guest    = str(user_id).startswith("guest_")
         user_type   = "guest" if is_guest else "registered"

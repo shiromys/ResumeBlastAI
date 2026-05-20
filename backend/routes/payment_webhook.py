@@ -189,9 +189,17 @@ def handle_checkout_completed(session: dict):
                 resume_url = found_resume_record.get("file_url", "")
                 
                 # Rehydrate metadata attributes if empty
-                analysis_data = found_resume_record.get("analysis_data", {})
-                if not candidate_name: candidate_name = analysis_data.get("candidate_name", "")
-                if not job_role:       job_role = analysis_data.get("detected_role", "")
+                analysis_data = found_resume_record.get("analysis_data") or {}
+                # Use 'or' not .get(key, default) — when key exists with None value,
+                # .get() returns None and ignores the default.
+                # 'or' correctly falls back on both None AND empty string.
+                if not candidate_name:
+                    candidate_name = analysis_data.get("candidate_name") or ""
+                if not job_role:
+                    job_role = analysis_data.get("detected_role") or ""
+                if not location:
+                    location = analysis_data.get("location") or "Remote"
+                print(f"[Webhook] Recovered: name={candidate_name!r} role={job_role!r} location={location!r}")
                 print(f"[Webhook] Dynamic Recovery successful! Pulled target asset: {resume_url}")
         except Exception as e:
             print(f"[Webhook] ⚠️ Asset collection lookup fault (non-blocking): {e}")
