@@ -4,13 +4,40 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- ── Google Tag Manager ── -->
+    <!-- ══════════════════════════════════════════════
+         ✅ FIX 1: Google Tag Manager
+         Both head + noscript now use the SAME ID: GT-5TPPGPSVX
+         NOTE: If your GTM dashboard shows GTM-XXXXXXX format,
+         replace GT-5TPPGPSVX below with that GTM-XXXXXXX ID
+    ══════════════════════════════════════════════ -->
     <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
     new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
     j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
     'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
     })(window,document,'script','dataLayer','GT-5TPPGPSVX');</script>
-    <!-- ── End Google Tag Manager ── -->
+    <!-- End Google Tag Manager -->
+
+    <!-- ══════════════════════════════════════════════
+         ✅ FIX 2: Microsoft Bing Ads UET Tag (Direct)
+         Added directly since GA4 is already working directly.
+         REPLACE: uetq tag ID below with your actual UET Tag ID
+         from Microsoft Ads → Tools → UET Tags
+    ══════════════════════════════════════════════ -->
+    <script>
+      (function(w,d,t,r,u){
+        var f,n,i;
+        w[u]=w[u]||[],f=function(){
+          var o={ti:"YOUR_UET_TAG_ID_HERE"};  /* ← Replace with your UET Tag ID */
+          o.q=w[u],w[u]=new UET(o),w[u].push("pageLoad")
+        },
+        n=d.createElement(t),n.src=r,n.async=1,n.onload=n.onreadystatechange=function(){
+          var s=this.readyState;
+          s&&s!=="loaded"&&s!=="complete"||(f(),n.onload=n.onreadystatechange=null)
+        },
+        i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i)
+      })(window,document,"script","//bat.bing.com/bat.js","uetq");
+    </script>
+    <!-- End Microsoft UET Tag -->
 
     <title>AI Recruiter Outreach Platform | Send Your Resume Directly to Recruiters — ResumeBlast.ai</title>
     <meta name="description" content="ResumeBlast.ai sends your resume directly to verified recruiters via AI-powered 3-wave email campaigns. Reach 250–500 recruiters automatically. Start free — no credit card needed." />
@@ -19,6 +46,7 @@
     <meta name="robots" content="index, follow" />
     <link rel="canonical" href="https://resumeblast.ai/" />
 
+    <!-- Open Graph -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://resumeblast.ai/" />
     <meta property="og:site_name" content="ResumeBlast.ai" />
@@ -29,15 +57,18 @@
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="ResumeBlast.ai — AI-powered 3-wave recruiter outreach" />
 
+    <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:site" content="@ResumeBlastAI" />
     <meta name="twitter:title" content="AI Recruiter Outreach Platform | ResumeBlast.ai" />
     <meta name="twitter:description" content="Send your resume directly to verified recruiters via 3-wave drip campaigns. Start free." />
     <meta name="twitter:image" content="https://resumeblast.ai/og-image.jpg" />
 
+    <!-- Favicon -->
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/favicon.png" />
 
+    <!-- Schema: Organization -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -59,6 +90,7 @@
     }
     </script>
 
+    <!-- Schema: SoftwareApplication -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -77,13 +109,19 @@
     </script>
 
   </head>
+
   <body>
-    <!-- ── Google Tag Manager (noscript) ── -->
-    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GT-MRM77899"
+
+    <!-- ══════════════════════════════════════════════
+         ✅ FIX 1 (noscript): SAME ID as <head> script above
+         Was: GT-MRM77899 ❌  →  Now: GT-5TPPGPSVX ✅
+    ══════════════════════════════════════════════ -->
+    <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GT-5TPPGPSVX"
     height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
-    <!-- ── End Google Tag Manager (noscript) ── -->
+    <!-- End Google Tag Manager (noscript) -->
 
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+
   </body>
 </html>
