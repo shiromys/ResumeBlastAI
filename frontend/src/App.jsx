@@ -22,6 +22,7 @@ import LegalPage from './components/LegalPage'
 import EmployerNetwork from './components/EmployerNetwork' // ✅ NEW
 import HowItWorksPage from './pages/HowItWorksPage'
 import PricingPage from './pages/PricingPage'
+import ScrollToTop from './components/ScrollToTop' // ✅ ADDED
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
@@ -316,6 +317,7 @@ function App() {
 
   return (
     <div className="app-wrapper">
+      <ScrollToTop /> {/* ✅ ADDED — fixes scroll position on all page navigations */}
       <GoogleAnalytics />
       <PaymentSuccessHandler />
       <PaymentBlastTrigger />
