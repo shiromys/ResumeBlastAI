@@ -5,6 +5,13 @@ Checks blast_campaigns table for Wave 1, Wave 2, and Wave 3 emails due.
 Works for both registered and guest users.
 
 DAILY QUOTA ENFORCED: Max 50 emails per campaign per wave per calendar day.
+
+WAVE TRIGGER LOGIC:
+  Wave 1 → starts immediately when campaign is created (status=active)
+  Wave 2 → starts automatically the next business-hours tick AFTER Wave 1 completes
+  Wave 3 → starts automatically the next business-hours tick AFTER Wave 2 completes
+  No fixed scheduled dates used — waves chain directly on completion.
+  Weekends and non-business hours are skipped for Wave 2 and Wave 3.
 """
 import os, time, requests
 from datetime import datetime
@@ -150,7 +157,7 @@ def _fetch_recruiters_for_plan(plan_name: str, offset: int = 0, batch_size: int 
     )
 
     resp = requests.get(url, headers=_headers())
-    
+
     if resp.status_code not in [200, 206]:
         print(f"[Scheduler] Failed to fetch recruiters: {resp.status_code}")
         print(f"[Scheduler] SUPABASE ERROR DETAILS: {resp.text}")
@@ -158,13 +165,13 @@ def _fetch_recruiters_for_plan(plan_name: str, offset: int = 0, batch_size: int 
 
     need = min(batch_size, remaining)
     seen, result = set(), []
-    
+
     for r in resp.json():
         # Safely extract email. If it's missing or null, skip this row.
         email = r.get("email")
         if not email:
             continue
-            
+
         email = str(email).strip().lower()
         if email and email not in seen:
             seen.add(email)
@@ -315,9 +322,39 @@ def _update_campaign_after_wave(campaign_id: str, drip_day: int, stats: dict):
 
     if wave_complete:
         update[fields["sent_at"]] = now
-        if drip_day == 8:
+
+        # ✅ FIX 3: Initialize next wave status to 'pending' when current wave
+        # completes. This prevents drip_day2_status / drip_day3_status from
+        # staying NULL and ensures the next wave is picked up on the very next
+        # business-hours scheduler tick — no fixed scheduled dates needed.
+        if drip_day == 1:
+            # Wave 1 complete → initialize Wave 2 and Wave 3 as pending
+            # Wave 2 will be picked up on the next business-hours tick automatically
+            update["drip_day2_status"] = "pending"
+            update["drip_day3_status"] = "pending"
+            print(f"[Scheduler] Wave 1 COMPLETE -- "
+                  f"drip_day2_status & drip_day3_status set to 'pending' "
+                  f"-- Wave 2 will start next business-hours tick "
+                  f"-- campaign={campaign_id}")
+
+        elif drip_day == 4:
+            # Wave 2 complete → ensure Wave 3 is pending
+            # Wave 3 will be picked up on the next business-hours tick automatically
+            update["drip_day3_status"] = "pending"
+            print(f"[Scheduler] Wave 2 COMPLETE -- "
+                  f"drip_day3_status set to 'pending' "
+                  f"-- Wave 3 will start next business-hours tick "
+                  f"-- campaign={campaign_id}")
+
+        elif drip_day == 8:
+            # Wave 3 complete → entire campaign is done
             update["status"] = "completed"
+            print(f"[Scheduler] Wave 3 COMPLETE -- "
+                  f"campaign marked as completed "
+                  f"-- campaign={campaign_id}")
+
         print(f"[Scheduler] Wave {drip_day} COMPLETE -- sent_at stamped campaign={campaign_id}")
+
     else:
         print(f"[Scheduler] Wave {drip_day} IN PROGRESS -- {cumulative} sent total, "
               f"next batch tomorrow -- campaign={campaign_id}")
@@ -372,7 +409,6 @@ def run_day1_blast(campaign_id: str) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 def run_scheduler_tick():
     now_utc      = datetime.utcnow()
-    now_iso      = now_utc.isoformat()
     in_biz_hours = _is_business_hours()
     today_str    = _today_utc_str()
 
@@ -385,6 +421,10 @@ def run_scheduler_tick():
 
     supabase_url = _get_supabase_url()
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # WAVE 1 — Runs every tick (no business hours restriction)
+    # Picks up any active campaign where Wave 1 has not been fully sent yet.
+    # ─────────────────────────────────────────────────────────────────────────
     resp_a = requests.get(
         f"{supabase_url}/rest/v1/blast_campaigns"
         f"?status=eq.active"
@@ -405,13 +445,19 @@ def run_scheduler_tick():
         stats = _send_drip_wave(campaign, drip_day=1)
         _update_campaign_after_wave(cid, drip_day=1, stats=stats)
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # WAVE 2 — Business hours only. Weekends skipped via _is_business_hours().
+    #
+    # ✅ FIX 1: Removed &day4_scheduled_for=lte.{now_iso} condition.
+    # Wave 2 now triggers immediately on the next business-hours tick after
+    # Wave 1 completes (drip_day1_sent_at is set). No fixed date delay.
+    # ─────────────────────────────────────────────────────────────────────────
     if in_biz_hours:
         resp4 = requests.get(
             f"{supabase_url}/rest/v1/blast_campaigns"
             f"?status=eq.active"
             f"&drip_day1_sent_at=not.is.null"
-            f"&drip_day2_sent_at=is.null"
-            f"&day4_scheduled_for=lte.{now_iso}",
+            f"&drip_day2_sent_at=is.null",
             headers=_headers()
         )
         wave2_campaigns = resp4.json() if resp4.status_code == 200 else []
@@ -423,18 +469,26 @@ def run_scheduler_tick():
             plan       = campaign.get("plan_name", "starter")
             plan_limit = _get_limit_for_plan(plan)
             last_date  = campaign.get("drip_day2_last_date", "never")
+            print(f"[Scheduler] --> Wave 2 | campaign={cid} | "
+                  f"{already}/{plan_limit} sent | last_batch={last_date}")
             stats = _send_drip_wave(campaign, drip_day=4)
             _update_campaign_after_wave(cid, drip_day=4, stats=stats)
     else:
         print("[Scheduler] Outside business hours -- Wave 2 skipped this tick")
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # WAVE 3 — Business hours only. Weekends skipped via _is_business_hours().
+    #
+    # ✅ FIX 2: Removed &day8_scheduled_for=lte.{now_iso} condition.
+    # Wave 3 now triggers immediately on the next business-hours tick after
+    # Wave 2 completes (drip_day2_sent_at is set). No fixed date delay.
+    # ─────────────────────────────────────────────────────────────────────────
     if in_biz_hours:
         resp8 = requests.get(
             f"{supabase_url}/rest/v1/blast_campaigns"
             f"?status=eq.active"
             f"&drip_day2_sent_at=not.is.null"
-            f"&drip_day3_sent_at=is.null"
-            f"&day8_scheduled_for=lte.{now_iso}",
+            f"&drip_day3_sent_at=is.null",
             headers=_headers()
         )
         wave3_campaigns = resp8.json() if resp8.status_code == 200 else []
@@ -446,6 +500,8 @@ def run_scheduler_tick():
             plan       = campaign.get("plan_name", "starter")
             plan_limit = _get_limit_for_plan(plan)
             last_date  = campaign.get("drip_day3_last_date", "never")
+            print(f"[Scheduler] --> Wave 3 | campaign={cid} | "
+                  f"{already}/{plan_limit} sent | last_batch={last_date}")
             stats = _send_drip_wave(campaign, drip_day=8)
             _update_campaign_after_wave(cid, drip_day=8, stats=stats)
     else:
