@@ -37,6 +37,12 @@ function Footer({ onViewChange }) {
             © 2026 ResumeBlast.ai - All rights reserved
           </p>
         </div>
+        <div className="footer-section">
+          <h4>Find Us On</h4>
+          <a href="https://www.producthunt.com/products/resumeblast-ai?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-resumeblast-ai" target="_blank" rel="noopener noreferrer">
+            <img alt="ResumeBlast.ai - Send your resume to verified recruiters, automatically | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1168341&theme=light&t=1781173764490" />
+          </a>
+        </div>
       </div>
     </footer>
   )
