@@ -480,6 +480,15 @@ def run_scheduler_tick():
         last_date  = campaign.get("drip_day1_last_date", "never")
         camp_status = campaign.get("status", "unknown")
 
+        # ✅ GUARD: Skip junk campaigns with no candidate data.
+        # Prevents broken template emails (empty subject/fields) going to recruiters.
+        # These are abandoned checkouts or corrupted records where candidate_name
+        # was never set. This guard ensures they are never processed.
+        if not campaign.get("candidate_name") or not campaign.get("plan_name"):
+            print(f"[Scheduler] Skipping campaign {cid} -- "
+                  f"candidate_name or plan_name is NULL (junk/incomplete campaign)")
+            continue
+
         # ✅ Auto-promote 'initiated' → 'active' before sending
         # This permanently fixes campaigns stuck after payment
         if camp_status == "initiated":
@@ -526,6 +535,13 @@ def run_scheduler_tick():
             plan       = campaign.get("plan_name", "starter")
             plan_limit = _get_limit_for_plan(plan)
             last_date  = campaign.get("drip_day2_last_date", "never")
+
+            # ✅ GUARD: Skip junk campaigns with no candidate data
+            if not campaign.get("candidate_name") or not campaign.get("plan_name"):
+                print(f"[Scheduler] Skipping Wave 2 campaign {cid} -- "
+                      f"candidate_name or plan_name is NULL (junk/incomplete campaign)")
+                continue
+
             print(f"[Scheduler] --> Wave 2 | campaign={cid} | "
                   f"{already}/{plan_limit} sent | last_batch={last_date}")
             stats = _send_drip_wave(campaign, drip_day=4)
@@ -557,6 +573,13 @@ def run_scheduler_tick():
             plan       = campaign.get("plan_name", "starter")
             plan_limit = _get_limit_for_plan(plan)
             last_date  = campaign.get("drip_day3_last_date", "never")
+
+            # ✅ GUARD: Skip junk campaigns with no candidate data
+            if not campaign.get("candidate_name") or not campaign.get("plan_name"):
+                print(f"[Scheduler] Skipping Wave 3 campaign {cid} -- "
+                      f"candidate_name or plan_name is NULL (junk/incomplete campaign)")
+                continue
+
             print(f"[Scheduler] --> Wave 3 | campaign={cid} | "
                   f"{already}/{plan_limit} sent | last_batch={last_date}")
             stats = _send_drip_wave(campaign, drip_day=8)
