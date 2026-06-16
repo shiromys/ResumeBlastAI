@@ -4,6 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
+    <!-- ✅ ADDED: Consent Mode default — must be BEFORE GTM snippet -->
+    <!-- Sets GA4 (G-6NHVZMSX04) and GTM (GT-5TPPGPSVX) to denied     -->
+    <!-- until user clicks Accept in ComplianceBanner                   -->
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+
+      // Default: deny tracking until user accepts banner
+      gtag('consent', 'default', {
+        analytics_storage: 'denied',
+        ad_storage:        'denied',
+        wait_for_update:   500
+      });
+
+      // If user already accepted on a previous visit — grant immediately
+      if (localStorage.getItem('analytics_consent') === 'granted') {
+        gtag('consent', 'update', {
+          analytics_storage: 'granted',
+          ad_storage:        'granted',
+        });
+      }
+    </script>
+    <!-- End Consent Mode default -->
+
     <!-- ✅ Google Tag Manager — SNIPPET 1 of 2 (must be in <head>) -->
     <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
     new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],

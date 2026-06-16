@@ -14,11 +14,50 @@ function ComplianceBanner() {
     }
   }, [])
 
-  // Both buttons will dismiss the banner for now 
-  // (You can add specific cookie tracking logic here later if needed)
-  const handleDismiss = () => {
+  // ✅ ADDED: Accept — enables GTM (GT-5TPPGPSVX) and GA4 (G-6NHVZMSX04) tracking
+  const handleAccept = () => {
     localStorage.setItem('compliance_acknowledged', 'true')
+    localStorage.setItem('analytics_consent', 'granted')
     setIsVisible(false)
+
+    // Update GTM + GA4 consent to granted
+    if (window.gtag) {
+      window.gtag('consent', 'update', {
+        analytics_storage: 'granted',
+        ad_storage:        'granted',
+      })
+    }
+
+    // Push consent event to GTM dataLayer (GT-5TPPGPSVX)
+    if (window.dataLayer) {
+      window.dataLayer.push({
+        event:        'consent_given',
+        consent_type: 'accepted',
+      })
+    }
+  }
+
+  // ✅ ADDED: Reject — disables GTM (GT-5TPPGPSVX) and GA4 (G-6NHVZMSX04) tracking
+  const handleReject = () => {
+    localStorage.setItem('compliance_acknowledged', 'true')
+    localStorage.setItem('analytics_consent', 'denied')
+    setIsVisible(false)
+
+    // Update GTM + GA4 consent to denied
+    if (window.gtag) {
+      window.gtag('consent', 'update', {
+        analytics_storage: 'denied',
+        ad_storage:        'denied',
+      })
+    }
+
+    // Push consent event to GTM dataLayer (GT-5TPPGPSVX)
+    if (window.dataLayer) {
+      window.dataLayer.push({
+        event:        'consent_given',
+        consent_type: 'rejected',
+      })
+    }
   }
 
   if (!isVisible) return null
@@ -42,10 +81,12 @@ function ComplianceBanner() {
         </div>
       </div>
       <div className="compliance-actions">
-        <button className="compliance-btn-outline" onClick={handleDismiss}>
+        {/* ✅ CHANGED: onClick now calls handleReject instead of handleDismiss */}
+        <button className="compliance-btn-outline" onClick={handleReject}>
           Reject Optional
         </button>
-        <button className="compliance-btn" onClick={handleDismiss}>
+        {/* ✅ CHANGED: onClick now calls handleAccept instead of handleDismiss */}
+        <button className="compliance-btn" onClick={handleAccept}>
           Accept All
         </button>
       </div>
