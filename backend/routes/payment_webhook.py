@@ -36,6 +36,59 @@ def _headers():
     }
 
 
+
+
+def _create_fallback_campaign(session_id, user_id, plan_name, resume_url,
+                               candidate_name, job_role, location, create_fn):
+    """
+    PERMANENT FIX: Fallback campaign creator called when send_blast_internal()
+    fails for any reason after a confirmed Stripe payment.
+
+    Creates a blast_campaigns record with status='active' so the drip
+    scheduler picks it up within 30 minutes and sends Day 1 emails.
+    Guards against duplicates — never creates if campaign already exists
+    for this stripe_session_id.
+    """
+    try:
+        # Idempotency: skip if campaign already exists for this session
+        existing = requests.get(
+            f"{SUPABASE_URL}/rest/v1/blast_campaigns"
+            f"?stripe_session_id=eq.{session_id}&select=id,status",
+            headers=_headers()
+        )
+        if existing.status_code == 200 and existing.json():
+            camp = existing.json()[0]
+            print(f"[Webhook] Fallback skipped — campaign already exists: "
+                  f"id={camp['id']} status={camp.get('status')}")
+            return
+
+        # No campaign found — create one for the scheduler to pick up
+        result = create_fn({
+            "user_id":           user_id,
+            "user_type":         "registered",
+            "stripe_session_id": session_id,
+            "plan_name":         plan_name,
+            "resume_url":        resume_url,
+            "candidate_name":    candidate_name or "Professional Candidate",
+            "job_role":          job_role       or "Professional",
+            "location":          location       or "Remote",
+            "candidate_email":   "",
+            "candidate_phone":   "",
+            "resume_name":       "Resume.pdf",
+            "years_experience":  "",
+            "key_skills":        "",
+        })
+
+        if result.get("success"):
+            print(f"[Webhook] Fallback campaign created: {result.get('campaign_id')} "
+                  f"-- scheduler starts blast within 30 min")
+        else:
+            print(f"[Webhook] Fallback campaign failed: {result.get('error')}")
+
+    except Exception as e:
+        print(f"[Webhook] _create_fallback_campaign exception: {e}")
+
+
 def handle_checkout_completed(session: dict):
     """
     Called when Stripe fires checkout.session.completed.
@@ -155,26 +208,80 @@ def handle_checkout_completed(session: dict):
         except Exception as e:
             print(f"[Webhook] ⚠️ Receipt email exception (non-blocking): {e}")
 
-    # ── ✅ FIX 2: Resolve User and Resume Context For Historical Resends ──────
+    # ── ✅ PERMANENT FIX: Resolve User Identity After Guest-Then-Register Flow ──
+    #
+    # ROOT CAUSE THIS FIXES:
+    #   User pays as guest (user_id=guest_xxx, email=guest@resumeblast.ai)
+    #   → registers AFTER payment → webhook fires but can't find real user_id
+    #   → blast never triggered → user raises support ticket
+    #
+    # RECOVERY CHAIN (tries each source in order until user_id found):
+    #   1. metadata user_id          (registered users who paid while logged in)
+    #   2. client_reference_id       (always set by payment.py line 239)
+    #   3. metadata customer_email   (real email stored by our payment.py fix)
+    #   4. Stripe customer_details email (works when not guest checkout)
+    #   5. Stripe client_reference_id via API (ultimate fallback)
+
     active_user_id = user_id or guest_id or ""
-    
-    # Sanitize variable inputs to weed out corrupted text tokens from old frontends
+
+    # Sanitize corrupted tokens from old frontends
     if str(active_user_id).strip() in ["None", "null", "undefined"]:
         active_user_id = ""
 
-    # Fallback A: If metadata lacks an internal user identity, look up user ID via email
-    if not active_user_id and customer_email:
+    # Fallback A: Use client_reference_id from Stripe session
+    # payment.py always sets client_reference_id=str(user_id) — even for guests
+    if not active_user_id or str(active_user_id).startswith("guest_"):
         try:
-            print(f"[Webhook] Missing user identity metadata. Querying profile matching: {customer_email}...")
+            cref = session.get("client_reference_id", "") or ""
+            if cref and str(cref).strip() not in ["", "None", "null", "undefined"]:
+                print(f"[Webhook] Trying client_reference_id: {cref!r}")
+                # Check if this is a real registered user
+                ref_check = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/users?id=eq.{cref}&select=id,email",
+                    headers=_headers()
+                )
+                if ref_check.status_code == 200 and ref_check.json():
+                    active_user_id = ref_check.json()[0].get("id", "")
+                    print(f"[Webhook] ✅ Recovered user_id from client_reference_id: {active_user_id}")
+        except Exception as e:
+            print(f"[Webhook] ⚠️ client_reference_id lookup fault (non-blocking): {e}")
+
+    # Fallback B: Use real email stored in Stripe metadata by payment.py
+    # This handles the guest-then-register case — metadata stores the real email
+    if not active_user_id or str(active_user_id).startswith("guest_"):
+        meta_email = metadata.get("customer_email", "").strip()
+        lookup_email = meta_email if (meta_email and meta_email != "guest@resumeblast.ai") else None
+        if not lookup_email:
+            # Also try Stripe customer_details email
+            lookup_email = customer_email if (customer_email and customer_email != "guest@resumeblast.ai") else None
+        if lookup_email:
+            try:
+                print(f"[Webhook] Trying email lookup: {lookup_email!r}")
+                user_resp = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/users?email=eq.{lookup_email}&select=id",
+                    headers=_headers()
+                )
+                if user_resp.status_code == 200 and user_resp.json():
+                    active_user_id = user_resp.json()[0].get("id", "")
+                    print(f"[Webhook] ✅ Recovered user_id from email: {active_user_id}")
+            except Exception as e:
+                print(f"[Webhook] ⚠️ Email lookup fault (non-blocking): {e}")
+
+    # Fallback C: Original email lookup (kept for backward compatibility)
+    if not active_user_id and customer_email and customer_email != "guest@resumeblast.ai":
+        try:
+            print(f"[Webhook] Fallback C — profile lookup: {customer_email}")
             user_resp = requests.get(
                 f"{SUPABASE_URL}/rest/v1/users?email=eq.{customer_email}&select=id",
                 headers=_headers()
             )
             if user_resp.status_code == 200 and user_resp.json():
                 active_user_id = user_resp.json()[0].get("id", "")
-                print(f"[Webhook] Dynamic Recovery successful! Found User ID: {active_user_id}")
+                print(f"[Webhook] ✅ Dynamic Recovery successful! Found User ID: {active_user_id}")
         except Exception as e:
             print(f"[Webhook] ⚠️ Profile mapping lookup fault (non-blocking): {e}")
+
+    print(f"[Webhook] Final active_user_id: {active_user_id!r}")
 
     # Fallback B: If metadata lacks a resume_url, locate the latest record they uploaded before checking out
     if not resume_url and active_user_id:
@@ -208,9 +315,10 @@ def handle_checkout_completed(session: dict):
     FREE_PLANS_WH = {"free", "freemium"}
     if resume_url and plan_name and plan_name.lower() not in FREE_PLANS_WH:
         try:
-            from routes.blast import send_blast_internal  # import here to avoid circular import
+            from routes.blast import send_blast_internal
+            from routes.drip_campaign import create_drip_campaign
 
-            print(f"[Webhook] 🚀 Triggering blast: plan={plan_name} user={active_user_id!r}")
+            print(f"[Webhook] Triggering blast: plan={plan_name} user={active_user_id!r}")
 
             blast_result = send_blast_internal(
                 plan_name      = plan_name,
@@ -223,18 +331,43 @@ def handle_checkout_completed(session: dict):
             )
 
             if blast_result.get("already_processed"):
-                print(f"[Webhook] ℹ️  Blast already handled by frontend — skipped (idempotent)")
+                print("[Webhook] Blast already handled by frontend — skipped (idempotent)")
             elif blast_result.get("success"):
-                print(f"[Webhook] ✅ Blast triggered: campaign={blast_result.get('drip_campaign_id')} sent={blast_result.get('successful_sends', 0)}")
+                print(f"[Webhook] Blast triggered: campaign={blast_result.get('drip_campaign_id')} "
+                      f"sent={blast_result.get('successful_sends', 0)}")
             else:
-                print(f"[Webhook] ⚠️ Blast trigger failed (non-blocking): {blast_result.get('error')}")
+                # ✅ PERMANENT FIX 2: Payment confirmed but blast failed.
+                # Create fallback campaign so scheduler starts blast within 30 min.
+                # This ensures EVERY completed payment triggers a blast — even
+                # when send_blast_internal() fails (Supabase error, Brevo timeout,
+                # resume parse failure, Stripe API error, etc.)
+                print(f"[Webhook] Blast failed: {blast_result.get('error')}")
+                print("[Webhook] Creating fallback campaign — scheduler picks up within 30 min")
+                _create_fallback_campaign(
+                    session_id=session_id, user_id=active_user_id,
+                    plan_name=plan_name, resume_url=resume_url,
+                    candidate_name=candidate_name, job_role=job_role,
+                    location=location, create_fn=create_drip_campaign,
+                )
 
         except Exception as e:
-            # Non-blocking — never let a blast failure return 500 to Stripe (causes retries)
-            print(f"[Webhook] ⚠️ Blast trigger exception (non-blocking): {e}")
+            # Non-blocking — never return 500 to Stripe (would cause webhook retries)
+            print(f"[Webhook] Blast trigger exception (non-blocking): {e}")
             traceback.print_exc()
+            # ✅ PERMANENT FIX 2 (exception path): Fallback on any exception too
+            try:
+                from routes.drip_campaign import create_drip_campaign
+                print("[Webhook] Exception fallback — creating campaign for scheduler")
+                _create_fallback_campaign(
+                    session_id=session_id, user_id=active_user_id,
+                    plan_name=plan_name, resume_url=resume_url,
+                    candidate_name=candidate_name, job_role=job_role,
+                    location=location, create_fn=create_drip_campaign,
+                )
+            except Exception as fe:
+                print(f"[Webhook] Fallback campaign creation also failed: {fe}")
     elif not resume_url:
-        print(f"[Webhook] ❌ Operation Aborted: Unable to map a valid resume file path string for user target.")
+        print("[Webhook] Operation Aborted: Unable to map a valid resume file path for user.")
 
 
 # ── ROUTE WITH SIGNATURE VERIFICATION ───────────────────────────────────────

@@ -313,12 +313,34 @@ def _update_campaign_after_wave(campaign_id: str, drip_day: int, stats: dict):
     cumulative    = stats.get("cumulative", stats.get("sent", 0))
     wave_complete = stats.get("wave_complete", False)
 
+    emails_sent_this_batch = stats.get("sent", 0)
+
     update = {
         fields["delivered"]: cumulative,
         fields["count"]:     cumulative,
         fields["status"]:    "sent" if wave_complete else "sending",
-        fields["last_date"]: today_str,
     }
+
+    # ✅ PERMANENT FIX 1: Only stamp last_date if emails were ACTUALLY sent.
+    #
+    # ROOT CAUSE OF RECURRING BUG:
+    #   Before this fix, last_date was ALWAYS set — even when sent=0 (Brevo
+    #   failed or network error). This caused _already_sent_today() to return
+    #   True on every subsequent scheduler tick for the rest of that calendar day,
+    #   permanently skipping the campaign. For a new user whose payment just
+    #   completed, Day 1 emails were never sent — and no emails until next day.
+    #
+    # WITH THIS FIX:
+    #   If Brevo fails and sent=0, last_date stays NULL.
+    #   _already_sent_today() returns False on every tick.
+    #   Scheduler retries every 30 minutes until emails actually go through.
+    #   User gets Day 1 emails as soon as Brevo recovers — same day as payment.
+    if emails_sent_this_batch > 0:
+        update[fields["last_date"]] = today_str
+        print(f"[Scheduler] last_date stamped ({today_str}) -- "
+              f"{emails_sent_this_batch} emails sent this batch")
+    else:
+        print(f"[Scheduler] last_date NOT stamped -- sent=0, will retry next tick")
 
     if wave_complete:
         update[fields["sent_at"]] = now
@@ -423,16 +445,32 @@ def run_scheduler_tick():
 
     # ─────────────────────────────────────────────────────────────────────────
     # WAVE 1 — Runs every tick (no business hours restriction)
-    # Picks up any active campaign where Wave 1 has not been fully sent yet.
+    #
+    # ✅ PERMANENT FIX: Query picks up BOTH 'active' AND 'initiated' campaigns.
+    #
+    # ROOT CAUSE OF RECURRING BUG:
+    #   When a user pays, the campaign is created with status='initiated'.
+    #   blast.py attempts the first send but may fail silently (backend error,
+    #   timeout, etc.) leaving status stuck at 'initiated' forever.
+    #   The old query only checked status='active' so the scheduler
+    #   never found these campaigns — Wave 1 never started.
+    #
+    # HOW THIS FIX WORKS:
+    #   1. Fetch both 'active' AND 'initiated' campaigns with no drip_day1_sent_at
+    #   2. When an 'initiated' campaign is found, promote it to 'active' first
+    #   3. Then send Wave 1 emails normally
+    #   Result: No manual DB intervention ever needed again. The scheduler
+    #   automatically rescues any stuck campaign within 30 minutes.
     # ─────────────────────────────────────────────────────────────────────────
     resp_a = requests.get(
         f"{supabase_url}/rest/v1/blast_campaigns"
-        f"?status=eq.active"
+        f"?status=in.(active,initiated)"
         f"&drip_day1_sent_at=is.null",
         headers=_headers()
     )
     wave1_campaigns = resp_a.json() if resp_a.status_code == 200 else []
-    print(f"[Scheduler] Wave 1 active campaigns : {len(wave1_campaigns)}")
+    print(f"[Scheduler] Wave 1 campaigns found  : {len(wave1_campaigns)} "
+          f"(active + initiated)")
 
     for campaign in wave1_campaigns:
         cid        = campaign["id"]
@@ -440,6 +478,25 @@ def run_scheduler_tick():
         plan       = campaign.get("plan_name", "starter")
         plan_limit = _get_limit_for_plan(plan)
         last_date  = campaign.get("drip_day1_last_date", "never")
+        camp_status = campaign.get("status", "unknown")
+
+        # ✅ Auto-promote 'initiated' → 'active' before sending
+        # This permanently fixes campaigns stuck after payment
+        if camp_status == "initiated":
+            promote_resp = requests.patch(
+                f"{supabase_url}/rest/v1/blast_campaigns?id=eq.{cid}",
+                json={"status": "active"},
+                headers=_headers()
+            )
+            if promote_resp.status_code in [200, 204]:
+                print(f"[Scheduler] ✅ Auto-promoted campaign "
+                      f"initiated→active | campaign={cid}")
+                campaign["status"] = "active"
+            else:
+                print(f"[Scheduler] ⚠️ Failed to promote campaign "
+                      f"status: {promote_resp.status_code} | campaign={cid}")
+                continue  # Skip this campaign this tick, retry next tick
+
         print(f"[Scheduler] --> Wave 1 | campaign={cid} | "
               f"{already}/{plan_limit} sent | last_batch={last_date}")
         stats = _send_drip_wave(campaign, drip_day=1)
