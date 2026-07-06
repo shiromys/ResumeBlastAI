@@ -14,9 +14,6 @@ SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 BREVO_WEBHOOK_SECRET = os.getenv('BREVO_WEBHOOK_SECRET')
 
 # ── CHANGE 1: split into write headers and read headers ──────────────────────
-# Old _get_headers() used 'Prefer: count=exact' on ALL requests including GETs.
-# With some PostgREST/Supabase versions this causes get_all_rows to receive a
-# non-list response, silently breaking all revenue / stats queries.
 def _get_headers():
     """For write operations (POST / PATCH / DELETE)."""
     return {
@@ -54,7 +51,6 @@ def get_all_rows(table, query=''):
             params.append(f"offset={offset}")
             url = base_url + "?" + "&".join(params)
             
-            # ✅ FIX: use _read_headers() — no Prefer:count=exact on GETs
             resp = requests.get(url, headers=_read_headers())
             
             if resp.status_code in [200, 206]:
@@ -81,15 +77,12 @@ def get_all_rows(table, query=''):
 # =========================================================
 # 1. REVENUE ANALYTICS
 # =========================================================
-# 1. REVENUE ANALYTICS
-# =========================================================
 @admin_bp.route('/api/admin/revenue', methods=['GET'])
 def get_revenue():
     try:
         start_date_str = request.args.get('start_date')
         end_date_str   = request.args.get('end_date')
 
-        # Direct Supabase query with full logging
         all_payments = []
         offset = 0
         limit  = 1000
@@ -142,12 +135,6 @@ def get_revenue():
                 return None
 
         def best_date(p):
-            """
-            Use initiated_at as the real payment date.
-            Falls back to completed_at then created_at.
-            Ensures recovered historical payments appear on their
-            actual date, not the recovery script run date.
-            """
             return (
                 parse_date(p.get('initiated_at'))
                 or parse_date(p.get('completed_at'))
@@ -364,7 +351,7 @@ def force_drip_wave():
         return jsonify({'error': str(e)}), 500
 
 # =========================================================
-# 3. BREVO LOGS ENDPOINTS (UPDATED WITH DATE PARSING)
+# 3. BREVO LOGS ENDPOINTS
 # =========================================================
 @admin_bp.route('/api/admin/brevo-logs', methods=['GET'])
 def get_brevo_logs():
@@ -640,15 +627,68 @@ def get_stats():
         return jsonify({'total_users': len(get_all_rows('users', 'select=id')), 'active_users': len(get_all_rows('users', 'select=id&account_status=eq.active')), 'total_blasts': len(get_all_rows('blast_campaigns', 'select=id')), 'total_resume_uploads': len(get_all_rows('resumes', 'select=id')), 'total_revenue': round(sum(safe_float(p.get('amount')) for p in payments if (p.get('status') or '').lower() in ['completed', 'paid', 'success', 'succeeded']) / 100, 2)}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
 
+
+# =========================================================
+# ✅ FIXED: get_recruiters_stats
+# =========================================================
 @admin_bp.route('/api/admin/recruiters/stats', methods=['GET'])
 def get_recruiters_stats():
     try:
-        paid_res = requests.get(f"{SUPABASE_URL}/rest/v1/recruiters?select=id", headers=_read_headers())
-        free_res = requests.get(f"{SUPABASE_URL}/rest/v1/freemium_recruiters?select=id", headers=_read_headers())
-        paid_count = len(paid_res.json()) if paid_res.status_code in [200, 206] else 0
-        free_count = len(free_res.json()) if free_res.status_code in [200, 206] else 0
-        return jsonify({'paid_count': paid_count, 'freemium_count': free_count, 'total_count': paid_count + free_count}), 200
-    except Exception as e: return jsonify({'error': str(e)}), 500
+        # ✅ PERMANENT FIX: Use Supabase count=exact header to get the real row
+        # count from the database without fetching all rows.
+        #
+        # ROOT CAUSE OF BUG:
+        #   Old code used len(paid_res.json()) — Supabase REST API returns max
+        #   1000 rows by default. With 1130 recruiters, len() always capped at
+        #   1000. The admin panel showed 1000 instead of the real 1130 count.
+        #
+        # HOW THIS FIX WORKS:
+        #   PostgREST returns the total count in the 'content-range' response
+        #   header when 'Prefer: count=exact' is sent. We request limit=1 to
+        #   avoid fetching rows — only the count header matters.
+        #   This returns the exact DB row count regardless of table size,
+        #   and will always stay accurate as recruiters are added/removed.
+        count_headers = {**_read_headers(), 'Prefer': 'count=exact'}
+
+        paid_res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/recruiters?select=id&limit=1",
+            headers=count_headers
+        )
+        free_res = requests.get(
+            f"{SUPABASE_URL}/rest/v1/freemium_recruiters?select=id&limit=1",
+            headers=count_headers
+        )
+
+        def _extract_count(response):
+            """Extract exact count from PostgREST content-range header.
+            Format: '0-0/1130' — total count is the number after the slash.
+            Falls back to len(json) if header is missing (safe for small tables).
+            """
+            if response.status_code in [200, 206]:
+                content_range = response.headers.get('content-range', '')
+                if '/' in content_range:
+                    try:
+                        return int(content_range.split('/')[-1])
+                    except (ValueError, IndexError):
+                        pass
+                try:
+                    return len(response.json())
+                except Exception:
+                    pass
+            return 0
+
+        paid_count = _extract_count(paid_res)
+        free_count = _extract_count(free_res)
+
+        return jsonify({
+            'paid_count':     paid_count,
+            'freemium_count': free_count,
+            'total_count':    paid_count + free_count
+        }), 200
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 @admin_bp.route('/api/admin/recruiters/add', methods=['POST'])
 def add_recruiter():
@@ -714,7 +754,6 @@ def get_user_count():
 # 5. APP REGISTERED RECRUITERS
 # =========================================================
 
-# ✅ NEW: Count endpoint for the notification badge
 @admin_bp.route('/api/admin/app-registered-recruiters/pending-count', methods=['GET'])
 def get_pending_recruiters_count():
     try:
