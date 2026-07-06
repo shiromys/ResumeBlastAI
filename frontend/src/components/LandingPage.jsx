@@ -76,19 +76,19 @@ const PLAN_CONFIG = {
     features: ['500 recruiters', 'Resume Analysis', 'Curated Resume score', '3-wave drip campaign', 'industry specific list', 'Guaranteed email delivery', 'Support response within 24 hours'] 
   },
   professional: { 
-    label: 'Professional', price: '$29.99', defaultCents: 2999, defaultLimit: 750, drip: true, badge: null, comingSoon: true, 
+    label: 'Professional', price: '$29.99', defaultCents: 2999, defaultLimit: 750, drip: true, badge: null, comingSoon: false, 
     features: ['750 recruiters', 'Resume Analysis', 'Skill Analysis', '3-wave drip campaign', 'Industry-specific list', 'Guaranteed email delivery', 'Periodical email delivery status (optional)', 'Support response within 24 hours', 'Express email support'] 
   },
   growth: { 
-    label: 'Growth', price: '$39.99', defaultCents: 3999, defaultLimit: 1000, drip: true, badge: null, comingSoon: true, 
+    label: 'Growth', price: '$39.99', defaultCents: 3999, defaultLimit: 1000, drip: true, badge: null, comingSoon: false, 
     features: ['1000 recruiters', 'Resume Analysis', 'Skill Analysis', '3-wave drip campaign', 'Industry-specific list', 'Guaranteed email delivery', 'periodical email delivery status', 'Priority email support within 12 hours', 'Express email support within 8 hours (optional)'] 
   },
   advanced: { 
-    label: 'Advance', price: '$49.99', defaultCents: 4999, defaultLimit: 1250, drip: true, badge: null, comingSoon: true, 
+    label: 'Advance', price: '$49.99', defaultCents: 4999, defaultLimit: 1250, drip: true, badge: null, comingSoon: false, 
     features: ['1250 recruiters', 'Resume Analysis', 'Skill Analysis', '3-wave drip campaign', 'Industry-specific list', 'Guaranteed email delivery', 'Periodical email delivery status', 'Express email support within 8 hours'] 
   },
   premium: { 
-    label: 'Premium', price: '$59.99', defaultCents: 5999, defaultLimit: 1500, drip: true, badge: 'BEST RESULTS', comingSoon: true, 
+    label: 'Premium', price: '$59.99', defaultCents: 5999, defaultLimit: 1500, drip: true, badge: 'BEST RESULTS', comingSoon: false, 
     features: ['1500 recruiters', 'everything in Advance plan', 'Customized plan according to enterprise requirement', 'Call us for customisation'] 
   },
 }
@@ -161,7 +161,7 @@ function LandingPage({ onGetStarted, user }) {
   }, [])
 
   const handlePlanSelection = async (planKey) => {
-    const isDisabled = planKey !== 'starter' && planKey !== 'basic' && planKey !== 'free'
+    const isDisabled = PLAN_CONFIG[planKey]?.comingSoon === true
     if (isDisabled) return
     if (planKey === 'free' || user) { onGetStarted(); return }
     try {
@@ -265,7 +265,7 @@ function LandingPage({ onGetStarted, user }) {
               const c = PLAN_CONFIG[key]
               const p = getPriceParts(key)
               const limit = getLimit(key)
-              const isDisabled = key !== 'starter' && key !== 'basic'
+              const isDisabled = c.comingSoon === true
               
               return (
                 <div key={key} style={{

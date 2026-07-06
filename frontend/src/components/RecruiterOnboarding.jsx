@@ -111,9 +111,9 @@ function RecruiterOnboarding({ user, onComplete }) {
             {/* HEADER */}
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '15px'}}>
                 <div>
-                    <h2 style={{fontSize: '28px', marginBottom: '5px'}}> Welcome back!</h2>
+                    <h2 style={{fontSize: '28px', marginBottom: '5px', color: '#111827'}}> Welcome back!</h2>
                     <p style={{color: '#666'}}>
-                        Logged in as: <strong>{formData.email}</strong>
+                        Logged in as: <strong style={{color: '#111827'}}>{formData.email}</strong>
                     </p>
                 </div>
                 
@@ -136,7 +136,7 @@ function RecruiterOnboarding({ user, onComplete }) {
             }}>
                 <span style={{fontSize: '20px'}}>📧</span>
                 <p style={{margin: 0, fontSize: '14px', lineHeight: '1.5'}}>
-                    To ensure you don’t miss any candidate updates, please remember to check both your <strong>Inbox</strong> and <strong>Spam</strong> folders.
+                    To ensure you don’t miss any candidate updates, please remember to check both your <strong style={{color: '#1e40af'}}>Inbox</strong> and <strong style={{color: '#1e40af'}}>Spam</strong> folders.
                 </p>
             </div>
 
@@ -172,7 +172,7 @@ function RecruiterOnboarding({ user, onComplete }) {
                 boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
             }}>
                 <div style={{textAlign: 'center', marginBottom: '25px'}}>
-                    <h3 style={{fontSize: '24px', marginBottom: '10px'}}>Find Your Next Hire</h3>
+                    <h3 style={{fontSize: '24px', marginBottom: '10px', color: '#111827'}}>Find Your Next Hire</h3>
                     <p style={{color: '#6B7280'}}>Search our database for skills, job titles, or keywords.</p>
                 </div>
 

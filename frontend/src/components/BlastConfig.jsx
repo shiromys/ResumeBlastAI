@@ -14,10 +14,10 @@ const PLAN_CONFIG = {
   free:         { label: 'Free Plan',          price: '$0.00',  amount: 0,    recruiters: 11,   drip: false },
   starter:      { label: 'Starter Plan',       price: '$9.99',  amount: 999,  recruiters: 250,  drip: true,  stripePriceId: import.meta.env.VITE_PRICE_STARTER },
   basic:        { label: 'Basic Plan',         price: '$14.99', amount: 1499, recruiters: 500,  drip: true,  stripePriceId: import.meta.env.VITE_PRICE_BASIC },
-  professional: { label: 'Professional Plan',  price: '$29.99', amount: 2999, recruiters: 750,  drip: true, comingSoon: true, stripePriceId: import.meta.env.VITE_PRICE_PROFESSIONAL },
-  growth:       { label: 'Growth Plan',        price: '$39.99', amount: 3999, recruiters: 1000, drip: true, comingSoon: true, stripePriceId: import.meta.env.VITE_PRICE_GROWTH },
-  advanced:     { label: 'Advanced Plan',      price: '$49.99', amount: 4999, recruiters: 1250, drip: true, comingSoon: true, stripePriceId: import.meta.env.VITE_PRICE_ADVANCE },
-  premium:      { label: 'Premium Plan',       price: '$59.99', amount: 5999, recruiters: 1500, drip: true, comingSoon: true, stripePriceId: import.meta.env.VITE_PRICE_PREMIUM },
+  professional: { label: 'Professional Plan',  price: '$29.99', amount: 2999, recruiters: 750,  drip: true,  stripePriceId: import.meta.env.VITE_PRICE_PROFESSIONAL },
+  growth:       { label: 'Growth Plan',        price: '$39.99', amount: 3999, recruiters: 1000, drip: true,  stripePriceId: import.meta.env.VITE_PRICE_GROWTH },
+  advanced:     { label: 'Advanced Plan',      price: '$49.99', amount: 4999, recruiters: 1250, drip: true,  stripePriceId: import.meta.env.VITE_PRICE_ADVANCE },
+  premium:      { label: 'Premium Plan',       price: '$59.99', amount: 5999, recruiters: 1500, drip: true,  stripePriceId: import.meta.env.VITE_PRICE_PREMIUM },
 }
 
 const PAID_PLAN_KEYS = ['starter','basic','professional','growth','advanced','premium']
