@@ -112,6 +112,10 @@ const FAQS = [
     a: 'Free plan: 11 recruiters at no cost. Starter ($9.99/month): 250 recruiters. Basic ($14.99/month): 500 recruiters. All verified and matched to your role and industry.'
   },
   {
+    q: 'Should I buy Starter or Basic twice, or choose a Power Plan?',
+    a: 'We recommend a Power Plan for wider reach. Buying the same plan again re-sends to the same recruiter list, so you reach the same recruiters twice rather than new ones. Professional, Growth, Advanced and Premium expand your reach to more unique verified recruiters in a single campaign, with skill analysis and priority support included.'
+  },
+  {
     q: 'Is ResumeBlast.ai different from applying on job boards?',
     a: 'Yes. Job boards submit your application to an ATS that filters 75%+ of applicants before a human sees them. ResumeBlast.ai emails your resume directly to a recruiter inbox, bypassing ATS entirely.'
   },
@@ -425,6 +429,25 @@ function LandingPage({ onGetStarted, user }) {
                  ))}
                </ul>
             </div>
+          </div>
+
+          {/* Upsell note: guide users toward Power Plans instead of repeat lower-tier buys */}
+          <div style={{
+            maxWidth: '760px',
+            margin: '40px auto 0',
+            padding: '16px 20px',
+            background: '#FEF2F2',
+            border: '1px solid #FCA5A5',
+            borderRadius: '12px',
+            color: '#7F1D1D',
+            fontSize: '14.5px',
+            lineHeight: '1.6',
+            textAlign: 'left'
+          }}>
+            <strong style={{ color: '#991B1B' }}>💡 Thinking of buying Starter or Basic twice?</strong>{' '}
+            A single Power Plan reaches <strong style={{ color: '#7F1D1D' }}>more unique recruiters</strong> in one campaign. Buying the
+            same plan again re-sends to the same recruiter list, while Professional, Growth, Advanced and
+            Premium expand your reach to new verified recruiters — with skill analysis and priority support included.
           </div>
         </div>  
       </section>

@@ -132,6 +132,7 @@ function PricingPage({ onGetStarted, user }) {
       <div className="pp-section pp-section-power">
         <div className="pp-section-label">Power Plans</div>
         <p className="pp-section-sub">More recruiters, deeper skill matching, priority support. Launching soon.</p>
+
         <div className="pp-cards-wrapper">
           <div className="pp-cards pp-cards-4">
             {renderCard('professional')}
@@ -139,6 +140,25 @@ function PricingPage({ onGetStarted, user }) {
             {renderCard('advanced')}
             {renderCard('premium')}
           </div>
+        </div>
+
+        {/* Upsell note: guide users toward Power Plans instead of repeat lower-tier buys */}
+        <div style={{
+          maxWidth: '760px',
+          margin: '32px auto 0',
+          padding: '16px 20px',
+          background: '#FEF2F2',
+          border: '1px solid #FCA5A5',
+          borderRadius: '12px',
+          color: '#7F1D1D',
+          fontSize: '14.5px',
+          lineHeight: '1.6',
+          textAlign: 'left'
+        }}>
+          <strong style={{ color: '#991B1B' }}>💡 Thinking of buying Starter or Basic twice?</strong>{' '}
+          A single Power Plan reaches <strong style={{ color: '#7F1D1D' }}>more unique recruiters</strong> in one campaign. Buying the
+          same plan again re-sends to the same recruiter list, while Professional, Growth, Advanced and
+          Premium expand your reach to new verified recruiters — with skill analysis and priority support included.
         </div>
       </div>
 
@@ -177,6 +197,10 @@ function PricingPage({ onGetStarted, user }) {
           <div className="pp-faq-item">
             <dt>Can I upgrade after purchasing the free plan?</dt>
             <dd>Yes. You can purchase any paid plan at any time to reach more recruiters with a full 3-wave campaign.</dd>
+          </div>
+          <div className="pp-faq-item">
+            <dt>Should I buy Starter or Basic twice, or choose a Power Plan?</dt>
+            <dd>We recommend a Power Plan for wider reach. Buying the same plan again re-sends to the same recruiter list, so you reach the same recruiters twice rather than new ones. Professional, Growth, Advanced and Premium expand your reach to more unique verified recruiters in a single campaign, with skill analysis and priority support included.</dd>
           </div>
           <div className="pp-faq-item">
             <dt>When will the Power Plans be available?</dt>
