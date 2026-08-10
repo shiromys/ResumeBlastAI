@@ -47,11 +47,12 @@ function LegalPage({ type, onBack }) {
               <li><strong>Data at Rest:</strong> User resumes and personal identifiers are encrypted at rest using AES-256 protocols.</li>
             </ul>
 
-            <h2>2. GDPR Compliance & "No Permanent Storage" Policy</h2>
+            <h2>2. GDPR Compliance & Data Retention Policy</h2>
             <p>To adhere to GDPR's Data Minimization and Storage Limitation principles:</p>
             <ul>
-              <li><strong>Transient Processing:</strong> Resumes are stored only for the duration necessary to complete the distribution service.</li>
-              <li><strong>Automatic Deletion:</strong> Once your "Resume Blast" is confirmed as delivered to the target recruiters/employers, your resume file is purged from our active processing servers within 30 days, unless a longer retention period is required for legal defense (e.g., chargeback evidence).</li>
+              <li><strong>Cloud Storage &amp; Retention:</strong> Your resume is stored securely on third-party cloud infrastructure (Supabase, hosted on Amazon Web Services) only for the duration necessary to run your multi-wave distribution campaign.</li>
+              <li><strong>Automatic Deletion:</strong> Once your "Resume Blast" is confirmed as delivered to the target recruiters/employers, your resume file is purged within 30 days, unless a longer retention period is required for legal defense (e.g., chargeback evidence).</li>
+              <li><strong>Third-Party Processors:</strong> We use trusted cloud providers, including Supabase (hosted on Amazon Web Services), as data processors to store and process your data under appropriate data-protection agreements. Your data is processed and stored in the United States.</li>
               <li><strong>User Rights:</strong> EU/EEA residents have the right to access, rectify, or erase their data, and the right to data portability. Contact <strong>info@resumeblast.ai</strong> to exercise these rights.</li>
             </ul>
 
@@ -94,7 +95,7 @@ function LegalPage({ type, onBack }) {
             <p>The Service is strictly a distribution platform. Any claims to the contrary are unauthorized.</p>
 
             <h2>4. GDPR Data Handling</h2>
-            <p>By using the Service, you acknowledge that your data will be processed in the United States. We maintain a "GDPR-Lite" approach where data is deleted post-service fulfillment to minimize the footprint of stored personal information.</p>
+            <p>By using the Service, you acknowledge that your data will be processed and stored in the United States on secure third-party cloud infrastructure (Supabase, hosted on Amazon Web Services). We retain your resume only for the duration of your campaign and delete it within 30 days of completion, except where a longer retention period is required for legal or fraud-prevention purposes.</p>
           </div>
         )
 

@@ -204,6 +204,11 @@ def create_checkout_session():
             'candidate_name': candidate_name,
             'job_role':       job_role,
             'location':       location,
+            # ✅ PERMANENT FIX: Store real customer email in metadata.
+            # When user pays as guest then registers, Stripe customer_details
+            # returns guest@resumeblast.ai — not the real email. Storing it
+            # here lets payment_webhook.py always look up the real user account.
+            'customer_email': str(user_email or ''),
         }
 
         if is_guest:

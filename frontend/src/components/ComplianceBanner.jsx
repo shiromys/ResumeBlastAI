@@ -72,11 +72,10 @@ function ComplianceBanner() {
         </div>
         <div className="compliance-text">
           <p>
-            <strong className="text-white">Compliance & Privacy Notice:</strong> ResumeBlast.ai is a distribution platform. 
-            In compliance with FTC guidelines, we make <strong className="text-white">no guarantees</strong> of employment or interviews. 
-            We operate strictly under equal opportunity principles (<strong className="text-white">29 CFR § 1625.2</strong>) with no age-based filtering. 
-            To ensure <strong className="text-white">GDPR compliance</strong>, we practice transient processing with no 
-            permanent storage of your resume. By using our service, you agree to our <Link to="/terms">Terms of Service</Link> and <Link to="/privacy">Privacy Policy</Link>.
+            <strong className="text-white">Privacy & Cookies:</strong> We use cookies for analytics to improve your experience. 
+            ResumeBlast.ai is a resume-distribution platform and makes <strong className="text-white">no guarantee</strong> of employment or interviews. 
+            See our <Link to="/terms">Terms of Service</Link> and <Link to="/privacy">Privacy Policy</Link> for how we handle your data. 
+            You can accept or reject optional analytics cookies below.
           </p>
         </div>
       </div>
