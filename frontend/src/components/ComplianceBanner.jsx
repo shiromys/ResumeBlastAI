@@ -73,9 +73,7 @@ function ComplianceBanner() {
         <div className="compliance-text">
           <p>
             <strong className="text-white">Privacy & Cookies:</strong> We use cookies for analytics to improve your experience. 
-            ResumeBlast.ai is a resume-distribution platform and makes <strong className="text-white">no guarantee</strong> of employment or interviews. 
-            See our <Link to="/terms">Terms of Service</Link> and <Link to="/privacy">Privacy Policy</Link> for how we handle your data. 
-            You can accept or reject optional analytics cookies below.
+            See our <Link to="/terms">Terms of Service</Link> and <Link to="/privacy">Privacy Policy</Link> for details.
           </p>
         </div>
       </div>
