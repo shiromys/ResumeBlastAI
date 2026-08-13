@@ -1,6 +1,7 @@
 // src/components/UserDashboard.jsx
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import ProfileSection from './ProfileSection'
 
 // Plan mapping to ensure we don't show 0 if DB column is missing
 const PLAN_LIMITS = {
@@ -180,6 +181,8 @@ function UserDashboard({ user, onStartBlast }) {
       <div className="rb-header-actions">
         <button className="rb-btn-blast" onClick={onStartBlast}>+ New Blast</button>
       </div>
+
+      <ProfileSection user={user} isPaid={!!currentBlast} />
 
       <section className="rb-active-hero">
         <span className="rb-campaign-tag">Active campaign</span>

@@ -54,6 +54,7 @@ from routes.webhooks import webhooks_bp
 from routes.guest_routes import guest_bp
 from routes.drip_campaign import drip_campaign_bp  # ✅ NEW
 from routes.employer_lead import employer_lead_bp  # ✅ NEW: Employer Network lead capture
+from routes.profile import profile_bp  # ✅ NEW: user profile (first/last/phone/skills)
 
 app = Flask(__name__)
 
@@ -141,6 +142,7 @@ app.register_blueprint(webhooks_bp)
 app.register_blueprint(guest_bp)
 app.register_blueprint(drip_campaign_bp)   # ✅ existing
 app.register_blueprint(employer_lead_bp)   # ✅ NEW: /api/employer-lead
+app.register_blueprint(profile_bp)         # ✅ NEW: /api/user/profile
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -846,3 +846,121 @@ def approve_app_registered_recruiter(recruiter_id):
     except Exception as e:
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
+
+# =========================================================
+# PROFILE MANAGEMENT (admin safety net)
+# =========================================================
+def _classify_user_type(user_id, paid_user_ids, resume_user_ids):
+    """paid > analyzed-only > signup-only."""
+    if user_id in paid_user_ids:
+        return 'paid'
+    if user_id in resume_user_ids:
+        return 'analyzed-only'
+    return 'signup-only'
+
+
+@admin_bp.route('/api/admin/profiles/incomplete', methods=['GET'])
+def get_incomplete_profiles():
+    """
+    List users whose profile is not complete, each classified as
+    paid / analyzed-only / signup-only, with their latest campaign status.
+    """
+    try:
+        # Users missing a complete profile
+        users = get_all_rows(
+            'users',
+            'profile_completed=eq.false&select=id,email,first_name,last_name,phone,primary_skills,created_at'
+        )
+
+        # Build lookup sets for classification
+        campaigns = get_all_rows('blast_campaigns', 'select=user_id,status,created_at')
+        payments = get_all_rows('payments', "status=eq.completed&select=user_id")
+        resumes = get_all_rows('resumes', 'select=user_id')
+
+        paid_ids = {c.get('user_id') for c in campaigns if c.get('user_id')}
+        paid_ids |= {p.get('user_id') for p in payments if p.get('user_id')}
+        resume_ids = {r.get('user_id') for r in resumes if r.get('user_id')}
+
+        # latest campaign status per user
+        latest_status = {}
+        for c in campaigns:
+            uid = c.get('user_id')
+            if not uid:
+                continue
+            if uid not in latest_status or (c.get('created_at') or '') > latest_status[uid][1]:
+                latest_status[uid] = (c.get('status'), c.get('created_at') or '')
+
+        result = []
+        for u in users:
+            uid = u.get('id')
+            result.append({
+                'id': uid,
+                'email': u.get('email'),
+                'first_name': u.get('first_name'),
+                'last_name': u.get('last_name'),
+                'phone': u.get('phone'),
+                'primary_skills': u.get('primary_skills'),
+                'user_type': _classify_user_type(uid, paid_ids, resume_ids),
+                'campaign_status': latest_status.get(uid, (None,))[0],
+                'created_at': u.get('created_at'),
+            })
+
+        # Sort: paid first, then analyzed-only, then signup-only
+        order = {'paid': 0, 'analyzed-only': 1, 'signup-only': 2}
+        result.sort(key=lambda r: order.get(r['user_type'], 3))
+
+        counts = {
+            'total': len(result),
+            'paid': sum(1 for r in result if r['user_type'] == 'paid'),
+            'analyzed_only': sum(1 for r in result if r['user_type'] == 'analyzed-only'),
+            'signup_only': sum(1 for r in result if r['user_type'] == 'signup-only'),
+        }
+
+        return jsonify({'success': True, 'counts': counts, 'users': result}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/profiles/create', methods=['POST'])
+def admin_create_profile():
+    """
+    Admin manually fills a user's profile (email stays locked/unchanged).
+    Body: { email, first_name, last_name, phone, primary_skills }
+    """
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        if not email:
+            return jsonify({'success': False, 'error': 'email is required'}), 400
+
+        allowed = ['first_name', 'last_name', 'phone', 'primary_skills']
+        payload = {}
+        for f in allowed:
+            if f in data:
+                val = data.get(f)
+                payload[f] = val.strip() if isinstance(val, str) else val
+
+        if not payload:
+            return jsonify({'success': False, 'error': 'no profile fields provided'}), 400
+
+        # completeness = all four filled
+        payload['profile_completed'] = all(
+            (payload.get(f) or '').strip() for f in allowed
+        )
+
+        url = f"{SUPABASE_URL}/rest/v1/users?email=eq.{quote(email)}"
+        resp = requests.patch(url, json=payload, headers=_get_headers())
+
+        if resp.status_code in (200, 204):
+            return jsonify({
+                'success': True,
+                'profile_completed': payload['profile_completed'],
+                'message': 'Profile saved'
+            }), 200
+        return jsonify({'success': False, 'error': f'update failed ({resp.status_code}): {resp.text[:200]}'}), 500
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
