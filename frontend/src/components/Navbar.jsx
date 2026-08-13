@@ -46,6 +46,9 @@ function Navbar({ user, isGuest, isAdmin, onViewChange, onLoginClick, onLogout }
                 {!isGuest && (
                   <li><Link className="nav-link" to="/dashboard" onClick={close}>Dashboard</Link></li>
                 )}
+                {!isGuest && (
+                  <li><Link className="nav-link" to="/dashboard?profile=1" onClick={close}>My Profile</Link></li>
+                )}
                 <li><Link className="nav-link" to="/contact" onClick={close}>Contact</Link></li>
                 {isAdmin && (
                   <li>

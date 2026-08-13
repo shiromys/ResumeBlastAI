@@ -964,3 +964,75 @@ def admin_create_profile():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/profiles/overview', methods=['GET'])
+def get_profiles_overview():
+    """
+    Full structured breakdown of ALL users:
+      paid vs non-paid  X  profile complete vs not completed.
+    Returns counts + the user lists for each bucket.
+    """
+    try:
+        users = get_all_rows(
+            'users',
+            'select=id,email,first_name,last_name,phone,primary_skills,profile_completed,created_at'
+        )
+        campaigns = get_all_rows('blast_campaigns', 'select=user_id,status,created_at')
+        payments = get_all_rows('payments', "status=eq.completed&select=user_id")
+        resumes = get_all_rows('resumes', 'select=user_id')
+
+        paid_ids = {c.get('user_id') for c in campaigns if c.get('user_id')}
+        paid_ids |= {p.get('user_id') for p in payments if p.get('user_id')}
+        resume_ids = {r.get('user_id') for r in resumes if r.get('user_id')}
+
+        latest_status = {}
+        for c in campaigns:
+            uid = c.get('user_id')
+            if not uid:
+                continue
+            if uid not in latest_status or (c.get('created_at') or '') > latest_status[uid][1]:
+                latest_status[uid] = (c.get('status'), c.get('created_at') or '')
+
+        buckets = {
+            'paid_complete': [],
+            'paid_incomplete': [],
+            'nonpaid_complete': [],
+            'nonpaid_incomplete': [],
+        }
+
+        for u in users:
+            uid = u.get('id')
+            is_paid = uid in paid_ids
+            is_complete = bool(u.get('profile_completed'))
+            entry = {
+                'id': uid,
+                'email': u.get('email'),
+                'first_name': u.get('first_name'),
+                'last_name': u.get('last_name'),
+                'phone': u.get('phone'),
+                'primary_skills': u.get('primary_skills'),
+                'user_type': _classify_user_type(uid, paid_ids, resume_ids),
+                'campaign_status': latest_status.get(uid, (None,))[0],
+                'created_at': u.get('created_at'),
+            }
+            key = ('paid' if is_paid else 'nonpaid') + ('_complete' if is_complete else '_incomplete')
+            buckets[key].append(entry)
+
+        counts = {
+            'total': len(users),
+            'paid': len(buckets['paid_complete']) + len(buckets['paid_incomplete']),
+            'nonpaid': len(buckets['nonpaid_complete']) + len(buckets['nonpaid_incomplete']),
+            'complete': len(buckets['paid_complete']) + len(buckets['nonpaid_complete']),
+            'incomplete': len(buckets['paid_incomplete']) + len(buckets['nonpaid_incomplete']),
+            'paid_complete': len(buckets['paid_complete']),
+            'paid_incomplete': len(buckets['paid_incomplete']),
+            'nonpaid_complete': len(buckets['nonpaid_complete']),
+            'nonpaid_incomplete': len(buckets['nonpaid_incomplete']),
+        }
+
+        return jsonify({'success': True, 'counts': counts, 'buckets': buckets}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500

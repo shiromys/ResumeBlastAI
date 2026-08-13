@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import ContactSubmissions from './ContactSubmissions'
 import RecruitersManager from './RecruitersManager' 
+import IncompleteProfiles from './IncompleteProfiles'
 import './AdminStyles.css'
 import AppRegisteredRecruiters from './AppRegisteredRecruiters';
 
@@ -84,7 +85,7 @@ function AdminDashboard({ user, onExit }) {
       return
     }
     
-    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip' && activeTab !== 'brevo-logs' && activeTab !== 'app-registered') {
+    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip' && activeTab !== 'brevo-logs' && activeTab !== 'app-registered' && activeTab !== 'profiles') {
       fetchData(activeTab)
     } else {
       setLoading(false)
@@ -560,6 +561,12 @@ function AdminDashboard({ user, onExit }) {
             onClick={() => setActiveTab('users')}
           >
             Users
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'profiles' ? 'active' : ''}`}
+            onClick={() => setActiveTab('profiles')}
+          >
+            Incomplete Profiles
           </button>
           <button
             className={`nav-item ${activeTab === 'stripe' ? 'active' : ''}`}
@@ -1274,6 +1281,10 @@ function AdminDashboard({ user, onExit }) {
 
             {activeTab === 'recruiters' && (
               <RecruitersManager user={user} />
+            )}
+
+            {activeTab === 'profiles' && (
+              <IncompleteProfiles />
             )}
 
             {activeTab === 'users' && data.users && (

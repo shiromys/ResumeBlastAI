@@ -19,7 +19,6 @@ export default function ProfileSection({ user, isPaid = false }) {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
   const [showPopup, setShowPopup] = useState(false)
-  const [bellOpen, setBellOpen] = useState(false)
   const [error, setError] = useState('')
 
   const email = user?.email || ''
@@ -43,6 +42,15 @@ export default function ProfileSection({ user, isPaid = false }) {
   }, [email, isPaid])
 
   useEffect(() => { load() }, [load])
+
+  // If arrived via the navbar "My Profile" link (?profile=1), open the card in edit mode.
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.location.search.includes('profile=1')) {
+      setTimeout(() => {
+        document.getElementById('rb-profile-card')?.scrollIntoView({ behavior: 'smooth' })
+      }, 300)
+    }
+  }, [])
 
   const complete = profile.profile_completed
   const filled = REQUIRED.filter(k => (profile[k] || '').trim()).length + 1 // +1 email
@@ -116,32 +124,18 @@ export default function ProfileSection({ user, isPaid = false }) {
         @media (max-width:640px){ .rb-pf-grid{ grid-template-columns:1fr; } }
       `}</style>
 
-      {/* Top bar: persistent profile button (always) + bell (paid + incomplete) */}
+      {/* Top bar: notification bell (always visible; click opens profile edit) */}
       <div className="rb-pf-topbar">
-        <button className="rb-pf-btn" onClick={() => { document.getElementById('rb-profile-card')?.scrollIntoView({ behavior: 'smooth' }); if (!complete) startEdit() }}>
-          👤 My Profile
-        </button>
-        {isPaid && (
-          <div style={{ position: 'relative' }}>
-            <button className={`rb-bell${!complete ? ' ring' : ''}`} onClick={() => setBellOpen(o => !o)} aria-label="Notifications">
-              🔔{!complete && <span className="rb-bell-dot" />}
-            </button>
-            {bellOpen && (
-              <div className="rb-bell-pop">
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Notifications</div>
-                {complete
-                  ? <div style={{ fontSize: 12.5, color: '#059669' }}>✓ Profile complete — you're all set.</div>
-                  : <div style={{ display: 'flex', gap: 8, padding: 10, background: '#ffebee', borderRadius: 8 }}>
-                      <span>👤</span>
-                      <div>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: '#991b1b' }}>Complete your profile</div>
-                        <div style={{ fontSize: 11.5, color: '#6b7280' }}>So recruiters can reach you.</div>
-                      </div>
-                    </div>}
-              </div>
-            )}
-          </div>
-        )}
+        <div style={{ position: 'relative' }}>
+          <button
+            className={`rb-bell${!complete ? ' ring' : ''}`}
+            onClick={() => { startEdit(); document.getElementById('rb-profile-card')?.scrollIntoView({ behavior: 'smooth' }) }}
+            aria-label="Complete your profile"
+            title={complete ? 'Profile complete' : 'Complete your profile'}
+          >
+            🔔{!complete && <span className="rb-bell-dot" />}
+          </button>
+        </div>
       </div>
 
       {/* Profile card */}
