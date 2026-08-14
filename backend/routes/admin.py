@@ -850,9 +850,10 @@ def approve_app_registered_recruiter(recruiter_id):
 # =========================================================
 # PROFILE MANAGEMENT (admin safety net)
 # =========================================================
-def _classify_user_type(user_id, paid_user_ids, resume_user_ids):
-    """paid > analyzed-only > signup-only."""
-    if user_id in paid_user_ids:
+def _classify_user_type(user_id, paid_user_ids, resume_user_ids, email=None, paid_emails=None):
+    """paid > analyzed-only > signup-only. Paid matches by user_id OR email."""
+    email_l = (email or '').strip().lower()
+    if user_id in paid_user_ids or (paid_emails and email_l in paid_emails):
         return 'paid'
     if user_id in resume_user_ids:
         return 'analyzed-only'
@@ -874,11 +875,15 @@ def get_incomplete_profiles():
 
         # Build lookup sets for classification
         campaigns = get_all_rows('blast_campaigns', 'select=user_id,status,created_at')
-        payments = get_all_rows('payments', "status=eq.completed&select=user_id")
+        payments = get_all_rows('payments', "status=eq.completed&select=user_id,user_email")
         resumes = get_all_rows('resumes', 'select=user_id')
 
-        # PAID = has a COMPLETED payment only (campaign existence != payment).
+        # PAID = has a COMPLETED payment. Many guest payments have NULL user_id
+        # and are linked only by user_email, so match on BOTH.
         paid_ids = {p.get('user_id') for p in payments if p.get('user_id')}
+        paid_emails = {(p.get('user_email') or '').strip().lower()
+                       for p in payments if p.get('user_email')}
+        paid_emails.discard('guest@resumeblast.ai')  # placeholder, not a real user
         resume_ids = {r.get('user_id') for r in resumes if r.get('user_id')}
 
         # latest campaign status per user
@@ -900,7 +905,7 @@ def get_incomplete_profiles():
                 'last_name': u.get('last_name'),
                 'phone': u.get('phone'),
                 'primary_skills': u.get('primary_skills'),
-                'user_type': _classify_user_type(uid, paid_ids, resume_ids),
+                'user_type': _classify_user_type(uid, paid_ids, resume_ids, u.get('email'), paid_emails),
                 'campaign_status': latest_status.get(uid, (None,))[0],
                 'created_at': u.get('created_at'),
             })
@@ -979,11 +984,15 @@ def get_profiles_overview():
             'select=id,email,first_name,last_name,phone,primary_skills,profile_completed,created_at'
         )
         campaigns = get_all_rows('blast_campaigns', 'select=user_id,status,created_at')
-        payments = get_all_rows('payments', "status=eq.completed&select=user_id")
+        payments = get_all_rows('payments', "status=eq.completed&select=user_id,user_email")
         resumes = get_all_rows('resumes', 'select=user_id')
 
-        # PAID = has a COMPLETED payment only (campaign existence != payment).
+        # PAID = has a COMPLETED payment. Many guest payments have NULL user_id
+        # and are linked only by user_email, so match on BOTH.
         paid_ids = {p.get('user_id') for p in payments if p.get('user_id')}
+        paid_emails = {(p.get('user_email') or '').strip().lower()
+                       for p in payments if p.get('user_email')}
+        paid_emails.discard('guest@resumeblast.ai')  # placeholder, not a real user
         resume_ids = {r.get('user_id') for r in resumes if r.get('user_id')}
 
         latest_status = {}
@@ -1003,7 +1012,7 @@ def get_profiles_overview():
 
         for u in users:
             uid = u.get('id')
-            is_paid = uid in paid_ids
+            is_paid = uid in paid_ids or (u.get('email') or '').strip().lower() in paid_emails
             is_complete = bool(u.get('profile_completed'))
             entry = {
                 'id': uid,
@@ -1012,7 +1021,7 @@ def get_profiles_overview():
                 'last_name': u.get('last_name'),
                 'phone': u.get('phone'),
                 'primary_skills': u.get('primary_skills'),
-                'user_type': _classify_user_type(uid, paid_ids, resume_ids),
+                'user_type': _classify_user_type(uid, paid_ids, resume_ids, u.get('email'), paid_emails),
                 'campaign_status': latest_status.get(uid, (None,))[0],
                 'created_at': u.get('created_at'),
             }
