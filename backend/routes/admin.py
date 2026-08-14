@@ -877,8 +877,8 @@ def get_incomplete_profiles():
         payments = get_all_rows('payments', "status=eq.completed&select=user_id")
         resumes = get_all_rows('resumes', 'select=user_id')
 
-        paid_ids = {c.get('user_id') for c in campaigns if c.get('user_id')}
-        paid_ids |= {p.get('user_id') for p in payments if p.get('user_id')}
+        # PAID = has a COMPLETED payment only (campaign existence != payment).
+        paid_ids = {p.get('user_id') for p in payments if p.get('user_id')}
         resume_ids = {r.get('user_id') for r in resumes if r.get('user_id')}
 
         # latest campaign status per user
@@ -982,8 +982,8 @@ def get_profiles_overview():
         payments = get_all_rows('payments', "status=eq.completed&select=user_id")
         resumes = get_all_rows('resumes', 'select=user_id')
 
-        paid_ids = {c.get('user_id') for c in campaigns if c.get('user_id')}
-        paid_ids |= {p.get('user_id') for p in payments if p.get('user_id')}
+        # PAID = has a COMPLETED payment only (campaign existence != payment).
+        paid_ids = {p.get('user_id') for p in payments if p.get('user_id')}
         resume_ids = {r.get('user_id') for r in resumes if r.get('user_id')}
 
         latest_status = {}
