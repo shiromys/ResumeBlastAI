@@ -250,7 +250,7 @@ function LandingPage({ onGetStarted, user }) {
           <div className="step"><div className="step-number">1</div><div className="step-icon">📄</div><h3>Upload Resume</h3><p>Upload your resume in PDF, TXT or DOCX format. No rewriting or reformatting required.</p></div>
           <div className="step"><div className="step-number">2</div><div className="step-icon">🤖</div><h3>AI Analysis</h3><p>Our AI scans your resume to detect your role, seniority, and best-fit industry automatically.</p></div>
           <div className="step"><div className="step-number">3</div><div className="step-icon">📧</div><h3>3-Wave Drip Blast</h3><p>Your introduction goes out to recruiters daily until your full plan list is reached, followed by a follow-up wave and a final reminder wave. Larger plans take longer to fully cycle through all three waves.</p></div>
-          <div className="step"><div className="step-number">4</div><div className="step-icon">📊</div><h3>Track Results</h3><p>Real-time dashboard showing your campaign status across all 3 waves.</p></div>
+          <div className="step"><div className="step-number">4</div><div className="step-icon">📊</div><h3>Track Results</h3><p>A live dashboard shows your progress for each wave as it sends. Later waves stay pending until the previous one finishes.</p></div>
         </div>
       </section>
 

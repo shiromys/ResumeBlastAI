@@ -25,7 +25,7 @@ function HowItWorksPage({ onGetStarted }) {
       {/* SEO metadata — unique title and description for this page */}
       <PageMeta
         title="How It Works | AI-Powered 3-Wave Recruiter Outreach — ResumeBlast.ai"
-        description="See how ResumeBlast.ai sends your resume directly to verified recruiters in 4 simple steps. Upload, AI analysis, 3-wave drip campaign, and real-time tracking."
+        description="See how ResumeBlast.ai sends your resume directly to verified recruiters in 4 simple steps. Upload, AI analysis, 3-wave drip campaign, and a live progress dashboard."
         canonical="https://www.resumeblast.ai/how-it-works"
       />
 
@@ -85,7 +85,7 @@ function HowItWorksPage({ onGetStarted }) {
             <div className="hiw-step-icon">📊</div>
             <h2 className="hiw-step-title">Track Results</h2>
             <p className="hiw-step-desc">
-             Real-time dashboard showing your campaign status across all 3 waves.
+             A live dashboard shows your progress for each wave as it sends. Later waves stay pending until the previous one finishes.
             </p>
           </div>
 

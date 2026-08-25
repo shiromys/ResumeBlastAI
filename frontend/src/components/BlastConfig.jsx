@@ -270,6 +270,7 @@ function BlastConfig({ resumeId, resumeUrl, resumeText, userData, isGuest, payme
                     <span style={{color:'#374151',fontSize:'13px',lineHeight:'1.6',fontWeight:'500'}}>
                       I understand ResumeBlast.ai does not guarantee interviews, job offers, or employment.
                       I acknowledge my resume will be sent to recruiters per the selected plan and this campaign is final and cannot be reversed.
+                      This is a one-time purchase — see our <a href="/refund" target="_blank" rel="noopener noreferrer" style={{color:'#DC2626',fontWeight:600}}>Refund Policy</a>.
                     </span>
                   </label>
                 </div>
