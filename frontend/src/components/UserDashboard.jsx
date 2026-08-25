@@ -41,9 +41,7 @@ function UserDashboard({ user, onStartBlast }) {
   const w2 = currentBlast ? (parseInt(currentBlast.drip_day2_delivered) || 0) : 0
   const w3 = currentBlast ? (parseInt(currentBlast.drip_day3_delivered) || 0) : 0
   
-  const recruitersReached = currentBlast ? (Math.max(w1, w2, w3) || planLimit) : 0
-  const companiesCount = Math.floor(recruitersReached * 0.88)
-  
+  const recruitersReached = currentBlast ? Math.max(w1, w2, w3) : 0
   const totalDelivered = w1 + w2 + w3
   const totalExpected = planLimit * 3
   const deliveryPct = totalExpected > 0 ? Math.min(Math.round((totalDelivered / totalExpected) * 100), 100) : 0
@@ -114,50 +112,25 @@ function UserDashboard({ user, onStartBlast }) {
           margin-bottom: 40px;
         }
         .rb-next-section h3 { font-size: 16px; font-weight: 700; margin: 0 0 25px 0; color: #000000; }
-        
-        .rb-timeline-row { 
-          display: flex; 
-          justify-content: space-between; 
-          align-items: center; 
-          gap: 15px;
-        }
 
-        .rb-timeline-item { 
-          display: flex; 
-          align-items: center; 
-          gap: 15px; 
-          flex: 1; 
-          padding: 15px;
-          border-radius: 10px;
-          transition: all 0.3s ease;
-          cursor: pointer;
+        .rb-wave-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 20px;
         }
-
-        .rb-timeline-item:hover {
-          background-color: #f9fafb;
-          box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-          transform: translateY(-2px);
+        .rb-wave-item { }
+        .rb-wave-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 6px;
         }
-
-        .rb-circle { 
-          width: 40px; 
-          height: 40px; 
-          background: #dc2626; 
-          color: #ffffff; 
-          border-radius: 50%; 
-          display: flex; 
-          align-items: center; 
-          justify-content: center; 
-          font-weight: 700; 
-          flex-shrink: 0;
-          transition: transform 0.3s ease;
-        }
-
-        .rb-timeline-item:hover .rb-circle {
-          transform: scale(1.1);
-        }
-
-        .rb-timeline-text { font-size: 15px; color: #374151; font-weight: 500; }
+        .rb-wave-title { font-size: 15px; font-weight: 600; color: #111827; }
+        .rb-wave-status { font-size: 12px; font-weight: 600; color: #6b7280; }
+        .rb-wave-count { font-size: 13px; color: #6b7280; margin-bottom: 8px; }
+        .rb-wave-track { height: 8px; background: #f3f4f6; border-radius: 999px; overflow: hidden; }
+        .rb-wave-fill { height: 100%; background: #dc2626; border-radius: 999px; transition: width 0.4s ease; }
+        .rb-wave-note { font-size: 13px; color: #9ca3af; margin: 22px 0 0; line-height: 1.5; }
 
         .rb-btn-blast { 
           background: #dc2626; 
@@ -173,8 +146,7 @@ function UserDashboard({ user, onStartBlast }) {
         .rb-btn-blast:hover { background: #b91c1c; }
 
         @media (max-width: 768px) {
-          .rb-stats-row, .rb-timeline-row { grid-template-columns: 1fr; flex-direction: column; }
-          .rb-timeline-item { width: 100%; }
+          .rb-stats-row { grid-template-columns: 1fr; }
         }
       `}</style>
 
@@ -193,41 +165,47 @@ function UserDashboard({ user, onStartBlast }) {
       <div className="rb-stats-row">
         <div className="rb-card">
           <span className="rb-card-val">{recruitersReached.toLocaleString()}</span>
-          <span className="rb-card-label">Recruiters reached</span>
+          <span className="rb-card-label">Recruiters reached (Wave 1)</span>
         </div>
         <div className="rb-card">
-          <span className="rb-card-val">{companiesCount}+</span>
-          <span className="rb-card-label">Companies</span>
+          <span className="rb-card-val">{totalDelivered.toLocaleString()}</span>
+          <span className="rb-card-label">Total emails delivered</span>
         </div>
         <div className="rb-card">
           <span className="rb-card-val red-theme">{deliveryPct}%</span>
-          <span className="rb-card-label">Delivered</span>
-        </div>
-      </div>
-
-      <div className="rb-next-section">
-        <h3>What happens next</h3>
-        <div className="rb-timeline-row">
-          <div className="rb-timeline-item">
-            <div className="rb-circle">1</div>
-            <div className="rb-timeline-text">Recruiters review your resume</div>
-          </div>
-          <div className="rb-timeline-item">
-            <div className="rb-circle">2</div>
-            <div className="rb-timeline-text">They contact you directly</div>
-          </div>
-          <div className="rb-timeline-item">
-            <div className="rb-circle">3</div>
-            <div className="rb-timeline-text">Direct Recruiter Evaluation</div>
-          </div>
+          <span className="rb-card-label">Campaign progress</span>
         </div>
       </div>
 
       {currentBlast && (
-        <div style={{ marginTop: '20px', fontSize: '12px', color: '#9ca3af', textAlign: 'center', letterSpacing: '0.05em' }}>
-          
+        <div className="rb-next-section">
+          <h3>Your campaign progress</h3>
+          <div className="rb-wave-grid">
+            {[
+              { n: 1, label: 'Wave 1 · Introduction', sent: w1 },
+              { n: 2, label: 'Wave 2 · Follow-up', sent: w2 },
+              { n: 3, label: 'Wave 3 · Final reminder', sent: w3 },
+            ].map(wave => {
+              const pct = planLimit > 0 ? Math.min(Math.round((wave.sent / planLimit) * 100), 100) : 0
+              const status = wave.sent >= planLimit ? 'Complete' : wave.sent > 0 ? 'In progress' : 'Pending'
+              return (
+                <div className="rb-wave-item" key={wave.n}>
+                  <div className="rb-wave-head">
+                    <span className="rb-wave-title">{wave.label}</span>
+                    <span className="rb-wave-status">{status}</span>
+                  </div>
+                  <div className="rb-wave-count">{wave.sent.toLocaleString()} / {planLimit.toLocaleString()} recruiters</div>
+                  <div className="rb-wave-track"><div className="rb-wave-fill" style={{ width: `${pct}%` }} /></div>
+                </div>
+              )
+            })}
+          </div>
+          <p className="rb-wave-note">
+            Each wave sends daily until your full recruiter list is reached. Wave 2 and Wave 3 begin only after the previous wave finishes, so it's normal for later waves to show 0 for a while.
+          </p>
         </div>
       )}
+
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, Link } from 'react-router-dom'
 import { initiateCheckout } from '../services/paymentService'
 import './LandingPage.css'
 import { Helmet } from 'react-helmet-async'
@@ -81,7 +81,7 @@ const PLAN_CONFIG = {
   },
   growth: { 
     label: 'Growth', price: '$39.99', defaultCents: 3999, defaultLimit: 1000, drip: true, badge: null, comingSoon: false, 
-    features: ['1000 recruiters', 'Resume Analysis', 'Skill Analysis', '3-wave drip campaign', 'Industry-specific list', 'Guaranteed email delivery', 'periodical email delivery status', 'Priority email support within 12 hours', 'Express email support within 8 hours (optional)'] 
+    features: ['1000 recruiters', 'Resume Analysis', 'Skill Analysis', '3-wave drip campaign', 'Industry-specific list', 'Guaranteed email delivery', 'periodical email delivery status', 'Priority email support within 12 hours', 'Express email support within 8 hours'] 
   },
   advanced: { 
     label: 'Advance', price: '$49.99', defaultCents: 4999, defaultLimit: 1250, drip: true, badge: null, comingSoon: false, 
@@ -105,15 +105,19 @@ const FAQS = [
   },
   {
     q: 'How does the 3-wave recruiter drip campaign work?',
-    a: 'Wave 1 fires on Day 1, a follow-up Wave 2 on Day 4, and a final Wave 3 on Day 8 — all to verified recruiters in your field. The multi-touch approach increases response rates compared to a single email.'
+    a: 'Wave 1 (introduction) starts the day your campaign begins and sends daily until your full recruiter list has received it. Wave 2 (follow-up) and Wave 3 (final reminder) each begin only after the previous wave finishes, and run on business days. Total campaign length depends on your plan size — check your dashboard for your specific progress.'
   },
   {
     q: 'How many recruiters will receive my resume?',
-    a: 'Free plan: 11 recruiters at no cost. Starter ($9.99/month): 250 recruiters. Basic ($14.99/month): 500 recruiters. All verified and matched to your role and industry.'
+    a: 'All plans are one-time purchases (no subscription). Free: 11 recruiters at no cost. Starter ($9.99): 250. Basic ($14.99): 500. Professional ($29.99): 750. Growth ($39.99): 1,000. Advance ($49.99): 1,250. Premium ($59.99): 1,500. All verified and matched to your role and industry.'
   },
   {
     q: 'Should I buy Starter or Basic twice, or choose a Power Plan?',
     a: 'We recommend a Power Plan for wider reach. Buying the same plan again re-sends to the same recruiter list, so you reach the same recruiters twice rather than new ones. Professional, Growth, Advanced and Premium expand your reach to more unique verified recruiters in a single campaign, with skill analysis and priority support included.'
+  },
+  {
+    q: 'Can I see who my resume was sent to?',
+    a: 'To protect our recruiter and employer partners, we don\u2019t share individual recruiter names or personal contact details. Once your campaign is fully complete, your dashboard will show the company name, general phone number, and website for every organization your resume reached.'
   },
   {
     q: 'Is ResumeBlast.ai different from applying on job boards?',
@@ -216,7 +220,7 @@ function LandingPage({ onGetStarted, user }) {
         <div className="hero-content">
           <div className="tagline-wrapper">
             <p className="tagline animated-wipe">
-              AI-Powered Resume Distribution to <span className="counter-badge">1,500+</span> Recruiters
+              AI-Powered Resume Distribution to <span className="counter-badge">Up to 1,500+</span> Recruiters
             </p>
           </div>
           <h1>
@@ -228,8 +232,8 @@ function LandingPage({ onGetStarted, user }) {
           <div className="hero-highlight-block">
             <p className="subtitle">
               Don't waste time rewriting your resume. Our engine analyzes your profile and sends it directly to{' '}
-              <strong style={{color:'#DC2626',fontWeight:'800'}}><CountUp end={1500} suffix="+" /> verified recruiters</strong>{' '}
-              looking for your skills — automatically over 8 days.
+              <strong style={{color:'#DC2626',fontWeight:'800'}}>verified recruiters</strong>{' '}
+              looking for your skills — starting immediately and continuing daily until your full list is reached.
             </p>
             <div className="cta-container">
               <button className="cta-button large" onClick={onGetStarted}>Start Your Job Search</button>
@@ -245,7 +249,7 @@ function LandingPage({ onGetStarted, user }) {
         <div className="steps">
           <div className="step"><div className="step-number">1</div><div className="step-icon">📄</div><h3>Upload Resume</h3><p>Upload your resume in PDF, TXT or DOCX format. No rewriting or reformatting required.</p></div>
           <div className="step"><div className="step-number">2</div><div className="step-icon">🤖</div><h3>AI Analysis</h3><p>Our AI scans your resume to detect your role, seniority, and best-fit industry automatically.</p></div>
-          <div className="step"><div className="step-number">3</div><div className="step-icon">📧</div><h3>3-Wave Drip Blast</h3><p>Day 1 introduction → Day 4 follow-up → Day 8 final reminder. Maximum recruiter engagement.</p></div>
+          <div className="step"><div className="step-number">3</div><div className="step-icon">📧</div><h3>3-Wave Drip Blast</h3><p>Your introduction goes out to recruiters daily until your full plan list is reached, followed by a follow-up wave and a final reminder wave. Larger plans take longer to fully cycle through all three waves.</p></div>
           <div className="step"><div className="step-number">4</div><div className="step-icon">📊</div><h3>Track Results</h3><p>Real-time dashboard showing your campaign status across all 3 waves.</p></div>
         </div>
       </section>
@@ -449,6 +453,12 @@ function LandingPage({ onGetStarted, user }) {
             same plan again re-sends to the same recruiter list, while Professional, Growth, Advanced and
             Premium expand your reach to new verified recruiters — with skill analysis and priority support included.
           </div>
+
+          {/* Refund policy visible at point of purchase */}
+          <p style={{ textAlign: 'center', marginTop: '18px', fontSize: '13px', color: '#6b7280' }}>
+            All plans are one-time purchases. Please review our{' '}
+            <Link to="/refund" style={{ color: '#DC2626', fontWeight: 600 }}>Refund Policy</Link> before buying.
+          </p>
         </div>  
       </section>
 
@@ -462,7 +472,7 @@ function LandingPage({ onGetStarted, user }) {
             <span className="learn-more">Learn More →</span>
           </a>
           <a href="https://www.cloudsourcehrm.us/" target="_blank" rel="noopener noreferrer" className="upsell-card">
-            <h3>📧 CloudeSourceHRM</h3>
+            <h3>📧 CloudSourceHRM</h3>
             <p>Access our premium recruiter database with 10,000+ contacts for targeted outreach campaigns.</p>
             <span className="learn-more">Learn More →</span>
           </a>
