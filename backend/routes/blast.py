@@ -340,9 +340,10 @@ def send_freemium_blast():
         if str(user_id).startswith("guest_"):
             return jsonify({"success": False, "error": "Guest users must use a paid plan."}), 403
 
-        # Check if free blast already used
+        # Check if free blast already used — only a prior FREE/freemium blast counts,
+        # not any campaign (paid, shell, or failed rows must not block eligibility).
         cr = requests.get(
-            f"{SUPABASE_URL}/rest/v1/blast_campaigns?user_id=eq.{user_id}&select=id",
+            f"{SUPABASE_URL}/rest/v1/blast_campaigns?user_id=eq.{user_id}&plan_name=in.(free,freemium)&select=id",
             headers=get_db_headers()
         )
         if cr.status_code != 200:
