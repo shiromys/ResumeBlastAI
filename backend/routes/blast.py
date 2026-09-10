@@ -364,13 +364,17 @@ def send_freemium_blast():
             return jsonify(result), 500
 
         # Record in blast_campaigns
+        # ✅ FIX: use the actual successful-send count, not the attempted total —
+        # result["success"] (checked above) now guarantees at least one send
+        # succeeded, but on a partial failure this must reflect how many
+        # recruiters really received the resume, not how many were attempted.
         requests.post(
             f"{SUPABASE_URL}/rest/v1/blast_campaigns",
             json={
                 "user_id":          user_id,
                 "user_type":        "registered",
                 "status":           "completed",
-                "recipients_count": result["total"],
+                "recipients_count": result["successful"],
                 "plan_name":        "free",
                 "industry":         "Freemium",
                 "initiated_at":     datetime.utcnow().isoformat(),

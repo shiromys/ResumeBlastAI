@@ -240,6 +240,10 @@ class FreemiumEmailService:
             email_params = {
                 "from": f"{self.sender_name} <{self.sender_email}>",
                 "to": [recruiter_email],
+                # ✅ FIX: Reply-To now points at the candidate's own email so a
+                # recruiter's "Reply" goes to them, not the app's shared inbox.
+                # Resend's REST API field is snake_case "reply_to" (not Brevo's "replyTo").
+                "reply_to": candidate_data.get('candidate_email') or self.sender_email,
                 "subject": f"Resume Submission - {candidate_data.get('candidate_name', 'Candidate')} | {candidate_data.get('job_role', 'Professional')}",
                 "html": html_content,
                 "attachments": [
@@ -316,12 +320,24 @@ class FreemiumEmailService:
             
             print(f"\n✅ FREEMIUM BLAST COMPLETE: {results['successful']}/{results['total']} sent")
             print("="*70)
-            
-            return {
-                'success': True,
+
+            # ✅ FIX: 'success' now reflects whether any resume actually went out,
+            # instead of always being True. Previously this was hardcoded True even
+            # when every single send failed (e.g. resume download/attachment failed
+            # for all recruiters), which caused the caller (blast.py) to record the
+            # campaign as "completed" and permanently mark the user's one-time free
+            # blast as used, even though nothing was ever delivered.
+            response = {
+                'success': results['successful'] > 0,
                 'message': f"Freemium blast completed: {results['successful']}/{results['total']} sent",
                 **results
             }
+            if not response['success']:
+                response['error'] = (
+                    f"All {results['total']} recruiter sends failed — "
+                    f"the resume was not attached/delivered to anyone."
+                )
+            return response
             
         except Exception as e:
             print(f"\n❌ FREEMIUM BLAST ERROR: {str(e)}")

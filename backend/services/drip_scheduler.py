@@ -130,9 +130,19 @@ def _already_sent_today(campaign: dict, drip_day: int) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 # _fetch_recruiters_for_plan
 # ─────────────────────────────────────────────────────────────────────────────
-def _fetch_recruiters_for_plan(plan_name: str, offset: int = 0, batch_size: int = None) -> list:
+def _fetch_recruiters_for_plan(plan_name: str, campaign_id: str, wave: int, already_sent: int, batch_size: int = None) -> list:
     """
-    Fetch the next batch of recruiters for this plan starting from offset.
+    Fetch the next batch of recruiters for this campaign+wave that have NOT
+    already been recorded as sent in campaign_recruiter_sends.
+
+    ✅ FIX: Identity-based selection (exclude-by-recruiter-id), replacing the old
+    offset-based `ORDER BY id LIMIT batch OFFSET already_sent` approach. The old
+    approach had no persisted record of *who* was sent to — only a count — so a
+    mid-campaign delete/reorder of the `recruiters` table could silently skip or
+    double-send recruiters for any in-flight campaign. This version is immune to
+    that, at the cost of one extra read (the already-sent id set) per batch.
+    `already_sent` is still used the same way as before: to know how many are
+    still needed to fill out the plan's limit for this wave.
     """
     supabase_url = _get_supabase_url()
     plan_limit   = _get_limit_for_plan(plan_name)
@@ -140,71 +150,104 @@ def _fetch_recruiters_for_plan(plan_name: str, offset: int = 0, batch_size: int 
     if batch_size is None:
         batch_size = DAILY_EMAIL_LIMIT
 
-    remaining = plan_limit - offset
+    remaining = plan_limit - already_sent
     if remaining <= 0:
         return []
 
-    fetch_limit = min(batch_size, remaining) + 10
+    need = min(batch_size, remaining)
+
+    # Recruiters already recorded as sent for this exact campaign+wave.
+    sent_resp = requests.get(
+        f"{supabase_url}/rest/v1/campaign_recruiter_sends"
+        f"?select=recruiter_id&campaign_id=eq.{campaign_id}&wave=eq.{wave}",
+        headers=_headers()
+    )
+    if sent_resp.status_code not in [200, 206]:
+        print(f"[Scheduler] Failed to fetch campaign_recruiter_sends: {sent_resp.status_code}")
+        print(f"[Scheduler] SUPABASE ERROR DETAILS: {sent_resp.text}")
+        return []
+    already_ids = {row["recruiter_id"] for row in sent_resp.json()}
 
     # ── EXACT SCHEMA MATCH ──
-    # We select only 'email' and order by 'id' safely since both exist.
-    url = (
-        f"{supabase_url}/rest/v1/recruiters"
-        f"?select=email"
-        f"&order=id.asc"
-        f"&limit={fetch_limit}"
-        f"&offset={offset}"
-    )
+    # We select 'id' and 'email', order by 'id' safely since both exist.
+    # Paginated via an id cursor (not a fixed offset) because, once already-sent
+    # recruiters are excluded, a single fixed-size page may not contain enough
+    # new candidates to satisfy `need` — this keeps fetching pages until it does
+    # or the recruiters table is exhausted.
+    result, id_cursor, seen = [], None, set()
 
-    resp = requests.get(url, headers=_headers())
+    while len(result) < need:
+        url = (
+            f"{supabase_url}/rest/v1/recruiters"
+            f"?select=id,email"
+            f"&order=id.asc"
+            f"&limit={need * 2}"
+        )
+        if id_cursor:
+            url += f"&id=gt.{id_cursor}"
 
-    if resp.status_code not in [200, 206]:
-        print(f"[Scheduler] Failed to fetch recruiters: {resp.status_code}")
-        print(f"[Scheduler] SUPABASE ERROR DETAILS: {resp.text}")
-        return []
-
-    need = min(batch_size, remaining)
-    seen, result = set(), []
-
-    for r in resp.json():
-        # Safely extract email. If it's missing or null, skip this row.
-        email = r.get("email")
-        if not email:
-            continue
-
-        email = str(email).strip().lower()
-        if email and email not in seen:
-            seen.add(email)
-            result.append({
-                "email":   email,
-                "name":    "Hiring Manager",    # Hardcoded fallback
-                "company": "Verified Firm"      # Hardcoded fallback
-            })
-        if len(result) >= need:
+        resp = requests.get(url, headers=_headers())
+        if resp.status_code not in [200, 206]:
+            print(f"[Scheduler] Failed to fetch recruiters: {resp.status_code}")
+            print(f"[Scheduler] SUPABASE ERROR DETAILS: {resp.text}")
             break
 
+        rows = resp.json()
+        if not rows:
+            break  # recruiters table exhausted
+
+        for r in rows:
+            id_cursor = r["id"]
+
+            # Safely extract email. If it's missing or null, skip this row.
+            email = r.get("email")
+            if not email or r["id"] in already_ids:
+                continue
+
+            email = str(email).strip().lower()
+            if email and email not in seen:
+                seen.add(email)
+                result.append({
+                    "id":      r["id"],
+                    "email":   email,
+                    "name":    "Hiring Manager",    # Hardcoded fallback — unchanged
+                    "company": "Verified Firm"      # Hardcoded fallback — unchanged
+                })
+            if len(result) >= need:
+                break
+
     print(f"[Scheduler] Fetched {len(result)} recruiters "
-          f"(plan={plan_name}, offset={offset}, need={need}, plan_limit={plan_limit})")
+          f"(plan={plan_name}, campaign={campaign_id}, wave={wave}, "
+          f"already_sent={already_sent}, need={need}, plan_limit={plan_limit})")
     return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # _send_brevo_email
 # ─────────────────────────────────────────────────────────────────────────────
-def _send_brevo_email(to_email, to_name, template_id, params):
+def _send_brevo_email(to_email, to_name, template_id, params, campaign_id=None):
     reply_to_email = params.get("candidate_email")
     if not reply_to_email:
         reply_to_email = BREVO_SENDER_EMAIL
 
+    payload = {
+        "to":         [{"email": to_email, "name": to_name or "Hiring Manager"}],
+        "templateId": template_id,
+        "params":     params,
+        "sender":     {"name": BREVO_SENDER_NAME, "email": BREVO_SENDER_EMAIL},
+        "replyTo":    {"email": reply_to_email}
+    }
+    # ✅ FIX: Tag the send with campaign_id so Brevo's event webhook can attribute
+    # delivered/opened/click/bounce events back to this campaign (webhooks.py /
+    # brevo_event_logs already exist and are ready for this — they just never
+    # received a campaign_id before because nothing sent one). Omitted entirely
+    # when there's no campaign_id, since Brevo rejects an empty "tags" value.
+    if campaign_id:
+        payload["tags"] = [str(campaign_id)]
+
     resp = requests.post(
         "https://api.brevo.com/v3/smtp/email",
-        json={
-            "to":         [{"email": to_email, "name": to_name or "Hiring Manager"}],
-            "templateId": template_id,
-            "params":     params,
-            "sender":     {"name": BREVO_SENDER_NAME, "email": BREVO_SENDER_EMAIL},
-            "replyTo":    {"email": reply_to_email}
-        },
+        json=payload,
         headers={"api-key": BREVO_API_KEY, "Content-Type": "application/json"}
     )
     if resp.status_code in [200, 201]:
@@ -240,9 +283,11 @@ def _send_drip_wave(campaign: dict, drip_day: int) -> dict:
                 "cumulative": already_sent, "wave_complete": False, "quota_exceeded": True}
 
     recruiters = _fetch_recruiters_for_plan(
-        plan_name  = plan_name,
-        offset     = already_sent,
-        batch_size = DAILY_EMAIL_LIMIT
+        plan_name    = plan_name,
+        campaign_id  = campaign_id,
+        wave         = drip_day,
+        already_sent = already_sent,
+        batch_size   = DAILY_EMAIL_LIMIT
     )
 
     if not recruiters:
@@ -273,10 +318,28 @@ def _send_drip_wave(campaign: dict, drip_day: int) -> dict:
 
     for recruiter in recruiters:
         result = _send_brevo_email(
-            recruiter["email"], recruiter["name"], template_id, email_params
+            recruiter["email"], recruiter["name"], template_id, email_params,
+            campaign_id=campaign_id
         )
         if result["success"]:
             sent_this_batch += 1
+            # ✅ FIX: Record exactly who this wave sent to (campaign_recruiter_sends),
+            # so recruiter selection is identity-based going forward (see
+            # _fetch_recruiters_for_plan) and so completed campaigns can later show
+            # the candidate which recruiters/companies their resume actually reached.
+            # "resolution=ignore-duplicates" makes this safe to retry — a duplicate
+            # (campaign_id, recruiter_id, wave) row is a no-op, not an error.
+            # If this write itself fails, the email already went out via Brevo, so
+            # it's logged as a warning only — it must NOT count against sent/failed,
+            # which would incorrectly affect wave-completion logic below.
+            log_resp = requests.post(
+                f"{_get_supabase_url()}/rest/v1/campaign_recruiter_sends",
+                json={"campaign_id": campaign_id, "recruiter_id": recruiter["id"], "wave": drip_day},
+                headers={**_headers(), "Prefer": "resolution=ignore-duplicates,return=minimal"}
+            )
+            if log_resp.status_code not in [200, 201, 204]:
+                print(f"[Scheduler] ⚠️ Sent to {recruiter['email']} but failed to log it "
+                      f"in campaign_recruiter_sends: {log_resp.status_code} {log_resp.text[:120]}")
         else:
             failed_this_batch += 1
             print(f"[Scheduler] Failed: {recruiter['email']} -- {result.get('error','')[:80]}")

@@ -9,9 +9,20 @@ const PLAN_LIMITS = {
   professional: 750, growth: 1000, advanced: 1250, premium: 1500,
 }
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+
 function UserDashboard({ user, onStartBlast }) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState({ blasts: [] })
+
+  // ✅ NEW: "Recruiters reached" (company/phone/website) for a completed campaign.
+  // Gated entirely by the backend's `available` flag — see
+  // GET /api/user/campaign/<campaign_id>/recruiters. Additive only; doesn't
+  // touch any existing state above.
+  const [recruitersState, setRecruitersState] = useState({
+    loading: false, available: false, recruiters: [], count: 0, error: null
+  })
+  const [recruiterSearch, setRecruiterSearch] = useState('')
 
   const loadData = useCallback(async () => {
     if (!user) return
@@ -32,6 +43,38 @@ function UserDashboard({ user, onStartBlast }) {
   }, [user, loadData])
 
   const currentBlast = data.blasts?.[0] || null
+
+  // ✅ NEW: fetch the recruiter/company list once we have a completed campaign.
+  // Freemium ('free') sends never populate campaign_recruiter_sends (no wave
+  // tracking on that path), so there's nothing to show there — skip the call.
+  useEffect(() => {
+    if (!user?.id || !currentBlast?.id || currentBlast.status !== 'completed' || currentBlast.plan_name === 'free') {
+      return
+    }
+    let cancelled = false
+    setRecruitersState(s => ({ ...s, loading: true, error: null }))
+    fetch(`${API_URL}/api/user/campaign/${currentBlast.id}/recruiters?user_id=${user.id}`)
+      .then(r => r.json())
+      .then(json => {
+        if (cancelled) return
+        if (json.success) {
+          setRecruitersState({
+            loading: false, available: !!json.available,
+            recruiters: json.recruiters || [], count: json.count || 0, error: null
+          })
+        } else {
+          setRecruitersState({ loading: false, available: false, recruiters: [], count: 0, error: json.error || 'Failed to load' })
+        }
+      })
+      .catch(err => {
+        if (!cancelled) setRecruitersState({ loading: false, available: false, recruiters: [], count: 0, error: err.message })
+      })
+    return () => { cancelled = true }
+  }, [user?.id, currentBlast?.id, currentBlast?.status, currentBlast?.plan_name])
+
+  const filteredRecruiters = recruitersState.recruiters.filter(r =>
+    !recruiterSearch.trim() || (r.company_name || '').toLowerCase().includes(recruiterSearch.trim().toLowerCase())
+  )
   
   // ── FOOLPROOF LIVE CALCULATIONS ──
   const planName = currentBlast?.plan_name?.toLowerCase() || 'starter'
@@ -148,6 +191,53 @@ function UserDashboard({ user, onStartBlast }) {
         @media (max-width: 768px) {
           .rb-stats-row { grid-template-columns: 1fr; }
         }
+
+        /* ✅ NEW: Recruiters reached (company/phone/website) section */
+        .rb-recruiters-section {
+          border: 1px solid #e5e7eb;
+          border-radius: 12px;
+          padding: 30px;
+          background: #ffffff;
+          margin-bottom: 40px;
+        }
+        .rb-recruiters-head {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+        .rb-recruiters-head h3 { font-size: 16px; font-weight: 700; margin: 0; color: #000000; }
+        .rb-recruiters-search {
+          padding: 8px 12px;
+          border: 1px solid #e5e7eb;
+          border-radius: 8px;
+          font-size: 14px;
+          min-width: 220px;
+        }
+        .rb-recruiters-table-wrap { overflow-x: auto; }
+        .rb-recruiters-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .rb-recruiters-table th {
+          text-align: left;
+          color: #6b7280;
+          font-weight: 600;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.03em;
+          padding: 10px 12px;
+          border-bottom: 1px solid #e5e7eb;
+        }
+        .rb-recruiters-table td {
+          padding: 12px;
+          border-bottom: 1px solid #f3f4f6;
+          color: #111827;
+        }
+        .rb-recruiters-table a { color: #dc2626; text-decoration: none; font-weight: 600; }
+        .rb-recruiters-table a:hover { text-decoration: underline; }
+        .rb-recruiters-footer { margin-top: 14px; font-size: 13px; color: #6b7280; }
+        .rb-recruiters-disclaimer { font-size: 12px; color: #9ca3af; margin-top: 16px; line-height: 1.5; }
+        .rb-recruiters-empty { color: #6b7280; font-size: 14px; padding: 20px 0; text-align: center; }
       `}</style>
 
       <div className="rb-header-actions">
@@ -202,6 +292,65 @@ function UserDashboard({ user, onStartBlast }) {
           </div>
           <p className="rb-wave-note">
             Each wave sends daily until your full recruiter list is reached. Wave 2 and Wave 3 begin only after the previous wave finishes, so it's normal for later waves to show 0 for a while.
+          </p>
+        </div>
+      )}
+
+      {/* ✅ NEW: Recruiters reached — company / phone / website, once the campaign
+          is fully completed and send-tracking data exists for it. Hidden entirely
+          while loading or unavailable, so it never shows a broken/empty-looking
+          section for older campaigns that predate send-tracking. */}
+      {currentBlast?.status === 'completed' && currentBlast?.plan_name !== 'free' && recruitersState.available && (
+        <div className="rb-recruiters-section">
+          <div className="rb-recruiters-head">
+            <h3>Recruiters your resume reached</h3>
+            {recruitersState.count > 0 && (
+              <input
+                type="text"
+                className="rb-recruiters-search"
+                placeholder="Search by company..."
+                value={recruiterSearch}
+                onChange={e => setRecruiterSearch(e.target.value)}
+              />
+            )}
+          </div>
+
+          {recruitersState.count === 0 ? (
+            <div className="rb-recruiters-empty">No recruiter details available for this campaign yet.</div>
+          ) : (
+            <>
+              <div className="rb-recruiters-table-wrap">
+                <table className="rb-recruiters-table">
+                  <thead>
+                    <tr>
+                      <th>Company</th>
+                      <th>Phone Number</th>
+                      <th>Website</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRecruiters.map((r, i) => (
+                      <tr key={i}>
+                        <td>{r.company_name || '—'}</td>
+                        <td>{r.contact_number || '—'}</td>
+                        <td>
+                          {r.website_url
+                            ? <a href={r.website_url} target="_blank" rel="noopener noreferrer">{r.website_url}</a>
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="rb-recruiters-footer">
+                Showing {filteredRecruiters.length} of {recruitersState.count}
+              </p>
+            </>
+          )}
+
+          <p className="rb-recruiters-disclaimer">
+            Company details are shown for recruiters your resume was fully delivered to, based on our records, and may not always be current or complete.
           </p>
         </div>
       )}

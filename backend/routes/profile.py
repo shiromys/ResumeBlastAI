@@ -71,6 +71,112 @@ def get_profile():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@profile_bp.route('/campaign/<campaign_id>/recruiters', methods=['GET'])
+def get_campaign_recruiters(campaign_id):
+    """
+    Candidate-facing: for a COMPLETED campaign, list the company name / phone /
+    website of recruiters whose resume send is fully recorded in
+    campaign_recruiter_sends (all 3 waves), enriched via
+    recruiter_company_links -> companies. Never the recruiter's own email —
+    only company-level info is ever returned here.
+
+    Usage: GET /api/user/campaign/<campaign_id>/recruiters?user_id=<uuid>
+
+    A campaign with no campaign_recruiter_sends rows yet (older campaigns that
+    predate send-tracking) simply returns an empty list — this never falls back
+    to guessing from `recruiters` directly.
+    """
+    try:
+        user_id = (request.args.get('user_id') or '').strip()
+        if not user_id:
+            return jsonify({'success': False, 'error': 'user_id is required'}), 400
+
+        campaign_id = (campaign_id or '').strip()
+
+        # Ownership + status check first — only the campaign's own owner, and
+        # only once it's fully completed, ever gets a list back.
+        camp_url = (
+            f"{SUPABASE_URL}/rest/v1/blast_campaigns"
+            f"?id=eq.{quote(campaign_id)}"
+            f"&select=id,user_id,status"
+        )
+        camp_resp = requests.get(camp_url, headers=_read_headers(), timeout=8)
+        if camp_resp.status_code != 200 or not camp_resp.json():
+            return jsonify({'success': False, 'error': 'campaign not found'}), 404
+
+        campaign = camp_resp.json()[0]
+        if str(campaign.get('user_id') or '') != user_id:
+            return jsonify({'success': False, 'error': 'not authorized for this campaign'}), 403
+
+        if campaign.get('status') != 'completed':
+            return jsonify({'success': True, 'available': False, 'recruiters': [], 'count': 0}), 200
+
+        # 1. Who this campaign actually sent to, and which waves each got.
+        sends_url = (
+            f"{SUPABASE_URL}/rest/v1/campaign_recruiter_sends"
+            f"?campaign_id=eq.{quote(campaign_id)}"
+            f"&select=recruiter_id,wave"
+        )
+        sends_resp = requests.get(sends_url, headers=_read_headers(), timeout=8)
+        if sends_resp.status_code != 200:
+            return jsonify({'success': False, 'error': f'lookup failed ({sends_resp.status_code})'}), 500
+
+        waves_by_recruiter = {}
+        for row in sends_resp.json():
+            rid = row.get('recruiter_id')
+            if not rid:
+                continue
+            waves_by_recruiter.setdefault(rid, set()).add(row.get('wave'))
+
+        # Only recruiters who received the full 3-wave sequence — this naturally
+        # excludes bounces/partial sends without any extra filtering logic.
+        qualifying_ids = [rid for rid, waves in waves_by_recruiter.items() if len(waves) >= 3]
+
+        if not qualifying_ids:
+            return jsonify({'success': True, 'available': True, 'recruiters': [], 'count': 0}), 200
+
+        # 2. Company links for those recruiters (a recruiter with no link is
+        #    expected and falls through to "Independent Recruiter" below).
+        ids_filter = ','.join(qualifying_ids)
+        links_url = (
+            f"{SUPABASE_URL}/rest/v1/recruiter_company_links"
+            f"?recruiter_id=in.({ids_filter})"
+            f"&select=recruiter_id,company_id"
+        )
+        links_resp = requests.get(links_url, headers=_read_headers(), timeout=8)
+        links = links_resp.json() if links_resp.status_code == 200 else []
+        company_id_by_recruiter = {l['recruiter_id']: l['company_id'] for l in links if l.get('company_id')}
+
+        # 3. The company rows themselves.
+        companies_by_id = {}
+        company_ids = list({cid for cid in company_id_by_recruiter.values()})
+        if company_ids:
+            cids_filter = ','.join(str(cid) for cid in company_ids)
+            companies_url = (
+                f"{SUPABASE_URL}/rest/v1/companies"
+                f"?id=in.({cids_filter})"
+                f"&select=id,company_name,website_url,contact_number"
+            )
+            companies_resp = requests.get(companies_url, headers=_read_headers(), timeout=8)
+            if companies_resp.status_code == 200:
+                companies_by_id = {c['id']: c for c in companies_resp.json()}
+
+        # 4. Assemble the candidate-facing list.
+        recruiters = []
+        for rid in qualifying_ids:
+            company = companies_by_id.get(company_id_by_recruiter.get(rid)) or {}
+            recruiters.append({
+                'company_name':   company.get('company_name') or 'Independent Recruiter',
+                'website_url':    company.get('website_url'),
+                'contact_number': company.get('contact_number'),
+            })
+
+        return jsonify({'success': True, 'available': True, 'recruiters': recruiters, 'count': len(recruiters)}), 200
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @profile_bp.route('/profile', methods=['PATCH'])
 def update_profile():
     """
