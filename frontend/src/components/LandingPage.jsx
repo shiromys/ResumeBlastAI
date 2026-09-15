@@ -213,6 +213,20 @@ function LandingPage({ onGetStarted, user }) {
             }))
           })}
         </script>
+
+        {/* ── SEO: VideoObject JSON-LD schema for the explainer video below ── */}
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "VideoObject",
+            "name": "See ResumeBlast.ai in Action",
+            "description": "A 60-second walkthrough of how ResumeBlast.ai sends your resume to verified recruiters through an AI-powered 3-wave drip campaign.",
+            "thumbnailUrl": "https://www.resumeblast.ai/video/resumeblast-landing-poster.jpg",
+            "uploadDate": "2026-09-15",
+            "duration": "PT1M",
+            "contentUrl": "https://www.resumeblast.ai/video/resumeblast-landing-video.mp4"
+          })}
+        </script>
       </Helmet>
 
       {/* ── HERO ── */}
@@ -239,6 +253,24 @@ function LandingPage({ onGetStarted, user }) {
               <button className="cta-button large" onClick={onGetStarted}>Start Your Job Search</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ── EXPLAINER VIDEO ── */}
+      <section className="explainer-video">
+        <h2>See ResumeBlast.ai in Action</h2>
+        <p className="section-subtitle">A 60-second look at how it works</p>
+        <div className="explainer-video-wrapper">
+          <video
+            className="explainer-video-player"
+            controls
+            preload="none"
+            poster="/video/resumeblast-landing-poster.jpg"
+            playsInline
+          >
+            <source src="/video/resumeblast-landing-video.mp4" type="video/mp4" />
+            Your browser does not support the video tag.
+          </video>
         </div>
       </section>
 
