@@ -22,6 +22,7 @@ function Navbar({ user, isGuest, isAdmin, onViewChange, onLoginClick, onLogout }
 
           <ul className={`navbar-menu ${mobileMenuOpen ? 'mobile-active' : ''}`}>
             <li><Link className="nav-link" to="/" onClick={close}>Home</Link></li>
+            <li><Link className="nav-link" to="/blog" onClick={close}>Blog</Link></li>
 
             {!user ? (
               <>

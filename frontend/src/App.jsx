@@ -23,6 +23,8 @@ import EmployerNetwork from './components/EmployerNetwork' // ✅ NEW
 import HowItWorksPage from './pages/HowItWorksPage'
 import PricingPage from './pages/PricingPage'
 import ScrollToTop from './components/ScrollToTop' // ✅ ADDED
+import BlogPage from './pages/BlogPage'
+import BlogPostPage from './pages/BlogPostPage'
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
@@ -409,6 +411,9 @@ function App() {
           <Route path="/pricing" element={
             <PricingPage onGetStarted={handleStartBlast} user={user} />
           } />
+
+          <Route path="/blog" element={<BlogPage />} />
+          <Route path="/blog/:slug" element={<BlogPostPage />} />
 
           <Route path="/contact" element={<ContactPage onBack={() => navigate(user ? '/dashboard' : '/')} />} />
           <Route path="/privacy" element={<LegalPage type="privacy" onBack={() => navigate(user ? '/dashboard' : '/')} />} />

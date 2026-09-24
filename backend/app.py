@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from dotenv import load_dotenv
 from routes.contact import contact_bp
+from routes.blog import blog_bp
 
 BASE_DIR = Path(__file__).resolve().parent
 manual_env_path = BASE_DIR / '.env'
@@ -143,17 +144,21 @@ app.register_blueprint(guest_bp)
 app.register_blueprint(drip_campaign_bp)   # ✅ existing
 app.register_blueprint(employer_lead_bp)   # ✅ NEW: /api/employer-lead
 app.register_blueprint(profile_bp)         # ✅ NEW: /api/user/profile
+app.register_blueprint(blog_bp)            # ✅ NEW: /api/blog/*
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ✅ APScheduler — Drip Email Scheduler
 # Runs every 30 minutes to process Day 4 & Day 8 emails
+# Also runs the Blogger blog sync every 6 hours (same scheduler instance,
+# so it stays covered by the Gunicorn file-lock guard below).
 # ─────────────────────────────────────────────────────────────────────────────
 def _start_drip_scheduler():
-    """Start APScheduler for drip email processing."""
+    """Start APScheduler for drip email processing + Blogger sync."""
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         from services.drip_scheduler import run_scheduler_tick
+        from services.blogger_sync_service import sync_blogger_posts
 
         scheduler = BackgroundScheduler(timezone="UTC")
         scheduler.add_job(
@@ -164,8 +169,17 @@ def _start_drip_scheduler():
             name="Drip Email Scheduler",
             replace_existing=True
         )
+        scheduler.add_job(
+            func=sync_blogger_posts,
+            trigger="interval",
+            hours=6,
+            id="blogger_sync_scheduler",
+            name="Blogger Blog Sync",
+            replace_existing=True
+        )
         scheduler.start()
         print("✅ Drip email scheduler started (runs every 30 minutes)")
+        print("✅ Blogger sync scheduler started (runs every 6 hours)")
         return scheduler
     except ImportError:
         print("⚠️ APScheduler not installed — drip scheduler disabled")
