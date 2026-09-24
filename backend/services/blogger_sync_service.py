@@ -46,11 +46,20 @@ def _alternate_link(entry):
 
 
 def _thumbnail(entry):
+    """
+    Prefer the first inline image from the post body — Blogger serves those
+    without the tiny size cap. Fall back to the auto-generated thumbnail with
+    its size segment widened (handles both /s72-c/ and /s72-w640-h480-c/ forms).
+    """
+    content_html = entry.get('content', {}).get('$t', '')
+    match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', content_html)
+    if match:
+        return match.group(1)
+
     thumb = entry.get('media$thumbnail', {}).get('url')
     if not thumb:
         return None
-    # Blogger's auto-thumbnail defaults to a tiny 72x72 crop — bump it up
-    return re.sub(r'/s72(-c)?/', '/s600/', thumb)
+    return re.sub(r'/s\d+(-w\d+-h\d+)?(-c)?/', '/s1600/', thumb)
 
 
 def _fetch_page(start_index, max_results=50):
