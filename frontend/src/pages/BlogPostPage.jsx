@@ -57,12 +57,9 @@ function BlogPostPage() {
         )}
       </div>
 
-      {post.thumbnail_url && (
-        <img src={post.thumbnail_url} alt={post.title} className="blog-post-hero-image" />
-      )}
-
-      {/* Content is authored solely by the ResumeBlast.ai team via Blogger — a single
-          trusted source, not user-submitted — so rendering it directly is safe. */}
+      {/* No separate hero image here — the post's own content already includes
+          its lead image (that's what thumbnail_url is extracted from), so
+          rendering it twice would duplicate it. */}
       <div className="blog-post-content" dangerouslySetInnerHTML={{ __html: post.content_html }} />
     </div>
   )
