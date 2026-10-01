@@ -172,7 +172,7 @@ def _start_drip_scheduler():
         scheduler.add_job(
             func=sync_blogger_posts,
             trigger="interval",
-            hours=6,
+            hours=1,
             id="blogger_sync_scheduler",
             name="Blogger Blog Sync",
             replace_existing=True
