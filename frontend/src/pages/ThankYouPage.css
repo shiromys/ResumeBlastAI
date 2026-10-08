@@ -1,0 +1,107 @@
+.thankyou-page {
+  width: 100%;
+  min-height: 80vh;
+  font-family: 'Inter', sans-serif;
+  background: radial-gradient(circle at 50% 0%, #FEF2F2 0%, #FFFFFF 65%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  box-sizing: border-box;
+}
+
+.thankyou-card {
+  width: 100%;
+  max-width: 480px;
+  background: #FFFFFF;
+  border: 1px solid #FEE2E2;
+  border-radius: 24px;
+  box-shadow: 0 20px 40px -10px rgba(220, 38, 38, 0.12);
+  padding: 48px 40px;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.thankyou-check-circle {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #16A34A;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+}
+
+.thankyou-title {
+  margin: 0 0 12px 0;
+  font-size: 28px;
+  font-weight: 800;
+  color: #111827;
+  letter-spacing: -0.01em;
+}
+
+.thankyou-subtitle {
+  margin: 0 0 28px 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: #4B5563;
+}
+
+.thankyou-summary {
+  background: #F9FAFB;
+  border: 1px solid #E5E7EB;
+  border-radius: 14px;
+  padding: 6px 20px;
+  margin-bottom: 28px;
+  text-align: left;
+}
+
+.thankyou-summary-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  font-size: 14px;
+  color: #6B7280;
+}
+
+.thankyou-summary-row + .thankyou-summary-row {
+  border-top: 1px solid #E5E7EB;
+}
+
+.thankyou-summary-value {
+  color: #111827;
+  font-weight: 600;
+}
+
+.thankyou-continue-btn {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 16px;
+  border: none;
+  border-radius: 50px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #FFFFFF;
+  cursor: pointer;
+  background: linear-gradient(135deg, #DC2626 0%, #991B1B 100%);
+  box-shadow: 0 10px 25px -5px rgba(220, 38, 38, 0.4);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.thankyou-continue-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 15px 30px -5px rgba(220, 38, 38, 0.5);
+}
+
+.thankyou-redirect-note {
+  margin: 20px 0 0 0;
+  font-size: 13px;
+  color: #9CA3AF;
+}
+
+@media (max-width: 480px) {
+  .thankyou-card { padding: 36px 24px; }
+  .thankyou-title { font-size: 24px; }
+}

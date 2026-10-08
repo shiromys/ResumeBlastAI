@@ -29,6 +29,7 @@ import BlogPostPage from './pages/BlogPostPage'
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
 import ComplianceBanner from './components/ComplianceBanner'
+import ThankYouPage from './pages/ThankYouPage'
 
 // ✅ FIX: Modified to accept isAuth parameter. 
 // If a user is logged in, we ignore guest logic to prevent session conflicts.
@@ -159,7 +160,7 @@ function App() {
             setPaymentSuccess(true)
             restoreResumeData() // Restore state for registered users
             // 🔥 FIX: Pass window.location.search to preserve Stripe URL parameters!
-            navigate(`/workbench${window.location.search}`, { replace: true })
+            navigate(`/thank-you${window.location.search}`, { replace: true })
           } else if (window.location.pathname === '/') {
              if (adminStatus) {
                 navigate('/admin', { replace: true })
@@ -176,7 +177,7 @@ function App() {
           setPaymentSuccess(true)
           restoreResumeData() // Restore state for guests
           // 🔥 FIX: Pass window.location.search to preserve Stripe URL parameters for guests too!
-          navigate(`/workbench${window.location.search}`, { replace: true })
+          navigate(`/thank-you${window.location.search}`, { replace: true })
 
         } else if (isPaymentReturn && !isGuestReturning) {
           console.warn('⚠️ Payment return but no session detected — going home')
@@ -341,7 +342,9 @@ function App() {
       >
         <Routes>
           <Route path="/" element={<LandingPage onGetStarted={handleStartBlast} user={user} />} />
-          
+
+          <Route path="/thank-you" element={<ThankYouPage />} />
+
           <Route path="/workbench" element={
             (user || isGuest) ? (
               <div className="container dashboard-container">
