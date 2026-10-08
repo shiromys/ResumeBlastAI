@@ -3,14 +3,18 @@ import { useNavigate } from 'react-router-dom'
 import PageMeta from '../components/SEO/PageMeta'
 import './ThankYouPage.css'
 
-const PLAN_LABELS = {
-  free:         'Free Plan',
-  starter:      'Starter Plan',
-  basic:        'Basic Plan',
-  professional: 'Professional Plan',
-  growth:       'Growth Plan',
-  advanced:     'Advanced Plan',
-  premium:      'Premium Plan',
+// Same plan keys/prices as PLAN_CONFIG in BlastConfig.jsx — duplicated here
+// (not imported) so this page has no dependency on that component's internals.
+// Since every plan is a fixed price (no coupons/discounts), this is always
+// accurate for what the user actually paid.
+const PLAN_INFO = {
+  free:         { label: 'Free Plan',          price: '$0.00' },
+  starter:      { label: 'Starter Plan',       price: '$9.99' },
+  basic:        { label: 'Basic Plan',         price: '$14.99' },
+  professional: { label: 'Professional Plan',  price: '$29.99' },
+  growth:       { label: 'Growth Plan',        price: '$39.99' },
+  advanced:     { label: 'Advanced Plan',      price: '$49.99' },
+  premium:      { label: 'Premium Plan',       price: '$59.99' },
 }
 
 const AUTO_REDIRECT_SECONDS = 6
@@ -18,6 +22,7 @@ const AUTO_REDIRECT_SECONDS = 6
 function ThankYouPage() {
   const navigate = useNavigate()
   const [planLabel, setPlanLabel] = useState('Your Plan')
+  const [planPrice, setPlanPrice] = useState(null)
   const [secondsLeft, setSecondsLeft] = useState(AUTO_REDIRECT_SECONDS)
 
   const continueToWorkbench = () => {
@@ -34,12 +39,14 @@ function ThankYouPage() {
       const savedConfig = localStorage.getItem('pending_blast_config')
       if (savedConfig) {
         const parsed = JSON.parse(savedConfig)
-        if (parsed?.plan && PLAN_LABELS[parsed.plan]) {
-          setPlanLabel(PLAN_LABELS[parsed.plan])
+        const info = parsed?.plan ? PLAN_INFO[parsed.plan] : null
+        if (info) {
+          setPlanLabel(info.label)
+          setPlanPrice(info.price)
         }
       }
     } catch (e) {
-      // Non-blocking — just falls back to the generic label
+      // Non-blocking — just falls back to the generic label, no price shown
     }
   }, [])
 
@@ -78,6 +85,12 @@ function ThankYouPage() {
             <span>Plan</span>
             <span className="thankyou-summary-value">{planLabel}</span>
           </div>
+          {planPrice && (
+            <div className="thankyou-summary-row">
+              <span>Amount Paid</span>
+              <span className="thankyou-summary-value">{planPrice}</span>
+            </div>
+          )}
           <div className="thankyou-summary-row">
             <span>Receipt</span>
             <span className="thankyou-summary-value">Sent to your email</span>
