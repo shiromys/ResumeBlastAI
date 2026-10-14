@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'  // Import supabase client
 import './ContactPage.css'
 import PageMeta from './SEO/PageMeta'
@@ -14,9 +14,52 @@ function ContactPage({ onBack }) {
   const [message, setMessage] = useState('')
   const [user, setUser] = useState(null)
 
+  // ✅ Cloudflare Turnstile state
+  const [turnstileToken, setTurnstileToken] = useState('')
+  const turnstileRef = useRef(null)
+  const widgetIdRef = useRef(null)
+
   // ✅ Get authenticated user on component mount
   useEffect(() => {
     getAuthenticatedUser()
+  }, [])
+
+  // ✅ Load the Turnstile script (once per page load) and render the widget
+  useEffect(() => {
+    const renderWidget = () => {
+      if (window.turnstile && turnstileRef.current && !widgetIdRef.current) {
+        widgetIdRef.current = window.turnstile.render(turnstileRef.current, {
+          sitekey: import.meta.env.VITE_TURNSTILE_SITE_KEY,
+          callback: (token) => setTurnstileToken(token),
+          'expired-callback': () => setTurnstileToken(''),
+          'error-callback': () => setTurnstileToken(''),
+        })
+      }
+    }
+
+    const existingScript = document.getElementById('cf-turnstile-script')
+    if (existingScript) {
+      if (window.turnstile) {
+        renderWidget()
+      } else {
+        existingScript.addEventListener('load', renderWidget)
+      }
+    } else {
+      const script = document.createElement('script')
+      script.id = 'cf-turnstile-script'
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js'
+      script.async = true
+      script.defer = true
+      script.onload = renderWidget
+      document.body.appendChild(script)
+    }
+
+    return () => {
+      if (window.turnstile && widgetIdRef.current) {
+        window.turnstile.remove(widgetIdRef.current)
+        widgetIdRef.current = null
+      }
+    }
   }, [])
 
   const getAuthenticatedUser = async () => {
@@ -56,19 +99,28 @@ function ContactPage({ onBack }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    setLoading(true)
     setMessage('')
 
-    try {
-      // Validate form
-      if (!formData.name || !formData.email || !formData.subject || !formData.message) {
-        throw new Error('Please fill in all fields')
-      }
+    // Validate form
+    if (!formData.name || !formData.email || !formData.subject || !formData.message) {
+      setMessage('❌ Please fill in all fields')
+      return
+    }
 
-      // ✅ Include user ID in submission (if authenticated)
+    // ✅ Block submission until the Turnstile challenge has passed
+    if (!turnstileToken) {
+      setMessage('❌ Please complete the verification checkbox before sending.')
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      // ✅ Include user ID and Turnstile token in submission
       const submissionData = {
         ...formData,
-        user_id: user?.id || 'N/A'
+        user_id: user?.id || 'N/A',
+        turnstile_token: turnstileToken
       }
 
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
@@ -102,7 +154,7 @@ function ContactPage({ onBack }) {
         subject: '',
         message: ''
       })
-      
+
       // Navigate back after 2 seconds
       setTimeout(() => {
         if (onBack) onBack()
@@ -112,6 +164,11 @@ function ContactPage({ onBack }) {
       console.error('❌ Contact form error:', error)
       setMessage('❌ ' + error.message)
     } finally {
+      // Turnstile tokens are single-use — reset the widget so the user can retry
+      if (window.turnstile && widgetIdRef.current) {
+        window.turnstile.reset(widgetIdRef.current)
+      }
+      setTurnstileToken('')
       setLoading(false)
     }
   }
@@ -235,6 +292,9 @@ function ContactPage({ onBack }) {
                 required
               />
             </div>
+
+            {/* ✅ Cloudflare Turnstile widget mounts here */}
+            <div ref={turnstileRef} style={{ margin: '20px 0' }}></div>
 
             <button 
               type="submit" 

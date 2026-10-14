@@ -14,6 +14,9 @@ SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_SERVICE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 BREVO_API_KEY = os.getenv('BREVO_API_KEY')
 
+# ✅ Cloudflare Turnstile secret key (never exposed to the frontend)
+TURNSTILE_SECRET_KEY = os.getenv('TURNSTILE_SECRET_KEY')
+
 # ✅ TARGET EMAIL (Based on your requirements)
 SUPPORT_EMAIL = 'support@shirotechnologies.com'
 
@@ -22,14 +25,52 @@ SUPPORT_EMAIL = 'support@shirotechnologies.com'
 BREVO_SENDER_EMAIL = os.getenv('BREVO_SENDER_EMAIL', 'info@resumeblast.ai')
 BREVO_SENDER_NAME = os.getenv('BREVO_SENDER_NAME', 'ResumeBlast Support')
 
+
+def _verify_turnstile(token, remote_ip):
+    """
+    Verifies a Cloudflare Turnstile token server-side. Returns True only if
+    Cloudflare confirms the token is valid, unused, and not expired.
+    """
+    if not TURNSTILE_SECRET_KEY:
+        print("⚠️ TURNSTILE_SECRET_KEY not configured — skipping verification")
+        return True  # fail-open only if you haven't set up the secret yet
+
+    if not token:
+        return False
+
+    try:
+        resp = requests.post(
+            'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+            data={
+                'secret': TURNSTILE_SECRET_KEY,
+                'response': token,
+                'remoteip': remote_ip
+            },
+            timeout=10
+        )
+        result = resp.json()
+        if not result.get('success'):
+            print(f"❌ Turnstile verification failed: {result.get('error-codes')}")
+        return bool(result.get('success'))
+    except Exception as e:
+        print(f"❌ Turnstile verification error: {str(e)}")
+        return False
+
+
 @support_ticket_bp.route('/api/support-ticket/submit', methods=['POST'])
 def submit_support_ticket():
     try:
         data = request.get_json()
-        
+
         print("\n" + "=" * 60)
         print("🎫 SUPPORT TICKET RECEIVED")
-        
+
+        # 0. Verify Cloudflare Turnstile token BEFORE doing anything else
+        turnstile_token = data.get('turnstile_token')
+        if not _verify_turnstile(turnstile_token, request.remote_addr):
+            print("🚫 Blocked submission — Turnstile verification failed")
+            return jsonify({'error': 'Verification failed. Please try again.'}), 400
+
         # 1. Validate inputs
         required_fields = ['name', 'email', 'subject', 'message']
         for field in required_fields:
