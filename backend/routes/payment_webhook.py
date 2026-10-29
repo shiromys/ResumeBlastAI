@@ -39,7 +39,8 @@ def _headers():
 
 
 def _create_fallback_campaign(session_id, user_id, plan_name, resume_url,
-                               candidate_name, job_role, location, create_fn):
+                               candidate_name, job_role, location, create_fn,
+                               candidate_email=""):
     """
     PERMANENT FIX: Fallback campaign creator called when send_blast_internal()
     fails for any reason after a confirmed Stripe payment.
@@ -48,6 +49,12 @@ def _create_fallback_campaign(session_id, user_id, plan_name, resume_url,
     scheduler picks it up within 30 minutes and sends Day 1 emails.
     Guards against duplicates — never creates if campaign already exists
     for this stripe_session_id.
+
+    ✅ FIX: Now accepts candidate_email and stores it on the campaign row.
+    When user_id can't be resolved (ends up NULL), this is the ONLY thread
+    back to the paying customer — without it, an orphaned campaign is
+    permanently invisible to the user's dashboard and nearly impossible to
+    trace back by hand.
     """
     try:
         # Idempotency: skip if campaign already exists for this session
@@ -72,7 +79,7 @@ def _create_fallback_campaign(session_id, user_id, plan_name, resume_url,
             "candidate_name":    candidate_name or "Professional Candidate",
             "job_role":          job_role       or "Professional",
             "location":          location       or "Remote",
-            "candidate_email":   "",
+            "candidate_email":   candidate_email or "",  # ✅ FIX: was always ""
             "candidate_phone":   "",
             "resume_name":       "Resume.pdf",
             "years_experience":  "",
@@ -248,6 +255,9 @@ def handle_checkout_completed(session: dict):
 
     # Fallback B: Use real email stored in Stripe metadata by payment.py
     # This handles the guest-then-register case — metadata stores the real email
+    # ✅ FIX: email lookup is now case-insensitive (ilike instead of eq). A
+    # customer typing "Name@Gmail.com" at checkout but having "name@gmail.com"
+    # on their account previously made this lookup silently fail every time.
     if not active_user_id or str(active_user_id).startswith("guest_"):
         meta_email = metadata.get("customer_email", "").strip()
         lookup_email = meta_email if (meta_email and meta_email != "guest@resumeblast.ai") else None
@@ -255,10 +265,11 @@ def handle_checkout_completed(session: dict):
             # Also try Stripe customer_details email
             lookup_email = customer_email if (customer_email and customer_email != "guest@resumeblast.ai") else None
         if lookup_email:
+            lookup_email = lookup_email.strip()
             try:
-                print(f"[Webhook] Trying email lookup: {lookup_email!r}")
+                print(f"[Webhook] Trying email lookup (case-insensitive): {lookup_email!r}")
                 user_resp = requests.get(
-                    f"{SUPABASE_URL}/rest/v1/users?email=eq.{lookup_email}&select=id",
+                    f"{SUPABASE_URL}/rest/v1/users?email=ilike.{lookup_email}&select=id",
                     headers=_headers()
                 )
                 if user_resp.status_code == 200 and user_resp.json():
@@ -268,11 +279,13 @@ def handle_checkout_completed(session: dict):
                 print(f"[Webhook] ⚠️ Email lookup fault (non-blocking): {e}")
 
     # Fallback C: Original email lookup (kept for backward compatibility)
+    # ✅ FIX: also made case-insensitive, same reasoning as Fallback B.
     if not active_user_id and customer_email and customer_email != "guest@resumeblast.ai":
         try:
-            print(f"[Webhook] Fallback C — profile lookup: {customer_email}")
+            lookup_email_c = customer_email.strip()
+            print(f"[Webhook] Fallback C — profile lookup (case-insensitive): {lookup_email_c}")
             user_resp = requests.get(
-                f"{SUPABASE_URL}/rest/v1/users?email=eq.{customer_email}&select=id",
+                f"{SUPABASE_URL}/rest/v1/users?email=ilike.{lookup_email_c}&select=id",
                 headers=_headers()
             )
             if user_resp.status_code == 200 and user_resp.json():
@@ -282,6 +295,17 @@ def handle_checkout_completed(session: dict):
             print(f"[Webhook] ⚠️ Profile mapping lookup fault (non-blocking): {e}")
 
     print(f"[Webhook] Final active_user_id: {active_user_id!r}")
+
+    # ✅ FIX: Loud, greppable warning the moment we're about to create a
+    # campaign with no user_id — instead of only finding out when a user
+    # files a support ticket days later. Search Railway logs for
+    # "ORPHANED CAMPAIGN" to catch these the same day they happen.
+    if not active_user_id or str(active_user_id).startswith("guest_"):
+        print(f"[Webhook] 🚨 ORPHANED CAMPAIGN WARNING — could not resolve a real "
+              f"user_id for session={session_id!r}, customer_email={customer_email!r}. "
+              f"The campaign row will be created with user_id=NULL (invisible on the "
+              f"user's dashboard) but candidate_email={customer_email!r} will be saved "
+              f"on it so it can be found and reconciled manually in blast_campaigns.")
 
     # Fallback B: If metadata lacks a resume_url, locate the latest record they uploaded before checking out
     if not resume_url and active_user_id:
@@ -348,6 +372,7 @@ def handle_checkout_completed(session: dict):
                     plan_name=plan_name, resume_url=resume_url,
                     candidate_name=candidate_name, job_role=job_role,
                     location=location, create_fn=create_drip_campaign,
+                    candidate_email=customer_email,
                 )
 
         except Exception as e:
@@ -363,6 +388,7 @@ def handle_checkout_completed(session: dict):
                     plan_name=plan_name, resume_url=resume_url,
                     candidate_name=candidate_name, job_role=job_role,
                     location=location, create_fn=create_drip_campaign,
+                    candidate_email=customer_email,
                 )
             except Exception as fe:
                 print(f"[Webhook] Fallback campaign creation also failed: {fe}")
