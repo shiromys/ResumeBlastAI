@@ -33,6 +33,36 @@ function UserDashboard({ user, onStartBlast }) {
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(1)
+
+      if (blasts && blasts.length > 0) {
+        setData({ blasts })
+        return
+      }
+
+      // ✅ NEW: Self-heal — no campaign is linked to this user_id yet. This can
+      // happen when a payment's webhook couldn't resolve the real user_id at
+      // the time (see backend/routes/payment_webhook.py), leaving the
+      // campaign "orphaned" with user_id=NULL but candidate_email set. Ask
+      // the backend to look for one matching this account's email and link
+      // it — this only ever needs to run once per affected user.
+      if (user.email) {
+        try {
+          const resp = await fetch(`${API_URL}/api/user/campaign/reconcile`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: user.id, email: user.email })
+          })
+          const result = await resp.json()
+          if (result.success && result.reconciled && result.campaign) {
+            console.log('✅ Linked a previously orphaned campaign to this account')
+            setData({ blasts: [result.campaign] })
+            return
+          }
+        } catch (reconcileErr) {
+          console.error('Campaign reconcile check failed (non-blocking):', reconcileErr)
+        }
+      }
+
       setData({ blasts: blasts || [] })
     } catch (e) { console.error(e) }
   }, [user])

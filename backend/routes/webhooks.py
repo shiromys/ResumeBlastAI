@@ -1,387 +1,434 @@
-# backend/routes/webhooks.py
-# ============================================================
-# UPDATED VERSION: Brevo Event Logging + Webhook Secret Validation
-# ============================================================
-
-from flask import Blueprint, request, jsonify
-from datetime import datetime, timezone
 import os
+import stripe
 import requests
 import traceback
-import uuid
+from flask import Blueprint, request, jsonify
+from datetime import datetime
+from pathlib import Path
+from dotenv import load_dotenv
 
-webhooks_bp = Blueprint('webhooks', __name__, url_prefix='/api/webhooks')
+# Import invoice service
+from services.invoice_email_service import InvoiceEmailService
 
-# Supabase configuration
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    load_dotenv(dotenv_path=_env_path, override=False)
 
-# Brevo webhook authentication
-BREVO_WEBHOOK_SECRET = os.getenv('BREVO_WEBHOOK_SECRET')
+payment_webhook_bp = Blueprint("payment_webhook", __name__)
 
-def get_supabase_headers():
-    """Get headers for Supabase API requests"""
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+
+# Safely initialize invoice service
+try:
+    _invoice_service = InvoiceEmailService()
+except Exception as e:
+    print(f"⚠️ Warning: InvoiceEmailService failed to initialize: {e}")
+    _invoice_service = None
+
+def _headers():
     return {
-        'apikey': SUPABASE_KEY,
-        'Authorization': f'Bearer {SUPABASE_KEY}',
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
+        "apikey":        SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type":  "application/json",
+        "Prefer":        "return=representation",
     }
 
-# ============================================================
-# NEW HELPER FUNCTION - Logs Brevo events to brevo_event_logs table
-# ============================================================
-def _log_brevo_event(event_type, email_to, email_from, email_subject, timestamp, campaign_id=None, raw_data=None):
+
+
+
+def _create_fallback_campaign(session_id, user_id, plan_name, resume_url,
+                               candidate_name, job_role, location, create_fn,
+                               candidate_email=""):
+    """
+    PERMANENT FIX: Fallback campaign creator called when send_blast_internal()
+    fails for any reason after a confirmed Stripe payment.
+
+    Creates a blast_campaigns record with status='active' so the drip
+    scheduler picks it up within 30 minutes and sends Day 1 emails.
+    Guards against duplicates — never creates if campaign already exists
+    for this stripe_session_id.
+
+    ✅ FIX: Now accepts candidate_email and stores it on the campaign row.
+    When user_id can't be resolved (ends up NULL), this is the ONLY thread
+    back to the paying customer — without it, an orphaned campaign is
+    permanently invisible to the user's dashboard and nearly impossible to
+    trace back by hand.
+    """
     try:
-        if not email_to:
-            print(f"⚠️ _log_brevo_event: email_to is required, skipping log")
-            return False
-
-        log_entry = {
-            "campaign_id": campaign_id,
-            "email_from": email_from or "info@resumeblast.ai",
-            "email_to": email_to,
-            "email_subject": email_subject or "[No Subject]",
-            "event_type": event_type,
-            "timestamp": timestamp or datetime.now(timezone.utc).isoformat(),
-            "brevo_raw_data": raw_data or {}
-        }
-
-        resp = requests.post(
-            f"{SUPABASE_URL}/rest/v1/brevo_event_logs",
-            json=log_entry,
-            headers=get_supabase_headers()
-        )
-
-        if resp.status_code in [200, 201]:
-            print(f"✅ Brevo event logged: {event_type} → {email_to}")
-            return True
-        else:
-            print(f"⚠️ Failed to log Brevo event: {resp.status_code} {resp.text}")
-            return False
-
-    except Exception as e:
-        print(f"❌ Error logging Brevo event: {str(e)}")
-        traceback.print_exc()
-        return False
-
-
-# ============================================================
-# EXISTING FUNCTION - UNTOUCHED
-# ============================================================
-def update_recruiter_status(email, status, bounce_type, reason):
-    try:
-        update_data = {
-            'email_status': status,
-            'bounce_type': bounce_type,
-            'bounce_date': datetime.utcnow().isoformat(),
-            'bounce_reason': reason
-        }
-        
-        tables_updated = 0
-        params = {'email': f'eq.{email}'}
-        
-        url1 = f"{SUPABASE_URL}/rest/v1/freemium_recruiters"
-        response1 = requests.patch(url1, headers=get_supabase_headers(), json=update_data, params=params)
-        
-        if response1.status_code in [200, 204]:
-            result = response1.json() if response1.text else []
-            if result or response1.status_code == 204:
-                tables_updated += 1
-        
-        url2 = f"{SUPABASE_URL}/rest/v1/recruiters"
-        response2 = requests.patch(url2, headers=get_supabase_headers(), json=update_data, params=params)
-        
-        if response2.status_code in [200, 204]:
-            result = response2.json() if response2.text else []
-            if result or response2.status_code == 204:
-                tables_updated += 1
-        
-        url3 = f"{SUPABASE_URL}/rest/v1/recruiter_activity"
-        response3 = requests.patch(url3, headers=get_supabase_headers(), json=update_data, params=params)
-        
-        if response3.status_code in [200, 204]:
-            result = response3.json() if response3.text else []
-            if result or response3.status_code == 204:
-                tables_updated += 1
-        
-        if tables_updated == 0:
-            return False
-        else:
-            return True
-            
-    except Exception as e:
-        traceback.print_exc()
-        return False
-
-# ============================================================
-# EXISTING FUNCTION - UNTOUCHED
-# ============================================================
-def delete_recruiter(email):
-    try:
-        params = {'email': f'eq.{email}'}
-        deleted_count = 0
-        
-        url1 = f"{SUPABASE_URL}/rest/v1/freemium_recruiters"
-        response1 = requests.delete(url1, headers=get_supabase_headers(), params=params)
-        if response1.status_code in [200, 204]:
-            deleted_count += 1
-        
-        url2 = f"{SUPABASE_URL}/rest/v1/recruiters"
-        response2 = requests.delete(url2, headers=get_supabase_headers(), params=params)
-        if response2.status_code in [200, 204]:
-            deleted_count += 1
-        
-        url3 = f"{SUPABASE_URL}/rest/v1/recruiter_activity"
-        response3 = requests.delete(url3, headers=get_supabase_headers(), params=params)
-        if response3.status_code in [200, 204]:
-            deleted_count += 1
-        
-        if deleted_count > 0:
-            return True
-        else:
-            return False
-            
-    except Exception as e:
-        traceback.print_exc()
-        return False
-
-
-# ============================================================
-# EXISTING HELPER FUNCTION - UNTOUCHED
-# ============================================================
-def _update_blast_campaign_counter(campaign_id, field, increment=1):
-    try:
-        if not campaign_id:
-            return False
-
-        fetch_url = (
+        # Idempotency: skip if campaign already exists for this session
+        existing = requests.get(
             f"{SUPABASE_URL}/rest/v1/blast_campaigns"
-            f"?id=eq.{campaign_id}"
-            f"&select=id,{field}"
+            f"?stripe_session_id=eq.{session_id}&select=id,status",
+            headers=_headers()
         )
-        resp = requests.get(fetch_url, headers=get_supabase_headers())
+        if existing.status_code == 200 and existing.json():
+            camp = existing.json()[0]
+            print(f"[Webhook] Fallback skipped — campaign already exists: "
+                  f"id={camp['id']} status={camp.get('status')}")
+            return
 
-        if resp.status_code != 200 or not resp.json():
-            return False
+        # No campaign found — create one for the scheduler to pick up
+        result = create_fn({
+            "user_id":           user_id,
+            "user_type":         "registered",
+            "stripe_session_id": session_id,
+            "plan_name":         plan_name,
+            "resume_url":        resume_url,
+            "candidate_name":    candidate_name or "Professional Candidate",
+            "job_role":          job_role       or "Professional",
+            "location":          location       or "Remote",
+            "candidate_email":   candidate_email or "",  # ✅ FIX: was always ""
+            "candidate_phone":   "",
+            "resume_name":       "Resume.pdf",
+            "years_experience":  "",
+            "key_skills":        "",
+        })
 
-        row = resp.json()[0]
-        current = row.get(field, 0) or 0
-        new_value = current + increment
-
-        patch_url = f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}"
-        patch_resp = requests.patch(
-            patch_url,
-            headers=get_supabase_headers(),
-            json={field: new_value}
-        )
-
-        if patch_resp.status_code in [200, 204]:
-            return True
+        if result.get("success"):
+            print(f"[Webhook] Fallback campaign created: {result.get('campaign_id')} "
+                  f"-- scheduler starts blast within 30 min")
         else:
-            return False
+            print(f"[Webhook] Fallback campaign failed: {result.get('error')}")
 
     except Exception as e:
-        traceback.print_exc()
-        return False
+        print(f"[Webhook] _create_fallback_campaign exception: {e}")
 
 
-# ============================================================
-# EXISTING ROUTE - UNTOUCHED
-# ============================================================
-@webhooks_bp.route('/brevo/bounce', methods=['POST', 'OPTIONS'])
-def handle_brevo_webhook():
-    if request.method == 'OPTIONS':
-        return '', 204
+def handle_checkout_completed(session: dict):
+    """
+    Called when Stripe fires checkout.session.completed.
+    Saves payment record + sends receipt email via Brevo.
+    """
+    session_id   = session.get("id", "")
     
-    try:
-        data = request.json
-        if not data:
-            return jsonify({'error': 'No data'}), 400
-        
-        event = data.get('event', '')
-        email = data.get('email', '')
-        
-        if event in ['hard_bounce', 'soft_bounce']:
-            bounce_type = 'hard' if event == 'hard_bounce' else 'soft'
-            update_recruiter_status(
-                email=email,
-                status=event,
-                bounce_type=bounce_type,
-                reason=data.get('reason', 'Bounce via Brevo webhook')
+    # Safely fallback to {} if the payload explicitly sends `null`
+    metadata     = session.get("metadata") or {}
+    customer     = session.get("customer_details") or {}
+    
+    amount_total = session.get("amount_total", 0)           # cents
+    currency     = session.get("currency", "usd")
+    payment_status = session.get("payment_status", "")
+
+    plan_name    = metadata.get("plan") or metadata.get("plan_name", "")
+    user_id      = metadata.get("user_id", "")
+    guest_id     = metadata.get("guest_id", "")
+
+    # Read blast metadata stored by payment.py at checkout creation
+    resume_url     = metadata.get("resume_url", "")
+    candidate_name = metadata.get("candidate_name", "")
+    job_role       = metadata.get("job_role", "")
+    location       = metadata.get("location", "Remote")
+
+    # ── Determine the customer email ────────────────────────────────────────
+    customer_email = customer.get("email", "")
+    customer_name  = customer.get("name", "")
+
+    # Fallback: fetch email from Supabase if we have user_id
+    if not customer_email and user_id and str(user_id).strip() not in ["None", "null", "undefined"]:
+        try:
+            resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}&select=email",
+                headers=_headers()
             )
-        
-        return jsonify({'status': 'ok'}), 200
-        
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+            if resp.status_code == 200 and resp.json():
+                customer_email = resp.json()[0].get("email", "")
+        except Exception as e:
+            print(f"[Webhook] Could not fetch user email: {e}")
 
+    print(f"\n[Webhook] checkout.session.completed")
+    print(f"  session_id={session_id!r}")
+    print(f"  plan={plan_name!r} user_id={user_id!r} guest_id={guest_id!r}")
+    print(f"  amount={amount_total} {currency.upper()} status={payment_status}")
+    print(f"  customer_email={customer_email!r}")
 
-# ============================================================
-# UPDATED ROUTE - NOW LOGS ALL EVENTS + FIXED TIMEZONE
-# ============================================================
-@webhooks_bp.route('/brevo/events', methods=['POST', 'OPTIONS'])
-def handle_brevo_email_events():
-    if request.method == 'OPTIONS':
-        return '', 204
-    
-    auth_header = request.headers.get('Authorization', '')
-    token = request.args.get('token', '')
-    
-    if auth_header.startswith('Bearer '):
-        token = auth_header.split(' ')[1]
-        
-    if token != BREVO_WEBHOOK_SECRET:
-        print("❌ Invalid or missing webhook token")
-        return jsonify({'error': 'Unauthorized'}), 401
-    
+    if payment_status != "paid":
+        print(f"[Webhook] Payment not paid (status={payment_status}) — skipping")
+        return
+
+    # ── ✅ FIX 1: Update payments table status to 'completed' ────────────────
+    # Changed 'customer_email' -> 'user_email' and 'customer_name' -> 'user_name' to resolve PGRST204 Schema Cache mismatch.
+    payment_completed = {
+        "status":         "completed",
+        "plan_name":      plan_name,
+        "amount":         amount_total,
+        "currency":       currency,
+        "user_email":     customer_email,
+        "user_name":      customer_name or (customer_email.split("@")[0] if customer_email else "unknown"),
+        "completed_at":   datetime.utcnow().isoformat(),
+    }
+
     try:
-        data = request.json
-        if not data:
-            return jsonify({'error': 'No data'}), 400
-
-        event   = data.get('event', '')
-        email   = data.get('email', '')
-        
-        tag         = data.get('tag', '')
-        campaign_id = tag.strip() if tag else None
-        
-        if campaign_id:
-            try:
-                uuid.UUID(campaign_id)
-            except ValueError:
-                campaign_id = None
-        
-        email_from = data.get('email_from', 'no-reply@brevo.com')
-        email_subject = data.get('subject', '[No Subject]')
-        
-        # ✅ FIXED: Bypass Brevo's timestamp to eliminate timezone/epoch crashes.
-        # Grabbing the server's exact UTC time ensures Supabase perfectly accepts the record.
-        timestamp = datetime.now(timezone.utc).isoformat()
-
-        print(f"\n{'='*70}")
-        print(f"🔔 BREVO EMAIL EVENT RECEIVED")
-        print(f"{'='*70}")
-        print(f"  Event:       {event}")
-        print(f"  Email:       {email}")
-        print(f"  Campaign ID: {campaign_id}")
-        print(f"  Subject:     {email_subject}")
-        print(f"{'='*70}\n")
-
-        _log_brevo_event(
-            event_type=event,
-            email_to=email,
-            email_from=email_from,
-            email_subject=email_subject,
-            timestamp=timestamp,
-            campaign_id=campaign_id,
-            raw_data=data
+        existing = requests.get(
+            f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}&select=id,status",
+            headers=_headers()
         )
-
-        if event == 'delivered':
-            if campaign_id: _update_blast_campaign_counter(campaign_id, 'delivered_count')
-
-        elif event == 'opened':
-            if campaign_id: _update_blast_campaign_counter(campaign_id, 'opened_count')
-
-        elif event == 'click':
-            if campaign_id: _update_blast_campaign_counter(campaign_id, 'clicked_count')
-
-        elif event == 'hard_bounce':
-            if campaign_id: _update_blast_campaign_counter(campaign_id, 'bounced_count')
-            if email: update_recruiter_status(email=email, status='hard_bounce', bounce_type='hard', reason=f"Hard bounce via Brevo event: {data.get('reason', '')}")
-
-        elif event == 'soft_bounce':
-            if campaign_id: _update_blast_campaign_counter(campaign_id, 'bounced_count')
-            if email: update_recruiter_status(email=email, status='soft_bounce', bounce_type='soft', reason=f"Soft bounce via Brevo event: {data.get('reason', '')}")
-
-        elif event == 'blocked':
-            if email: update_recruiter_status(email=email, status='blocked', bounce_type='blocked', reason=f"Blocked via Brevo event: {data.get('reason', '')}")
-
-        elif event == 'spam':
-            if campaign_id: _update_blast_campaign_counter(campaign_id, 'spam_count')
-            if email: update_recruiter_status(email=email, status='blocked', bounce_type='spam', reason='Spam complaint via Brevo events webhook')
-
-        elif event == 'unsubscribed':
-            if email: update_recruiter_status(email=email, status='blocked', bounce_type='unsubscribed', reason='Unsubscribed via Brevo events webhook')
-
-        return jsonify({'status': 'ok', 'event': event, 'campaign_id': campaign_id}), 200
-
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-@webhooks_bp.route('/resend/bounce', methods=['POST', 'OPTIONS'])
-def handle_resend_webhook():
-    if request.method == 'OPTIONS':
-        return '', 204
-    
-    try:
-        data = request.json
-        if not data: return jsonify({'error': 'No data provided'}), 400
         
-        event_type = data.get('type')
-        event_data = data.get('data', {})
-        to_field = event_data.get('to', [])
-        email = to_field[0] if isinstance(to_field, list) and len(to_field) > 0 else None
-        
-        if not email: return jsonify({'error': 'Email address missing'}), 400
-        
-        if event_type == 'email.bounced':
-            bounce_type = event_data.get('bounce_type', 'hard')
-            reason = event_data.get('bounce_reason', 'Email bounced')
-            update_recruiter_status(email=email, status='hard_bounce', bounce_type=bounce_type, reason=f"Resend bounce: {reason}")
+        if existing.status_code == 200 and existing.json():
+            # Record exists as 'initiated' — patch it to 'completed'
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{session_id}",
+                json=payment_completed,
+                headers=_headers()
+            )
+            print(f"[Webhook] Payment record patched to 'completed' for session {session_id}")
+        else:
+            # No record at all — insert a full new completed record
+            # We enforce checking that UUID inputs are valid strings, otherwise we pass None
+            db_user_id = user_id if (user_id and str(user_id).strip() not in ["None", "null", "undefined"]) else None
+            db_guest_id = guest_id if (guest_id and str(guest_id).strip() not in ["None", "null", "undefined"]) else None
             
-        elif event_type == 'email.complained':
-            update_recruiter_status(email=email, status='blocked', bounce_type='spam', reason='Spam complaint via Resend')
-        
-        return jsonify({'status': 'success', 'event': event_type}), 200
-        
+            resp = requests.post(
+                f"{SUPABASE_URL}/rest/v1/payments",
+                json={
+                    "stripe_session_id": session_id,
+                    "user_id":           db_user_id,
+                    "guest_id":          db_guest_id,
+                    **payment_completed,
+                },
+                headers=_headers()
+            )
+            if resp.status_code in [200, 201]:
+                print(f"[Webhook] Payment record inserted (new)")
+            else:
+                print(f"[Webhook] Failed to save payment: {resp.status_code} {resp.text}")
     except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        print(f"[Webhook] DB error saving payment: {e}")
+
+    # ── Receipt email via Brevo ─────────────────────────────────
+    if customer_email and _invoice_service:
+        try:
+            receipt_result = _invoice_service.send_payment_receipt(
+                recipient_email   = customer_email,
+                recipient_name    = customer_name or customer_email.split("@")[0],
+                amount_cents      = amount_total,
+                currency          = currency,
+                plan_name         = plan_name,
+                stripe_session_id = session_id,
+                payment_date      = datetime.utcnow().strftime("%B %d, %Y"),
+            )
+            if receipt_result["success"]:
+                print(f"[Webhook] ✅ Receipt email sent to {customer_email}")
+            else:
+                print(f"[Webhook] ⚠️ Receipt email failed: {receipt_result.get('error')}")
+        except Exception as e:
+            print(f"[Webhook] ⚠️ Receipt email exception (non-blocking): {e}")
+
+    # ── ✅ PERMANENT FIX: Resolve User Identity After Guest-Then-Register Flow ──
+    #
+    # ROOT CAUSE THIS FIXES:
+    #   User pays as guest (user_id=guest_xxx, email=guest@resumeblast.ai)
+    #   → registers AFTER payment → webhook fires but can't find real user_id
+    #   → blast never triggered → user raises support ticket
+    #
+    # RECOVERY CHAIN (tries each source in order until user_id found):
+    #   1. metadata user_id          (registered users who paid while logged in)
+    #   2. client_reference_id       (always set by payment.py line 239)
+    #   3. metadata customer_email   (real email stored by our payment.py fix)
+    #   4. Stripe customer_details email (works when not guest checkout)
+    #   5. Stripe client_reference_id via API (ultimate fallback)
+
+    active_user_id = user_id or guest_id or ""
+
+    # Sanitize corrupted tokens from old frontends
+    if str(active_user_id).strip() in ["None", "null", "undefined"]:
+        active_user_id = ""
+
+    # Fallback A: Use client_reference_id from Stripe session
+    # payment.py always sets client_reference_id=str(user_id) — even for guests
+    if not active_user_id or str(active_user_id).startswith("guest_"):
+        try:
+            cref = session.get("client_reference_id", "") or ""
+            if cref and str(cref).strip() not in ["", "None", "null", "undefined"]:
+                print(f"[Webhook] Trying client_reference_id: {cref!r}")
+                # Check if this is a real registered user
+                ref_check = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/users?id=eq.{cref}&select=id,email",
+                    headers=_headers()
+                )
+                if ref_check.status_code == 200 and ref_check.json():
+                    active_user_id = ref_check.json()[0].get("id", "")
+                    print(f"[Webhook] ✅ Recovered user_id from client_reference_id: {active_user_id}")
+        except Exception as e:
+            print(f"[Webhook] ⚠️ client_reference_id lookup fault (non-blocking): {e}")
+
+    # Fallback B: Use real email stored in Stripe metadata by payment.py
+    # This handles the guest-then-register case — metadata stores the real email
+    # ✅ FIX: email lookup is now case-insensitive (ilike instead of eq). A
+    # customer typing "Name@Gmail.com" at checkout but having "name@gmail.com"
+    # on their account previously made this lookup silently fail every time.
+    if not active_user_id or str(active_user_id).startswith("guest_"):
+        meta_email = metadata.get("customer_email", "").strip()
+        lookup_email = meta_email if (meta_email and meta_email != "guest@resumeblast.ai") else None
+        if not lookup_email:
+            # Also try Stripe customer_details email
+            lookup_email = customer_email if (customer_email and customer_email != "guest@resumeblast.ai") else None
+        if lookup_email:
+            lookup_email = lookup_email.strip()
+            try:
+                print(f"[Webhook] Trying email lookup (case-insensitive): {lookup_email!r}")
+                user_resp = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/users?email=ilike.{lookup_email}&select=id",
+                    headers=_headers()
+                )
+                if user_resp.status_code == 200 and user_resp.json():
+                    active_user_id = user_resp.json()[0].get("id", "")
+                    print(f"[Webhook] ✅ Recovered user_id from email: {active_user_id}")
+            except Exception as e:
+                print(f"[Webhook] ⚠️ Email lookup fault (non-blocking): {e}")
+
+    # Fallback C: Original email lookup (kept for backward compatibility)
+    # ✅ FIX: also made case-insensitive, same reasoning as Fallback B.
+    if not active_user_id and customer_email and customer_email != "guest@resumeblast.ai":
+        try:
+            lookup_email_c = customer_email.strip()
+            print(f"[Webhook] Fallback C — profile lookup (case-insensitive): {lookup_email_c}")
+            user_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/users?email=ilike.{lookup_email_c}&select=id",
+                headers=_headers()
+            )
+            if user_resp.status_code == 200 and user_resp.json():
+                active_user_id = user_resp.json()[0].get("id", "")
+                print(f"[Webhook] ✅ Dynamic Recovery successful! Found User ID: {active_user_id}")
+        except Exception as e:
+            print(f"[Webhook] ⚠️ Profile mapping lookup fault (non-blocking): {e}")
+
+    print(f"[Webhook] Final active_user_id: {active_user_id!r}")
+
+    # ✅ FIX: Loud, greppable warning the moment we're about to create a
+    # campaign with no user_id — instead of only finding out when a user
+    # files a support ticket days later. Search Railway logs for
+    # "ORPHANED CAMPAIGN" to catch these the same day they happen.
+    if not active_user_id or str(active_user_id).startswith("guest_"):
+        print(f"[Webhook] 🚨 ORPHANED CAMPAIGN WARNING — could not resolve a real "
+              f"user_id for session={session_id!r}, customer_email={customer_email!r}. "
+              f"The campaign row will be created with user_id=NULL (invisible on the "
+              f"user's dashboard) but candidate_email={customer_email!r} will be saved "
+              f"on it so it can be found and reconciled manually in blast_campaigns.")
+
+    # Fallback B: If metadata lacks a resume_url, locate the latest record they uploaded before checking out
+    if not resume_url and active_user_id:
+        try:
+            print(f"[Webhook] Missing resume_url asset string. Scanning user document database logs...")
+            resume_resp = requests.get(
+                f"{SUPABASE_URL}/rest/v1/resumes?user_id=eq.{active_user_id}&order=created_at.desc&limit=1",
+                headers=_headers()
+            )
+            if resume_resp.status_code == 200 and resume_resp.json():
+                found_resume_record = resume_resp.json()[0]
+                resume_url = found_resume_record.get("file_url", "")
+                
+                # Rehydrate metadata attributes if empty
+                analysis_data = found_resume_record.get("analysis_data") or {}
+                # Use 'or' not .get(key, default) — when key exists with None value,
+                # .get() returns None and ignores the default.
+                # 'or' correctly falls back on both None AND empty string.
+                if not candidate_name:
+                    candidate_name = analysis_data.get("candidate_name") or ""
+                if not job_role:
+                    job_role = analysis_data.get("detected_role") or ""
+                if not location:
+                    location = analysis_data.get("location") or "Remote"
+                print(f"[Webhook] Recovered: name={candidate_name!r} role={job_role!r} location={location!r}")
+                print(f"[Webhook] Dynamic Recovery successful! Pulled target asset: {resume_url}")
+        except Exception as e:
+            print(f"[Webhook] ⚠️ Asset collection lookup fault (non-blocking): {e}")
+
+    # ── Authoritative blast campaign runner ──
+    FREE_PLANS_WH = {"free", "freemium"}
+    if resume_url and plan_name and plan_name.lower() not in FREE_PLANS_WH:
+        try:
+            from routes.blast import send_blast_internal
+            from routes.drip_campaign import create_drip_campaign
+
+            print(f"[Webhook] Triggering blast: plan={plan_name} user={active_user_id!r}")
+
+            blast_result = send_blast_internal(
+                plan_name      = plan_name,
+                user_id        = active_user_id,
+                resume_url     = resume_url,
+                candidate_name = candidate_name,
+                job_role       = job_role,
+                location       = location,
+                stripe_session = session_id,
+            )
+
+            if blast_result.get("already_processed"):
+                print("[Webhook] Blast already handled by frontend — skipped (idempotent)")
+            elif blast_result.get("success"):
+                print(f"[Webhook] Blast triggered: campaign={blast_result.get('drip_campaign_id')} "
+                      f"sent={blast_result.get('successful_sends', 0)}")
+            else:
+                # ✅ PERMANENT FIX 2: Payment confirmed but blast failed.
+                # Create fallback campaign so scheduler starts blast within 30 min.
+                # This ensures EVERY completed payment triggers a blast — even
+                # when send_blast_internal() fails (Supabase error, Brevo timeout,
+                # resume parse failure, Stripe API error, etc.)
+                print(f"[Webhook] Blast failed: {blast_result.get('error')}")
+                print("[Webhook] Creating fallback campaign — scheduler picks up within 30 min")
+                _create_fallback_campaign(
+                    session_id=session_id, user_id=active_user_id,
+                    plan_name=plan_name, resume_url=resume_url,
+                    candidate_name=candidate_name, job_role=job_role,
+                    location=location, create_fn=create_drip_campaign,
+                    candidate_email=customer_email,
+                )
+
+        except Exception as e:
+            # Non-blocking — never return 500 to Stripe (would cause webhook retries)
+            print(f"[Webhook] Blast trigger exception (non-blocking): {e}")
+            traceback.print_exc()
+            # ✅ PERMANENT FIX 2 (exception path): Fallback on any exception too
+            try:
+                from routes.drip_campaign import create_drip_campaign
+                print("[Webhook] Exception fallback — creating campaign for scheduler")
+                _create_fallback_campaign(
+                    session_id=session_id, user_id=active_user_id,
+                    plan_name=plan_name, resume_url=resume_url,
+                    candidate_name=candidate_name, job_role=job_role,
+                    location=location, create_fn=create_drip_campaign,
+                    candidate_email=customer_email,
+                )
+            except Exception as fe:
+                print(f"[Webhook] Fallback campaign creation also failed: {fe}")
+    elif not resume_url:
+        print("[Webhook] Operation Aborted: Unable to map a valid resume file path for user.")
 
 
-@webhooks_bp.route('/test', methods=['GET'])
-def test_webhook():
-    return jsonify({
-        'success': True,
-        'message': 'Webhook routes are active',
-        'endpoints': {
-            'brevo_bounce_only': '/api/webhooks/brevo/bounce',
-            'brevo_all_events':  '/api/webhooks/brevo/events',
-            'resend_freemium':   '/api/webhooks/resend/bounce'
-        },
-        'brevo_events_tracked': ['delivered', 'opened', 'click', 'hard_bounce', 'soft_bounce', 'blocked', 'spam', 'unsubscribed'],
-        'tables': {
-            'freemium': 'freemium_recruiters',
-            'premium_recruiters': 'recruiters',
-            'premium_activity': 'recruiter_activity',
-            'blast_stats': 'blast_campaigns',
-            'brevo_logs': 'brevo_event_logs'
-        },
-        'supabase_configured': bool(SUPABASE_URL and SUPABASE_KEY),
-        'brevo_webhook_secret_configured': bool(BREVO_WEBHOOK_SECRET)
-    })
+# ── ROUTE WITH SIGNATURE VERIFICATION ───────────────────────────────────────
+@payment_webhook_bp.route("/api/webhooks/stripe", methods=["POST"])
+def stripe_webhook():
+    payload = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+    endpoint_secret = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
-@webhooks_bp.route('/manual-bounce', methods=['POST'])
-def manual_bounce():
+    # ✅ Fail fast if webhook secret is missing (often the cause of live-mode errors)
+    if not endpoint_secret:
+        print("❌ CRITICAL: STRIPE_WEBHOOK_SECRET is not set in environment!")
+        return jsonify({"error": "Webhook secret missing"}), 500
+
     try:
-        data = request.json
-        email = data.get('email')
-        status = data.get('status', 'hard_bounce')
-        bounce_type = data.get('bounce_type', 'hard')
-        reason = data.get('reason', 'Manually marked as bounced')
-        
-        if not email: return jsonify({'error': 'Email address required'}), 400
-        valid_statuses = ['active', 'soft_bounce', 'hard_bounce', 'blocked', 'spam']
-        if status not in valid_statuses: return jsonify({'error': f'Invalid status'}), 400
-        
-        result = update_recruiter_status(email, status, bounce_type, reason)
-        if result: return jsonify({'success': True, 'message': f'Email {email} marked as {status}'}), 200
-        else: return jsonify({'success': False, 'message': f'Email {email} not found'}), 404
-            
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, endpoint_secret
+        )
+    except ValueError as e:
+        print("❌ Webhook Error: Invalid payload")
+        return jsonify({"error": "Invalid payload"}), 400
+    except stripe.error.SignatureVerificationError as e:
+        print("❌ Webhook Error: Invalid signature (Check your STRIPE_WEBHOOK_SECRET)")
+        return jsonify({"error": "Invalid signature"}), 400
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"❌ Webhook Exception: {str(e)}")
+        return jsonify({"error": str(e)}), 400
+
+    # ✅ Wrap internal processing in a try/except to prevent 500 crashes
+    try:
+        if event["type"] == "checkout.session.completed":
+            handle_checkout_completed(event["data"]["object"])
+    except Exception as e:
+        print(f"❌ CRITICAL ERROR processing checkout.session.completed:")
+        traceback.print_exc()
+        return jsonify({"error": "Internal processing error"}), 500
+
+    return jsonify({"received": True}), 200
