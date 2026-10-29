@@ -178,6 +178,61 @@ def get_campaign_status(user_id):
         return jsonify({"error": str(e)}), 500
 
 
+# ✅ NEW: Self-healing lookup for the user dashboard.
+# When a logged-in user's dashboard finds no blast_campaigns row under their
+# own user_id, this is called as a fallback. It searches for an orphaned
+# campaign (user_id IS NULL) whose candidate_email matches this user's
+# account email — the exact scenario caused by a webhook identity-resolution
+# miss (see payment_webhook.py) — and links it permanently, so this only
+# ever has to happen once per affected user.
+@drip_campaign_bp.route('/api/user/campaign/reconcile', methods=['POST'])
+def reconcile_orphaned_campaign():
+    try:
+        data = request.get_json() or {}
+        user_id = data.get('user_id')
+        email = (data.get('email') or '').strip()
+
+        if not user_id or not email:
+            return jsonify({'success': False, 'error': 'user_id and email are required'}), 400
+
+        supabase_url = _get_supabase_url()
+        headers = _get_headers()
+
+        # Find the most recent orphaned campaign for this email (case-insensitive)
+        find_resp = requests.get(
+            f"{supabase_url}/rest/v1/blast_campaigns"
+            f"?user_id=is.null&candidate_email=ilike.{email}"
+            f"&order=created_at.desc&limit=1&select=*",
+            headers=headers
+        )
+
+        if find_resp.status_code != 200 or not find_resp.json():
+            # Nothing to reconcile — not an error, just means this user has
+            # no orphaned campaign waiting for them
+            return jsonify({'success': True, 'reconciled': False})
+
+        orphan = find_resp.json()[0]
+        campaign_id = orphan['id']
+
+        patch_resp = requests.patch(
+            f"{supabase_url}/rest/v1/blast_campaigns?id=eq.{campaign_id}",
+            json={'user_id': user_id},
+            headers=headers
+        )
+
+        if patch_resp.status_code in [200, 204]:
+            print(f"[Reconcile] ✅ Linked orphaned campaign {campaign_id} to user {user_id} (email={email})")
+            orphan['user_id'] = user_id
+            return jsonify({'success': True, 'reconciled': True, 'campaign': orphan})
+        else:
+            print(f"[Reconcile] Failed to link campaign {campaign_id}: {patch_resp.status_code} {patch_resp.text}")
+            return jsonify({'success': False, 'error': 'Failed to link campaign'}), 500
+
+    except Exception as e:
+        print(f"[Reconcile] Exception: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @drip_campaign_bp.route('/api/drip/campaigns', methods=['GET'])
 def list_campaigns():
     """Admin: list all active campaigns."""
