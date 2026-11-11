@@ -253,18 +253,24 @@ function ContactSubmissions({ onTicketUpdate }) {
         </div>
       </div>
 
-      {/* Table wrapped in stat-card */}
-      <div className="stat-card" style={{ padding: '0', overflow: 'hidden' }}>
-        <table className="admin-table">
+      {/* Table wrapped in stat-card. ✅ FIX: overflowX auto (not hidden) so on a narrow
+          window the table scrolls horizontally instead of clipping the Actions column,
+          and tableLayout:fixed + a sane minWidth stops columns from being squeezed so
+          far that the Date cell wraps across multiple lines and bloats every row. */}
+      <div className="stat-card" style={{ padding: '0', overflowX: 'auto', overflowY: 'hidden' }}>
+        {/* ✅ FIX: "ticket-table" scopes a tighter padding override (see <style> block
+            below) so this dense table isn't stuck with the global .admin-table
+            18px/24px cell padding, which was eating most of each column's width. */}
+        <table className="admin-table ticket-table" style={{ width: '100%', minWidth: '820px', tableLayout: 'fixed' }}>
           <thead>
             <tr>
-              <th style={{ width: '100px' }}>STATUS</th>
-              <th style={{ width: '180px' }}>TICKET ID</th>
-              <th style={{ width: '140px' }}>DATE</th>
+              <th style={{ width: '95px' }}>STATUS</th>
+              <th style={{ width: '165px' }}>TICKET ID</th>
+              <th style={{ width: '135px' }}>DATE</th>
               <th style={{ width: '120px' }}>NAME</th>
-              <th style={{ width: '200px' }}>EMAIL</th>
+              <th>EMAIL</th>
               <th style={{ width: '150px' }}>SUBJECT</th>
-              <th style={{ width: '150px' }}>ACTIONS</th>
+              <th style={{ width: '130px' }}>ACTIONS</th>
             </tr>
           </thead>
           <tbody>
@@ -315,19 +321,22 @@ function ContactSubmissions({ onTicketUpdate }) {
                     </td>
 
                     {/* Ticket ID */}
-                    <td style={{ 
-                      fontFamily: 'monospace', 
-                      fontSize: '12px', 
+                    <td style={{
+                      fontFamily: 'monospace',
+                      fontSize: '11px',
                       color: '#6B7280',
-                      fontWeight: '600'
-                    }}>
+                      fontWeight: '600',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }} title={ticket.ticket_id || `#${ticket.id}`}>
                       {ticket.ticket_id || `#${ticket.id}`}
                     </td>
 
                     {/* Date */}
-                    <td style={{ fontSize: '13px', color: '#374151' }}>
-                      {new Date(ticket.submitted_at).toLocaleDateString('en-US', { 
-                        month: 'short', 
+                    <td style={{ fontSize: '12px', color: '#374151', whiteSpace: 'nowrap' }}>
+                      {new Date(ticket.submitted_at).toLocaleDateString('en-US', {
+                        month: 'short',
                         day: 'numeric',
                         hour: '2-digit',
                         minute: '2-digit',
@@ -336,19 +345,31 @@ function ContactSubmissions({ onTicketUpdate }) {
                     </td>
 
                     {/* Name */}
-                    <td style={{ fontWeight: '600', color: '#111827', fontSize: '14px' }}>
+                    <td style={{
+                      fontWeight: '600',
+                      color: '#111827',
+                      fontSize: '13px',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }} title={ticket.name}>
                       {ticket.name}
                     </td>
 
                     {/* Email */}
-                    <td>
-                      <a 
+                    <td style={{ maxWidth: 0, overflow: 'hidden' }}>
+                      <a
                         href={`mailto:${ticket.email}`}
-                        style={{ 
-                          color: '#2563EB', 
+                        title={ticket.email}
+                        style={{
+                          color: '#2563EB',
                           textDecoration: 'none',
                           fontSize: '13px',
-                          fontWeight: '500'
+                          fontWeight: '500',
+                          display: 'block',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
                         }}
                         onMouseOver={(e) => e.target.style.textDecoration = 'underline'}
                         onMouseOut={(e) => e.target.style.textDecoration = 'none'}
@@ -369,26 +390,25 @@ function ContactSubmissions({ onTicketUpdate }) {
                       {ticket.subject}
                     </td>
 
-                    {/* Actions */}
+                    {/* Actions — ✅ FIX: side-by-side + compact instead of two full-width
+                        stacked buttons, which was what forced every row to be so tall */}
                     <td>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        {/* ✅ NEW: Reply — always available, even on resolved tickets */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        {/* Reply — always available, even on resolved tickets */}
                         <button
                           onClick={() => handleOpenReply(ticket)}
+                          title="Reply to this ticket"
                           style={{
-                            padding: '8px 18px',
+                            padding: '5px 10px',
                             background: '#2563EB',
                             color: 'white',
                             border: 'none',
                             borderRadius: '6px',
                             cursor: 'pointer',
-                            fontSize: '13px',
+                            fontSize: '11px',
                             fontWeight: '600',
-                            transition: 'all 0.2s',
-                            boxShadow: '0 1px 3px rgba(37, 99, 235, 0.3)'
+                            whiteSpace: 'nowrap'
                           }}
-                          onMouseOver={(e) => { e.target.style.background = '#1D4ED8' }}
-                          onMouseOut={(e) => { e.target.style.background = '#2563EB' }}
                         >
                           ↩ Reply
                         </button>
@@ -397,45 +417,30 @@ function ContactSubmissions({ onTicketUpdate }) {
                           <button
                             onClick={() => handleMarkAsResolved(ticket)}
                             disabled={resolving}
+                            title="Mark this ticket as resolved"
                             style={{
-                              padding: '8px 18px',
+                              padding: '5px 10px',
                               background: resolving ? '#9CA3AF' : '#10B981',
                               color: 'white',
                               border: 'none',
                               borderRadius: '6px',
                               cursor: resolving ? 'not-allowed' : 'pointer',
-                              fontSize: '13px',
+                              fontSize: '11px',
                               fontWeight: '600',
-                              transition: 'all 0.2s',
-                              boxShadow: '0 1px 3px rgba(16, 185, 129, 0.3)'
-                            }}
-                            onMouseOver={(e) => {
-                              if (!resolving) {
-                                e.target.style.background = '#059669'
-                                e.target.style.transform = 'translateY(-1px)'
-                                e.target.style.boxShadow = '0 4px 6px rgba(16, 185, 129, 0.4)'
-                              }
-                            }}
-                            onMouseOut={(e) => {
-                              if (!resolving) {
-                                e.target.style.background = '#10B981'
-                                e.target.style.transform = 'translateY(0)'
-                                e.target.style.boxShadow = '0 1px 3px rgba(16, 185, 129, 0.3)'
-                              }
+                              whiteSpace: 'nowrap'
                             }}
                           >
-                            {resolving ? 'Processing...' : 'Mark as Resolved'}
+                            {resolving ? '...' : 'Resolve'}
                           </button>
                         ) : (
                           <span style={{
-                            padding: '8px 18px',
+                            padding: '5px 10px',
                             background: '#D1FAE5',
                             color: '#059669',
                             borderRadius: '6px',
-                            fontSize: '13px',
+                            fontSize: '11px',
                             fontWeight: '600',
-                            display: 'inline-block',
-                            textAlign: 'center'
+                            whiteSpace: 'nowrap'
                           }}>
                             ✓ Resolved
                           </span>
@@ -749,6 +754,16 @@ function ContactSubmissions({ onTicketUpdate }) {
             opacity: 1;
             transform: translateY(0) scale(1);
           }
+        }
+
+        /* ✅ FIX: the shared .admin-table class ships 18px/24px cell padding — fine for
+           wide tables elsewhere, but it was eating ~48px out of every narrow column
+           here (Status/Ticket ID/Date/Name/Actions), which forced text to wrap across
+           multiple lines and bloated every row. Scope a tighter padding to this table only. */
+        .ticket-table th,
+        .ticket-table td {
+          padding: 10px 14px !important;
+          vertical-align: middle !important;
         }
       `}</style>
     </div>
