@@ -114,10 +114,21 @@ def submit_support_ticket():
             timeout=10
         )
         
-        if db_response.status_code in [200, 201]:
-            print(f"✅ DB Save Success (Status: unread)")
-        else:
-            print(f"⚠️ DB Save Failed: {db_response.text}")
+        # ✅ FIX: Previously, a failed DB insert here only printed a warning and
+        # the function kept going — it still sent the notification email AND
+        # still returned {'success': True} to the customer. That's exactly how
+        # a ticket can arrive in the support inbox by email but never appear in
+        # the admin panel: the row behind it was never actually created. Now we
+        # stop immediately and report the failure plainly, instead of silently
+        # continuing on a save that didn't happen.
+        if db_response.status_code not in [200, 201]:
+            print(f"❌ DB Save Failed ({db_response.status_code}): {db_response.text}")
+            return jsonify({
+                'error': 'Could not save your ticket. Please try again or email us directly.',
+                'ticket_id': ticket_id,
+            }), 500
+
+        print(f"✅ DB Save Success (Status: unread)")
 
         # 4. Send Email
         if not BREVO_API_KEY:

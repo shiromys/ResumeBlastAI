@@ -13,6 +13,12 @@ SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 BREVO_WEBHOOK_SECRET = os.getenv('BREVO_WEBHOOK_SECRET')
 
+# ✅ NEW: used as the reply-to address on admin→customer ticket replies, so
+# if the customer hits "Reply" in their inbox it lands back in the support
+# inbox rather than the no-reply sender address. Same address support_ticket.py
+# already notifies on new tickets.
+SUPPORT_EMAIL = 'support@shirotechnologies.com'
+
 # ── CHANGE 1: split into write headers and read headers ──────────────────────
 def _get_headers():
     """For write operations (POST / PATCH / DELETE)."""
@@ -616,6 +622,109 @@ def update_contact_notes(ticket_id):
         requests.patch(f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}", json={'admin_notes': request.json.get('admin_notes')}, headers=_get_headers())
         return jsonify({'success': True}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
+
+# ✅ NEW: reply to a support ticket from the admin panel itself.
+# Reuses the existing Brevo setup exactly as-is — same BREVO_API_KEY /
+# BREVO_SENDER_NAME / BREVO_SENDER_EMAIL env vars that support_ticket.py
+# already uses for the "new ticket" notification, so no new email config
+# is needed. The reply is emailed straight to the customer's address on
+# file for that ticket, and also saved to a separate support_ticket_replies
+# table (no FK to support_tickets, kept deliberately additive) purely so
+# the admin panel can show reply history for a ticket.
+@admin_bp.route('/api/admin/contact-submissions/<ticket_id>/reply', methods=['POST'])
+def reply_to_contact_submission(ticket_id):
+    try:
+        body = request.json or {}
+        message = (body.get('message') or '').strip()
+        if not message:
+            return jsonify({'error': 'Reply message is required'}), 400
+
+        # Look up the ticket to get the customer's email/name/subject.
+        lookup = requests.get(f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}&select=*", headers=_read_headers())
+        rows = lookup.json() if lookup.status_code in [200, 206] else []
+        if not rows:
+            return jsonify({'error': 'Ticket not found'}), 404
+        ticket = rows[0]
+
+        user_email = ticket.get('user_email')
+        user_name = ticket.get('user_name') or 'there'
+        subject = ticket.get('subject') or 'your support ticket'
+        ref_id = ticket.get('ticket_id') or str(ticket_id)
+        if not user_email:
+            return jsonify({'error': 'This ticket has no customer email on file'}), 400
+
+        brevo_api_key = os.getenv('BREVO_API_KEY')
+        if not brevo_api_key:
+            return jsonify({'error': 'BREVO_API_KEY is not configured'}), 500
+
+        sender_name = os.getenv('BREVO_SENDER_NAME', 'ResumeBlast Support')
+        sender_email = os.getenv('BREVO_SENDER_EMAIL', 'info@resumeblast.ai')
+        admin_name = body.get('admin_name') or 'ResumeBlast Support Team'
+
+        email_payload = {
+            "sender": {"name": sender_name, "email": sender_email},
+            "replyTo": {"email": SUPPORT_EMAIL, "name": "Support Team"},
+            "to": [{"email": user_email, "name": user_name}],
+            "subject": f"Re: {subject} [{ref_id}]",
+            "htmlContent": f"""
+            <html>
+            <body style="font-family:Arial, sans-serif; padding:20px;">
+                <p>Hi {user_name},</p>
+                <p style="white-space: pre-wrap; color:#374151;">{message}</p>
+                <hr style="border:0;border-top:1px solid #eee;margin:20px 0;">
+                <p style="font-size:12px;color:#999;">
+                    Ticket reference: {ref_id}<br>
+                    &mdash; {admin_name}, ResumeBlast.ai Support
+                </p>
+            </body>
+            </html>
+            """
+        }
+
+        brevo_resp = requests.post(
+            'https://api.brevo.com/v3/smtp/email',
+            headers={'accept': 'application/json', 'api-key': brevo_api_key, 'content-type': 'application/json'},
+            json=email_payload,
+            timeout=10
+        )
+        if brevo_resp.status_code not in [200, 201]:
+            print(f"[Admin] ❌ Reply email failed to send: {brevo_resp.status_code} — {brevo_resp.text}")
+            return jsonify({'error': 'Failed to send reply email'}), 502
+
+        # Best-effort history save — the reply has already been sent at this
+        # point, so a failure here should not be reported as the reply failing.
+        try:
+            requests.post(
+                f"{SUPABASE_URL}/rest/v1/support_ticket_replies",
+                json={
+                    'ticket_row_id': str(ticket_id),
+                    'ticket_id': ref_id,
+                    'admin_name': admin_name,
+                    'message': message,
+                    'created_at': datetime.now(timezone.utc).isoformat(),
+                },
+                headers=_get_headers()
+            )
+        except Exception:
+            traceback.print_exc()
+
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@admin_bp.route('/api/admin/contact-submissions/<ticket_id>/replies', methods=['GET'])
+def get_contact_submission_replies(ticket_id):
+    """Reply history for a ticket (oldest first), for the admin panel's thread view."""
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/support_ticket_replies?ticket_row_id=eq.{ticket_id}&select=*&order=created_at.asc",
+            headers=_read_headers()
+        )
+        rows = resp.json() if resp.status_code in [200, 206] else []
+        return jsonify({'replies': rows}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/stats', methods=['GET'])
 def get_stats():
