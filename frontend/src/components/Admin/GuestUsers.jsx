@@ -163,7 +163,7 @@ function GuestUsers({ onConvert }) {
                       disabled={converting}
                       style={{
                         padding: '8px 18px',
-                        background: converting ? '#9CA3AF' : '#7C3AED',
+                        background: converting ? '#9CA3AF' : '#DC2626',
                         color: 'white',
                         border: 'none',
                         borderRadius: '6px',
@@ -171,10 +171,10 @@ function GuestUsers({ onConvert }) {
                         fontSize: '13px',
                         fontWeight: '600',
                         transition: 'all 0.2s',
-                        boxShadow: '0 1px 3px rgba(124, 58, 237, 0.3)'
+                        boxShadow: '0 1px 3px rgba(220, 38, 38, 0.3)'
                       }}
-                      onMouseOver={(e) => { if (!converting) e.target.style.background = '#6D28D9' }}
-                      onMouseOut={(e) => { if (!converting) e.target.style.background = '#7C3AED' }}
+                      onMouseOver={(e) => { if (!converting) e.target.style.background = '#B91C1C' }}
+                      onMouseOut={(e) => { if (!converting) e.target.style.background = '#DC2626' }}
                     >
                       Convert to Registered User
                     </button>
@@ -207,7 +207,7 @@ function GuestUsers({ onConvert }) {
             <div style={{ marginBottom: '20px', textAlign: 'center' }}>
               <div style={{
                 width: '56px', height: '56px', borderRadius: '50%',
-                background: 'linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%)',
+                background: 'linear-gradient(135deg, #DC2626 0%, #B91C1C 100%)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 margin: '0 auto 16px', fontSize: '28px', color: 'white', fontWeight: 'bold'
               }}>
@@ -240,7 +240,7 @@ function GuestUsers({ onConvert }) {
                 disabled={converting}
                 style={{
                   padding: '12px 32px',
-                  background: converting ? '#9CA3AF' : 'linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%)',
+                  background: converting ? '#9CA3AF' : 'linear-gradient(135deg, #DC2626 0%, #B91C1C 100%)',
                   color: 'white', border: 'none', borderRadius: '8px',
                   cursor: converting ? 'not-allowed' : 'pointer', fontSize: '15px', fontWeight: '700',
                   minWidth: '100px'
