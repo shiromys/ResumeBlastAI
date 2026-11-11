@@ -35,6 +35,8 @@ function AdminDashboard({ user, onExit }) {
 
   // ✅ NEW: which user's detail panel is open (null = closed)
   const [selectedUserId, setSelectedUserId] = useState(null)
+  // ✅ NEW: Users-tab search — filters the combined registered+guest list
+  const [userSearch, setUserSearch] = useState('')
 
   // Drip Campaign States
   const [dripEmail, setDripEmail] = useState('')
@@ -335,7 +337,7 @@ function AdminDashboard({ user, onExit }) {
 
         const json = await res.json()
         console.log(`✅ ${tab} data received:`, json)
-        
+
         // ✅ FIXED: Verify data before setting state
         if (json && (json.success !== false || json.error === undefined)) {
           setData(prev => ({
@@ -344,6 +346,21 @@ function AdminDashboard({ user, onExit }) {
           }))
         } else {
           throw new Error(json.error || `Failed to fetch ${tab}`)
+        }
+      }
+
+      // ✅ NEW: the Users tab shows everyone — registered users AND guests
+      // who haven't converted yet — in one searchable table. Fetch the
+      // guest side alongside the registered-users fetch above.
+      if (tab === 'users') {
+        try {
+          const guestRes = await fetch(`${API_URL}/api/admin/guest-users`)
+          if (guestRes.ok) {
+            const guestJson = await guestRes.json()
+            setData(prev => ({ ...prev, guestUsersForUsersTab: guestJson.guests || [] }))
+          }
+        } catch (ge) {
+          console.error('❌ Error fetching guest users for Users tab:', ge)
         }
       }
     } catch (e) {
@@ -1336,86 +1353,170 @@ function AdminDashboard({ user, onExit }) {
               <IncompleteProfiles />
             )}
 
-            {activeTab === 'users' && data.users && (
-              <div>
-                <h2>User Management</h2>
-                <div className="stat-card" style={{ marginBottom: '20px' }}>
-                  <h3>Total Users</h3>
-                  <div className="stat-value">{data.users.count || 0}</div>
-                </div>
-                
-                <div className="stat-card" style={{ padding: '0', overflow: 'hidden' }}>
-                  <table className="admin-table">
-                    <thead>
-                      <tr>
-                        <th>Email</th>
-                        <th>Name</th>
-                        <th>Status</th>
-                        <th>Created</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.users.users && data.users.users.length > 0 ? (
-                        data.users.users.map((user) => (
-                          <tr key={user.id}>
-                            <td style={{ fontWeight: '600' }}>{user.email}</td>
-                            <td>{user.full_name || 'N/A'}</td>
-                            <td>
-                              <span className={user.account_status === 'active' ? 'badge-success' : 'badge-warning'}>
-                                {user.account_status || 'Unknown'}
-                              </span>
-                            </td>
-                            <td>{new Date(user.created_at).toLocaleDateString()}</td>
-                            <td>
-                              {/* ✅ NEW: View Details — additive, existing Delete button untouched */}
-                              <button
-                                onClick={() => setSelectedUserId(user.id)}
-                                style={{
-                                  padding: '6px 12px',
-                                  background: '#DC2626',
-                                  color: 'white',
-                                  border: 'none',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                  fontSize: '12px',
-                                  fontWeight: '600',
-                                  marginRight: '8px',
-                                }}
-                              >
-                                View Details
-                              </button>
-                              <button
-                                onClick={() => handleDeleteUser(user.email, user.id)}
-                                style={{
-                                  padding: '6px 12px',
-                                  background: 'white',
-                                  color: '#64748B',
-                                  border: '1px solid #E2E8F0',
-                                  borderRadius: '6px',
-                                  cursor: 'pointer',
-                                  fontSize: '12px',
-                                  fontWeight: '600',
-                                  transition: 'background 0.2s'
-                                }}
-                              >
-                                Delete
-                              </button>
+            {activeTab === 'users' && data.users && (() => {
+              // ✅ NEW: combine registered users + not-yet-converted guests into
+              // one list, each tagged with _rowType, so the table below can show
+              // "all of them, irrespective of guest or registered" in one place.
+              const registeredRows = (data.users.users || []).map(u => ({ ...u, _rowType: 'registered' }))
+              const guestRows = (data.guestUsersForUsersTab || []).map(g => ({ ...g, _rowType: 'guest' }))
+              const combined = [...registeredRows, ...guestRows]
+
+              const q = userSearch.trim().toLowerCase()
+              const filtered = q
+                ? combined.filter(r => {
+                    const haystack = [r.email, r.full_name, r.name, r.id].filter(Boolean).join(' ').toLowerCase()
+                    return haystack.includes(q)
+                  })
+                : combined
+
+              return (
+                <div>
+                  <h2>User Management</h2>
+                  <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
+                    <div className="stat-card" style={{ flex: '1 1 200px' }}>
+                      <h3>Registered Users</h3>
+                      <div className="stat-value">{data.users.count || 0}</div>
+                    </div>
+                    <div className="stat-card" style={{ flex: '1 1 200px' }}>
+                      <h3>Unconverted Guests</h3>
+                      <div className="stat-value">{guestRows.length}</div>
+                    </div>
+                    <div className="stat-card" style={{ flex: '1 1 200px' }}>
+                      <h3>Total</h3>
+                      <div className="stat-value">{combined.length}</div>
+                    </div>
+                  </div>
+
+                  {/* ✅ NEW: search across email / name / user id, both registered and guest rows */}
+                  <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      value={userSearch}
+                      onChange={(e) => setUserSearch(e.target.value)}
+                      placeholder="Search by name, email, or user ID…"
+                      style={{ padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px', width: '320px', maxWidth: '100%' }}
+                    />
+                    <span style={{ fontSize: '13px', color: '#64748B' }}>
+                      {q ? `${filtered.length} of ${combined.length} matching "${userSearch.trim()}"` : `${combined.length} total`}
+                    </span>
+                  </div>
+
+                  <div className="stat-card" style={{ padding: '0', overflow: 'hidden' }}>
+                    <table className="admin-table">
+                      <thead>
+                        <tr>
+                          <th>Type</th>
+                          <th>Email</th>
+                          <th>Name</th>
+                          <th>User ID</th>
+                          <th>Status</th>
+                          <th>Created</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.length > 0 ? (
+                          filtered.map((row) => (
+                            <tr key={`${row._rowType}-${row.id}`} style={row._rowType === 'guest' ? { background: '#FFFBEB' } : undefined}>
+                              <td>
+                                <span style={row._rowType === 'guest'
+                                  ? { background: '#FEF3C7', color: '#92400E', fontSize: '11px', fontWeight: 600, padding: '3px 9px', borderRadius: '999px' }
+                                  : { background: '#F1F5F9', color: '#475569', fontSize: '11px', fontWeight: 600, padding: '3px 9px', borderRadius: '999px' }}>
+                                  {row._rowType === 'guest' ? 'Guest' : 'Registered'}
+                                </span>
+                              </td>
+                              <td style={{ fontWeight: '600' }}>{row.email || '—'}</td>
+                              <td>{row.full_name || row.name || 'N/A'}</td>
+                              <td>
+                                {row._rowType === 'registered'
+                                  ? <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#374151' }}>{row.id}</span>
+                                  : <span style={{ fontSize: '11px', color: '#9CA3AF' }}>Not yet registered</span>}
+                              </td>
+                              <td>
+                                {row._rowType === 'registered' ? (
+                                  <span className={row.account_status === 'active' ? 'badge-success' : 'badge-warning'}>
+                                    {row.account_status || 'Unknown'}
+                                  </span>
+                                ) : (
+                                  <span style={{ fontSize: '12px', color: '#92400E' }}>
+                                    {row.plan_name || 'Plan'} · {row.currency ? `${String(row.currency).toUpperCase()} ` : ''}${row.amount != null ? (Number(row.amount) / 100).toFixed(2) : '—'}
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {row._rowType === 'registered'
+                                  ? (row.created_at ? new Date(row.created_at).toLocaleDateString() : '—')
+                                  : (row.completed_at ? new Date(row.completed_at).toLocaleDateString() : '—')}
+                              </td>
+                              <td>
+                                {row._rowType === 'registered' ? (
+                                  <>
+                                    <button
+                                      onClick={() => setSelectedUserId(row.id)}
+                                      style={{
+                                        padding: '6px 12px',
+                                        background: '#DC2626',
+                                        color: 'white',
+                                        border: 'none',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        fontSize: '12px',
+                                        fontWeight: '600',
+                                        marginRight: '8px',
+                                      }}
+                                    >
+                                      View Details
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteUser(row.email, row.id)}
+                                      style={{
+                                        padding: '6px 12px',
+                                        background: 'white',
+                                        color: '#64748B',
+                                        border: '1px solid #E2E8F0',
+                                        borderRadius: '6px',
+                                        cursor: 'pointer',
+                                        fontSize: '12px',
+                                        fontWeight: '600',
+                                      }}
+                                    >
+                                      Delete
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    onClick={() => setActiveTab('guest-users')}
+                                    title="Opens the Guest Users tab to convert this person"
+                                    style={{
+                                      padding: '6px 12px',
+                                      background: '#FEF3C7',
+                                      color: '#92400E',
+                                      border: '1px solid #FDE68A',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer',
+                                      fontSize: '12px',
+                                      fontWeight: '600',
+                                    }}
+                                  >
+                                    Convert →
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan="7" style={{ textAlign: 'center', padding: '40px', color: '#9CA3AF' }}>
+                              {q ? `No users match "${userSearch.trim()}"` : 'No users found'}
                             </td>
                           </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: '#9CA3AF' }}>
-                            No users found
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              </div>
-            )}
+              )
+            })()}
 
             {/* ✅ NEW: user detail panel — rendered once, opened by setSelectedUserId above */}
             {selectedUserId && (
