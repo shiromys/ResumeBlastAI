@@ -326,6 +326,9 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
                       <div style={{ fontSize: '11px', color: '#94A3B8' }}>
                         Initiated {formatDate(c.initiated_at)}{c.completed_at ? ` · Completed ${formatDate(c.completed_at)}` : ''}
                       </div>
+                      <div style={{ fontSize: '10px', color: '#CBD5E1', fontFamily: 'monospace', marginTop: '6px' }} title={c.id}>
+                        Campaign ID: {c.id}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -348,7 +351,10 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
                     <tbody>
                       {details.payments.map((p) => (
                         <tr key={p.id}>
-                          <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC', color: '#374151' }}>{formatDate(p.completed_at)}</td>
+                          <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC', color: '#374151' }}>
+                            <div>{formatDate(p.completed_at)}</div>
+                            <div style={{ fontSize: '9px', color: '#CBD5E1', fontFamily: 'monospace', marginTop: '2px' }} title={p.id}>{p.id}</div>
+                          </td>
                           <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC', color: '#374151' }}>{p.plan_name || '—'}</td>
                           <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC', color: '#0F172A', fontWeight: 600 }}>{formatMoney(p.amount, p.currency)}</td>
                           <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC' }}>

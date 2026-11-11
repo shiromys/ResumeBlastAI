@@ -37,6 +37,8 @@ function AdminDashboard({ user, onExit }) {
   const [selectedUserId, setSelectedUserId] = useState(null)
   // ✅ NEW: Users-tab search — filters the combined registered+guest list
   const [userSearch, setUserSearch] = useState('')
+  // ✅ NEW: Users-tab pagination — current page (1-indexed)
+  const [usersPage, setUsersPage] = useState(1)
 
   // Drip Campaign States
   const [dripEmail, setDripEmail] = useState('')
@@ -1369,6 +1371,12 @@ function AdminDashboard({ user, onExit }) {
                   })
                 : combined
 
+              // ✅ NEW: pagination — 20 rows per page instead of one long scroll
+              const pageSize = 20
+              const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+              const safePage = Math.min(Math.max(1, usersPage), totalPages)
+              const pagedRows = filtered.slice((safePage - 1) * pageSize, safePage * pageSize)
+
               return (
                 <div>
                   <h2>User Management</h2>
@@ -1392,7 +1400,7 @@ function AdminDashboard({ user, onExit }) {
                     <input
                       type="text"
                       value={userSearch}
-                      onChange={(e) => setUserSearch(e.target.value)}
+                      onChange={(e) => { setUserSearch(e.target.value); setUsersPage(1) }}
                       placeholder="Search by name, email, or user ID…"
                       style={{ padding: '10px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px', width: '320px', maxWidth: '100%' }}
                     />
@@ -1401,22 +1409,23 @@ function AdminDashboard({ user, onExit }) {
                     </span>
                   </div>
 
-                  <div className="stat-card" style={{ padding: '0', overflow: 'hidden' }}>
-                    <table className="admin-table">
+                  {/* ✅ FIX: overflowX auto (not hidden) so a wide row scrolls instead of clipping the Actions column */}
+                  <div className="stat-card" style={{ padding: '0', overflowX: 'auto', overflowY: 'hidden' }}>
+                    <table className="admin-table" style={{ minWidth: '880px' }}>
                       <thead>
                         <tr>
-                          <th>Type</th>
+                          <th style={{ width: '90px' }}>Type</th>
                           <th>Email</th>
                           <th>Name</th>
-                          <th>User ID</th>
-                          <th>Status</th>
-                          <th>Created</th>
-                          <th>Actions</th>
+                          <th style={{ width: '130px' }}>User ID</th>
+                          <th style={{ width: '150px' }}>Status</th>
+                          <th style={{ width: '100px' }}>Created</th>
+                          <th style={{ width: '190px' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {filtered.length > 0 ? (
-                          filtered.map((row) => (
+                        {pagedRows.length > 0 ? (
+                          pagedRows.map((row) => (
                             <tr key={`${row._rowType}-${row.id}`} style={row._rowType === 'guest' ? { background: '#FFFBEB' } : undefined}>
                               <td>
                                 <span style={row._rowType === 'guest'
@@ -1429,7 +1438,24 @@ function AdminDashboard({ user, onExit }) {
                               <td>{row.full_name || row.name || 'N/A'}</td>
                               <td>
                                 {row._rowType === 'registered'
-                                  ? <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#374151' }}>{row.id}</span>
+                                  ? (
+                                    <span
+                                      title={row.id}
+                                      style={{
+                                        fontFamily: 'monospace',
+                                        fontSize: '11px',
+                                        color: '#374151',
+                                        display: 'inline-block',
+                                        maxWidth: '110px',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        verticalAlign: 'bottom',
+                                      }}
+                                    >
+                                      {row.id}
+                                    </span>
+                                  )
                                   : <span style={{ fontSize: '11px', color: '#9CA3AF' }}>Not yet registered</span>}
                               </td>
                               <td>
@@ -1514,6 +1540,29 @@ function AdminDashboard({ user, onExit }) {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* ✅ NEW: pagination controls — replaces one long scroll */}
+                  {filtered.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginTop: '16px' }}>
+                      <button
+                        onClick={() => setUsersPage(p => Math.max(1, p - 1))}
+                        disabled={safePage <= 1}
+                        style={{ padding: '8px 16px', background: safePage <= 1 ? '#F1F5F9' : 'white', color: safePage <= 1 ? '#CBD5E1' : '#374151', border: '1px solid #E2E8F0', borderRadius: '6px', cursor: safePage <= 1 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: '600' }}
+                      >
+                        ← Previous
+                      </button>
+                      <span style={{ fontSize: '13px', color: '#64748B' }}>
+                        Page {safePage} of {totalPages} · showing {pagedRows.length} of {filtered.length}
+                      </span>
+                      <button
+                        onClick={() => setUsersPage(p => Math.min(totalPages, p + 1))}
+                        disabled={safePage >= totalPages}
+                        style={{ padding: '8px 16px', background: safePage >= totalPages ? '#F1F5F9' : 'white', color: safePage >= totalPages ? '#CBD5E1' : '#374151', border: '1px solid #E2E8F0', borderRadius: '6px', cursor: safePage >= totalPages ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: '600' }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             })()}

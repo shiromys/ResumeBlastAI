@@ -1137,9 +1137,12 @@ def get_user_details(user_id):
 
         # Campaigns — keyed by user_id directly, with a candidate_email
         # fallback for any older row a relink missed. Dedupe by id.
+        # ✅ FIX: quote() the email — an unquoted '+' (common in aliased
+        # addresses like name+tag@gmail.com) is read as a literal space by
+        # the HTTP layer, silently breaking the match for that one user.
         campaign_rows = get_all_rows('blast_campaigns', f'select=*&user_id=eq.{user_id}')
         if email:
-            campaign_rows += get_all_rows('blast_campaigns', f'select=*&candidate_email=ilike.{email}')
+            campaign_rows += get_all_rows('blast_campaigns', f'select=*&candidate_email=ilike.{quote(email)}')
         campaign_rows = _dedupe_by_id(campaign_rows)
         campaign_rows.sort(key=lambda c: c.get('initiated_at') or c.get('created_at') or '', reverse=True)
 
@@ -1165,7 +1168,7 @@ def get_user_details(user_id):
         payment_rows = get_all_rows('payments', f'select=*&user_id=eq.{user_id}')
         if _is_usable_email(email):
             existing_ids = {p.get('id') for p in payment_rows}
-            for p in get_all_rows('payments', f'select=*&user_email=ilike.{email}'):
+            for p in get_all_rows('payments', f'select=*&user_email=ilike.{quote(email)}'):
                 if p.get('id') not in existing_ids:
                     payment_rows.append(p)
         payment_rows.sort(key=lambda p: p.get('completed_at') or p.get('initiated_at') or '', reverse=True)
@@ -1189,7 +1192,7 @@ def get_user_details(user_id):
         # each with its reply thread.
         tickets = []
         if email:
-            ticket_rows = get_all_rows('support_tickets', f'select=*&user_email=ilike.{email}&order=created_at.desc')
+            ticket_rows = get_all_rows('support_tickets', f'select=*&user_email=ilike.{quote(email)}&order=created_at.desc')
             for t in ticket_rows:
                 replies_resp = requests.get(
                     f"{SUPABASE_URL}/rest/v1/support_ticket_replies?ticket_row_id=eq.{t.get('id')}&select=*&order=created_at.asc",
@@ -1212,10 +1215,10 @@ def get_user_details(user_id):
         guest_history = None
         guest_id_hint = next((p.get('guest_id') for p in payment_rows if p.get('guest_id')), None)
         if guest_id_hint:
-            g = get_all_rows('guest_users', f'select=*&id=eq.{guest_id_hint}')
+            g = get_all_rows('guest_users', f'select=*&id=eq.{quote(guest_id_hint)}')
             guest_history = g[0] if g else None
         if not guest_history and email:
-            g = get_all_rows('guest_users', f'select=*&metadata->>candidate_email=ilike.{email}')
+            g = get_all_rows('guest_users', f'select=*&metadata->>candidate_email=ilike.{quote(email)}')
             guest_history = g[0] if g else None
 
         notes_resp = requests.get(
