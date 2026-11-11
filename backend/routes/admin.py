@@ -1,17 +1,28 @@
 from flask import Blueprint, request, jsonify
 import os
 import requests
+import secrets
 from datetime import datetime, timedelta, timezone
 import time
 import traceback
 from urllib.parse import quote
 from services.user_service import UserService
+from routes.auth import _send_reset_code_email  # ✅ NEW: reuse the existing Brevo-based reset-code flow for guest conversion
 
 admin_bp = Blueprint('admin', __name__)
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 BREVO_WEBHOOK_SECRET = os.getenv('BREVO_WEBHOOK_SECRET')
+
+# ✅ RESTORED: used as the reply-to address on admin→customer ticket replies,
+# so if the customer hits "Reply" in their inbox it lands back in the support
+# inbox rather than the no-reply sender address. Same address support_ticket.py
+# already notifies on new tickets. (This constant and the /reply endpoints
+# below were accidentally dropped in the "guest users alert system" commit —
+# that round was built from a stale local copy of this file that predated
+# them — restoring them here, unrelated to anything else in this file.)
+SUPPORT_EMAIL = 'support@shirotechnologies.com'
 
 # ── CHANGE 1: split into write headers and read headers ──────────────────────
 def _get_headers():
@@ -617,6 +628,109 @@ def update_contact_notes(ticket_id):
         return jsonify({'success': True}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
 
+# ✅ RESTORED: reply to a support ticket from the admin panel itself.
+# Reuses the existing Brevo setup exactly as-is — same BREVO_API_KEY /
+# BREVO_SENDER_NAME / BREVO_SENDER_EMAIL env vars that support_ticket.py
+# already uses for the "new ticket" notification, so no new email config
+# is needed. The reply is emailed straight to the customer's address on
+# file for that ticket, and also saved to a separate support_ticket_replies
+# table (no FK to support_tickets, kept deliberately additive) purely so
+# the admin panel can show reply history for a ticket.
+@admin_bp.route('/api/admin/contact-submissions/<ticket_id>/reply', methods=['POST'])
+def reply_to_contact_submission(ticket_id):
+    try:
+        body = request.json or {}
+        message = (body.get('message') or '').strip()
+        if not message:
+            return jsonify({'error': 'Reply message is required'}), 400
+
+        # Look up the ticket to get the customer's email/name/subject.
+        lookup = requests.get(f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}&select=*", headers=_read_headers())
+        rows = lookup.json() if lookup.status_code in [200, 206] else []
+        if not rows:
+            return jsonify({'error': 'Ticket not found'}), 404
+        ticket = rows[0]
+
+        user_email = ticket.get('user_email')
+        user_name = ticket.get('user_name') or 'there'
+        subject = ticket.get('subject') or 'your support ticket'
+        ref_id = ticket.get('ticket_id') or str(ticket_id)
+        if not user_email:
+            return jsonify({'error': 'This ticket has no customer email on file'}), 400
+
+        brevo_api_key = os.getenv('BREVO_API_KEY')
+        if not brevo_api_key:
+            return jsonify({'error': 'BREVO_API_KEY is not configured'}), 500
+
+        sender_name = os.getenv('BREVO_SENDER_NAME', 'ResumeBlast Support')
+        sender_email = os.getenv('BREVO_SENDER_EMAIL', 'info@resumeblast.ai')
+        admin_name = body.get('admin_name') or 'ResumeBlast Support Team'
+
+        email_payload = {
+            "sender": {"name": sender_name, "email": sender_email},
+            "replyTo": {"email": SUPPORT_EMAIL, "name": "Support Team"},
+            "to": [{"email": user_email, "name": user_name}],
+            "subject": f"Re: {subject} [{ref_id}]",
+            "htmlContent": f"""
+            <html>
+            <body style="font-family:Arial, sans-serif; padding:20px;">
+                <p>Hi {user_name},</p>
+                <p style="white-space: pre-wrap; color:#374151;">{message}</p>
+                <hr style="border:0;border-top:1px solid #eee;margin:20px 0;">
+                <p style="font-size:12px;color:#999;">
+                    Ticket reference: {ref_id}<br>
+                    &mdash; {admin_name}, ResumeBlast.ai Support
+                </p>
+            </body>
+            </html>
+            """
+        }
+
+        brevo_resp = requests.post(
+            'https://api.brevo.com/v3/smtp/email',
+            headers={'accept': 'application/json', 'api-key': brevo_api_key, 'content-type': 'application/json'},
+            json=email_payload,
+            timeout=10
+        )
+        if brevo_resp.status_code not in [200, 201]:
+            print(f"[Admin] ❌ Reply email failed to send: {brevo_resp.status_code} — {brevo_resp.text}")
+            return jsonify({'error': 'Failed to send reply email'}), 502
+
+        # Best-effort history save — the reply has already been sent at this
+        # point, so a failure here should not be reported as the reply failing.
+        try:
+            requests.post(
+                f"{SUPABASE_URL}/rest/v1/support_ticket_replies",
+                json={
+                    'ticket_row_id': str(ticket_id),
+                    'ticket_id': ref_id,
+                    'admin_name': admin_name,
+                    'message': message,
+                    'created_at': datetime.now(timezone.utc).isoformat(),
+                },
+                headers=_get_headers()
+            )
+        except Exception:
+            traceback.print_exc()
+
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@admin_bp.route('/api/admin/contact-submissions/<ticket_id>/replies', methods=['GET'])
+def get_contact_submission_replies(ticket_id):
+    """Reply history for a ticket (oldest first), for the admin panel's thread view."""
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/support_ticket_replies?ticket_row_id=eq.{ticket_id}&select=*&order=created_at.asc",
+            headers=_read_headers()
+        )
+        rows = resp.json() if resp.status_code in [200, 206] else []
+        return jsonify({'replies': rows}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @admin_bp.route('/api/admin/stats', methods=['GET'])
 def get_stats():
     try:
@@ -761,17 +875,69 @@ def get_user_count():
 # it's converted (user_id gets set), so there's no separate "dismissed"
 # flag to maintain.
 
+# ✅ NEW: Stripe pre-fills a guest checkout's email field with this literal
+# placeholder (see payment.py), and guests don't always bother editing it —
+# so this exact string can end up stored as payments.user_email for real.
+GUEST_EMAIL_PLACEHOLDER = 'guest@resumeblast.ai'
+
+def _is_usable_email(email):
+    return bool(email) and email.strip().lower() != GUEST_EMAIL_PLACEHOLDER
+
 def _guest_payment_rows():
-    """Completed payments with no linked user_id, newest first, email required."""
+    """
+    Completed payments with no linked user_id, newest first.
+    ✅ FIX: when payments.user_email is missing or is the placeholder above,
+    fall back to blast_campaigns.candidate_email for the same
+    stripe_session_id — that's parsed directly from the guest's uploaded
+    resume, so it's a real, reachable email even when Stripe's isn't.
+    GuestEmailGate.jsx now asks guests to confirm a real email before they
+    can upload at all, fixing this at the source going forward; this
+    fallback is the safety net for anyone who bypassed that gate, or for
+    older payments from before it existed. A row is only included if it has
+    a usable email from either source — nothing to act on otherwise.
+    """
     rows = get_all_rows('payments', 'select=*&status=eq.completed&user_id=is.null&order=completed_at.desc')
-    return [r for r in rows if r.get('user_email')]
+
+    needs_fallback_sessions = [
+        r['stripe_session_id'] for r in rows
+        if not _is_usable_email(r.get('user_email')) and r.get('stripe_session_id')
+    ]
+
+    fallback_emails = {}
+    if needs_fallback_sessions:
+        ids_filter = ','.join(needs_fallback_sessions)
+        campaign_rows = get_all_rows(
+            'blast_campaigns',
+            f"select=stripe_session_id,candidate_email&stripe_session_id=in.({ids_filter})"
+        )
+        for c in campaign_rows:
+            email = (c.get('candidate_email') or '').strip()
+            sid = c.get('stripe_session_id')
+            if email and sid and sid not in fallback_emails:
+                fallback_emails[sid] = email
+
+    result = []
+    for r in rows:
+        email = r.get('user_email') or ''
+        used_fallback = False
+        if not _is_usable_email(email):
+            fallback = fallback_emails.get(r.get('stripe_session_id'))
+            if not fallback:
+                continue  # no usable email from either source
+            email, used_fallback = fallback, True
+        row = dict(r)
+        row['_resolved_email'] = email
+        row['_email_from_resume_fallback'] = used_fallback
+        result.append(row)
+    return result
 
 @admin_bp.route('/api/admin/guest-users', methods=['GET'])
 def get_guest_users():
     try:
         return jsonify({'guests': [{
             'id':                 r.get('id'),
-            'email':              r.get('user_email'),
+            'email':              r.get('_resolved_email'),
+            'email_source':       'resume' if r.get('_email_from_resume_fallback') else 'payment',
             'name':               r.get('user_name'),
             'plan_name':          r.get('plan_name'),
             'amount':             r.get('amount'),
@@ -804,14 +970,30 @@ def convert_guest_user():
     try:
         body = request.json or {}
         email = (body.get('email') or '').strip().lower()
+        # ✅ NEW: the email shown in the Guest Users list can come from
+        # blast_campaigns.candidate_email instead of payments.user_email (see
+        # _guest_payment_rows' resume fallback above) — in that case
+        # payments.user_email is still the 'guest@resumeblast.ai' placeholder,
+        # so an email-only relink below would never find that payments row.
+        # stripe_session_id is the one reliable, always-correct key for it.
+        stripe_session_id = (body.get('stripe_session_id') or '').strip()
         if not email:
             return jsonify({'error': 'Email is required'}), 400
 
         # Best-effort name for the new account, from their payment record.
-        pay_lookup = requests.get(
-            f"{SUPABASE_URL}/rest/v1/payments?user_email=ilike.{email}&status=eq.completed&order=completed_at.desc&limit=1&select=user_name",
-            headers=_read_headers()
-        )
+        # Looked up by stripe_session_id when we have it (exact match,
+        # works even when user_email is the placeholder); falls back to an
+        # email sweep otherwise.
+        if stripe_session_id:
+            pay_lookup = requests.get(
+                f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{stripe_session_id}&select=user_name",
+                headers=_read_headers()
+            )
+        else:
+            pay_lookup = requests.get(
+                f"{SUPABASE_URL}/rest/v1/payments?user_email=ilike.{email}&status=eq.completed&order=completed_at.desc&limit=1&select=user_name",
+                headers=_read_headers()
+            )
         pay_rows = pay_lookup.json() if pay_lookup.status_code in [200, 206] else []
         guest_name = (pay_rows[0].get('user_name') if pay_rows else None) or email.split('@')[0]
 
@@ -823,20 +1005,33 @@ def convert_guest_user():
         existing_rows = existing.json() if existing.status_code in [200, 206] else []
 
         created_new = False
+        invite_email_sent = False
         if existing_rows:
             user_id = existing_rows[0]['id']
         else:
-            invite_resp = requests.post(
-                f"{SUPABASE_URL}/auth/v1/invite",
-                json={'email': email, 'data': {'full_name': guest_name}},
+            # ✅ Create the Auth account directly (no Supabase invite/magic-link
+            # email — that's Supabase's own email system). A random throwaway
+            # password is set since Supabase requires one on creation; the
+            # guest never sees or needs it, because right below we send them
+            # the app's own Brevo-based reset code instead, so they set their
+            # own password through the exact same flow/UI normal users already
+            # use for "Forgot Password".
+            create_resp = requests.post(
+                f"{SUPABASE_URL}/auth/v1/admin/users",
+                json={
+                    'email':         email,
+                    'password':      secrets.token_urlsafe(24),
+                    'email_confirm': True,
+                    'user_metadata': {'full_name': guest_name},
+                },
                 headers=_get_headers()
             )
-            if invite_resp.status_code not in [200, 201]:
-                print(f"[Admin] ❌ Guest invite failed: {invite_resp.status_code} — {invite_resp.text}")
-                return jsonify({'error': 'Failed to create an account for this guest', 'details': invite_resp.text}), 502
+            if create_resp.status_code not in [200, 201]:
+                print(f"[Admin] ❌ Guest account creation failed: {create_resp.status_code} — {create_resp.text}")
+                return jsonify({'error': 'Failed to create an account for this guest', 'details': create_resp.text}), 502
 
-            invited = invite_resp.json()
-            user_id = invited.get('id') or (invited.get('user') or {}).get('id')
+            created = create_resp.json()
+            user_id = created.get('id') or (created.get('user') or {}).get('id')
             if not user_id:
                 return jsonify({'error': 'Account created but no user id was returned'}), 502
 
@@ -856,9 +1051,27 @@ def convert_guest_user():
             )
             created_new = True
 
-        # 2. Relink any orphaned data for this email to the (new or
-        # existing) user_id — same ilike-match pattern already used by
-        # the self-serve /api/user/campaign/reconcile endpoint.
+            # Send the "set your password" code via Brevo — same template/
+            # sender the public Forgot Password flow already uses.
+            invite_email_sent, email_err = _send_reset_code_email(email)
+            if not invite_email_sent:
+                print(f"[Admin] ⚠️ Guest account created but reset-code email failed: {email_err}")
+
+        # 2. Relink any orphaned data to the (new or existing) user_id.
+        # ✅ FIX: relink the specific payments row by stripe_session_id first
+        # (exact match — works even when its user_email is still the
+        # placeholder and doesn't match `email` at all), then also sweep by
+        # email for both tables to pick up any other historical rows under
+        # the same real address. Without the session_id patch, a guest
+        # converted via the resume-email fallback would never actually get
+        # user_id set on their payments row, so they'd keep reappearing in
+        # the Guest Users list after being "converted."
+        if stripe_session_id:
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{stripe_session_id}&user_id=is.null",
+                json={'user_id': user_id},
+                headers=_get_headers()
+            )
         requests.patch(
             f"{SUPABASE_URL}/rest/v1/payments?user_email=ilike.{email}&user_id=is.null",
             json={'user_id': user_id},
@@ -874,7 +1087,7 @@ def convert_guest_user():
             'success':            True,
             'user_id':            user_id,
             'created_new_account': created_new,
-            'invite_email_sent':  created_new,
+            'invite_email_sent':  invite_email_sent,
         }), 200
     except Exception as e:
         traceback.print_exc()
