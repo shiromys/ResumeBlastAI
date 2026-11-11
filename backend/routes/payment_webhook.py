@@ -345,13 +345,21 @@ def handle_checkout_completed(session: dict):
             print(f"[Webhook] Triggering blast: plan={plan_name} user={active_user_id!r}")
 
             blast_result = send_blast_internal(
-                plan_name      = plan_name,
-                user_id        = active_user_id,
-                resume_url     = resume_url,
-                candidate_name = candidate_name,
-                job_role       = job_role,
-                location       = location,
-                stripe_session = session_id,
+                plan_name       = plan_name,
+                user_id         = active_user_id,
+                resume_url      = resume_url,
+                candidate_name  = candidate_name,
+                # ✅ FIX: was never passed here before — only on the fallback-
+                # campaign path below. When active_user_id couldn't be resolved
+                # (orphaned campaign, user_id=NULL), this was the only line that
+                # could have saved candidate_email on the row even though the
+                # blast itself succeeds and sends — without it, the new
+                # /api/user/campaign/reconcile self-heal (which matches by
+                # candidate_email) could never find or relink this campaign.
+                candidate_email = customer_email,
+                job_role        = job_role,
+                location        = location,
+                stripe_session  = session_id,
             )
 
             if blast_result.get("already_processed"):

@@ -177,6 +177,12 @@ function LandingPage({ onGetStarted, user }) {
       if (!guestId) { guestId = 'guest_' + Date.now(); localStorage.setItem('rb_guest_tracker_id', guestId) }
       localStorage.setItem('is_guest_session', 'true')
       localStorage.setItem('selected_plan_type', planKey)
+      // ✅ FIX: Also write pending_blast_config (same shape BlastConfig.jsx uses)
+      // so the post-payment guest upload flow (ResumeAnalysis.jsx handleGuestBlast)
+      // and the Thank You page can read the correct plan — previously only
+      // selected_plan_type was set here, which nothing downstream ever reads,
+      // causing the blast to silently fall back to the Starter plan.
+      localStorage.setItem('pending_blast_config', JSON.stringify({ plan: planKey, location: 'Remote' }))
       await initiateCheckout({ email: 'guest@resumeblast.ai', id: guestId, plan: planKey, disclaimer_accepted: true })
     } catch (err) { console.error('Payment failed:', err) }
   }

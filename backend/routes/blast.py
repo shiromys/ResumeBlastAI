@@ -195,8 +195,20 @@ def send_blast_internal(
         print(f"[Blast] resume_url={resume_url!r}")
 
         # ── Deduplication guard: prevent double-blast on webhook retries ──
+        # ✅ FIX: Pull the AUTHORITATIVE plan from Stripe itself here, and use
+        # it instead of whatever plan_name the caller sent. plan_name as passed
+        # in from the frontend can be wrong (stale/missing localStorage, guest
+        # pay-first flow) or tampered with — it must never be trusted for a
+        # billing-relevant value like recruiter count. Stripe's session
+        # metadata.plan was set once, server-side, at checkout creation and
+        # is immutable afterward, so it's the only safe source of truth.
         if stripe_session:
-            _, _, already_processed = verify_stripe_session(stripe_session)
+            verified_plan_name, _, already_processed = verify_stripe_session(stripe_session)
+            if verified_plan_name and verified_plan_name.lower() != plan_name:
+                print(f"[Blast] ⚠️ plan_name mismatch — caller sent {plan_name!r}, "
+                      f"Stripe session {stripe_session!r} says {verified_plan_name!r}. "
+                      f"Using Stripe's value as authoritative.")
+                plan_name = verified_plan_name.lower()
             if already_processed:
                 print(f"[Blast] Session {stripe_session} already processed — returning cached result")
                 existing = requests.get(
