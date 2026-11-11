@@ -8,6 +8,12 @@ function ContactSubmissions({ onTicketUpdate }) {
   const [selectedTicket, setSelectedTicket] = useState(null)
   const [resolving, setResolving] = useState(false)
 
+  // ✅ NEW: reply-from-admin-panel state
+  const [showReplyDialog, setShowReplyDialog] = useState(false)
+  const [replyTicket, setReplyTicket] = useState(null)
+  const [replyMessage, setReplyMessage] = useState('')
+  const [sendingReply, setSendingReply] = useState(false)
+
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
   useEffect(() => {
@@ -94,6 +100,53 @@ function ContactSubmissions({ onTicketUpdate }) {
   const cancelResolve = () => {
     setShowConfirmDialog(false)
     setSelectedTicket(null)
+  }
+
+  // ✅ NEW: reply-from-admin-panel handlers
+  const handleOpenReply = (ticket) => {
+    setReplyTicket(ticket)
+    setReplyMessage('')
+    setShowReplyDialog(true)
+  }
+
+  const cancelReply = () => {
+    if (sendingReply) return
+    setShowReplyDialog(false)
+    setReplyTicket(null)
+    setReplyMessage('')
+  }
+
+  const sendReply = async () => {
+    if (!replyTicket || !replyMessage.trim()) return
+
+    setSendingReply(true)
+    try {
+      const response = await fetch(
+        `${API_URL}/api/admin/contact-submissions/${replyTicket.id}/reply`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: replyMessage.trim() })
+        }
+      )
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || `Failed to send reply: ${response.status}`)
+      }
+
+      setShowReplyDialog(false)
+      setReplyTicket(null)
+      setReplyMessage('')
+
+      alert('✅ Reply sent to the customer!')
+    } catch (error) {
+      console.error('❌ Error sending reply:', error)
+      alert(`Failed to send reply: ${error.message}`)
+    } finally {
+      setSendingReply(false)
+    }
   }
 
   // Get status display properties
@@ -318,52 +371,76 @@ function ContactSubmissions({ onTicketUpdate }) {
 
                     {/* Actions */}
                     <td>
-                      {ticket.status !== 'resolved' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {/* ✅ NEW: Reply — always available, even on resolved tickets */}
                         <button
-                          onClick={() => handleMarkAsResolved(ticket)}
-                          disabled={resolving}
+                          onClick={() => handleOpenReply(ticket)}
                           style={{
                             padding: '8px 18px',
-                            background: resolving ? '#9CA3AF' : '#10B981',
+                            background: '#2563EB',
                             color: 'white',
                             border: 'none',
                             borderRadius: '6px',
-                            cursor: resolving ? 'not-allowed' : 'pointer',
+                            cursor: 'pointer',
                             fontSize: '13px',
                             fontWeight: '600',
                             transition: 'all 0.2s',
-                            boxShadow: '0 1px 3px rgba(16, 185, 129, 0.3)'
+                            boxShadow: '0 1px 3px rgba(37, 99, 235, 0.3)'
                           }}
-                          onMouseOver={(e) => {
-                            if (!resolving) {
-                              e.target.style.background = '#059669'
-                              e.target.style.transform = 'translateY(-1px)'
-                              e.target.style.boxShadow = '0 4px 6px rgba(16, 185, 129, 0.4)'
-                            }
-                          }}
-                          onMouseOut={(e) => {
-                            if (!resolving) {
-                              e.target.style.background = '#10B981'
-                              e.target.style.transform = 'translateY(0)'
-                              e.target.style.boxShadow = '0 1px 3px rgba(16, 185, 129, 0.3)'
-                            }
-                          }}
+                          onMouseOver={(e) => { e.target.style.background = '#1D4ED8' }}
+                          onMouseOut={(e) => { e.target.style.background = '#2563EB' }}
                         >
-                          {resolving ? 'Processing...' : 'Mark as Resolved'}
+                          ↩ Reply
                         </button>
-                      ) : (
-                        <span style={{
-                          padding: '8px 18px',
-                          background: '#D1FAE5',
-                          color: '#059669',
-                          borderRadius: '6px',
-                          fontSize: '13px',
-                          fontWeight: '600',
-                          display: 'inline-block'
-                        }}>
-                          ✓ Resolved
-                        </span>
-                      )}
+
+                        {ticket.status !== 'resolved' ? (
+                          <button
+                            onClick={() => handleMarkAsResolved(ticket)}
+                            disabled={resolving}
+                            style={{
+                              padding: '8px 18px',
+                              background: resolving ? '#9CA3AF' : '#10B981',
+                              color: 'white',
+                              border: 'none',
+                              borderRadius: '6px',
+                              cursor: resolving ? 'not-allowed' : 'pointer',
+                              fontSize: '13px',
+                              fontWeight: '600',
+                              transition: 'all 0.2s',
+                              boxShadow: '0 1px 3px rgba(16, 185, 129, 0.3)'
+                            }}
+                            onMouseOver={(e) => {
+                              if (!resolving) {
+                                e.target.style.background = '#059669'
+                                e.target.style.transform = 'translateY(-1px)'
+                                e.target.style.boxShadow = '0 4px 6px rgba(16, 185, 129, 0.4)'
+                              }
+                            }}
+                            onMouseOut={(e) => {
+                              if (!resolving) {
+                                e.target.style.background = '#10B981'
+                                e.target.style.transform = 'translateY(0)'
+                                e.target.style.boxShadow = '0 1px 3px rgba(16, 185, 129, 0.3)'
+                              }
+                            }}
+                          >
+                            {resolving ? 'Processing...' : 'Mark as Resolved'}
+                          </button>
+                        ) : (
+                          <span style={{
+                            padding: '8px 18px',
+                            background: '#D1FAE5',
+                            color: '#059669',
+                            borderRadius: '6px',
+                            fontSize: '13px',
+                            fontWeight: '600',
+                            display: 'inline-block',
+                            textAlign: 'center'
+                          }}>
+                            ✓ Resolved
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 )
@@ -531,6 +608,131 @@ function ContactSubmissions({ onTicketUpdate }) {
                 }}
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ✅ NEW: Reply Dialog */}
+      {showReplyDialog && replyTicket && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10000,
+            padding: '20px',
+            backdropFilter: 'blur(4px)'
+          }}
+          onClick={cancelReply}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '30px',
+              maxWidth: '520px',
+              width: '100%',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.08)',
+              animation: 'slideIn 0.2s ease-out'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ marginBottom: '16px' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: '700', color: '#111827' }}>
+                Reply to Ticket
+              </h3>
+              <div style={{ fontSize: '13px', color: '#6B7280' }}>
+                <div>
+                  Ticket: <span style={{ fontWeight: '600', color: '#111827' }}>
+                    {replyTicket.ticket_id || `#${replyTicket.id}`}
+                  </span>
+                </div>
+                <div>
+                  To: <span style={{ fontWeight: '600', color: '#111827' }}>
+                    {replyTicket.name} ({replyTicket.email})
+                  </span>
+                </div>
+                <div>Subject: <span style={{ fontWeight: '600', color: '#111827' }}>{replyTicket.subject}</span></div>
+              </div>
+            </div>
+
+            {/* Original message, for context */}
+            <div style={{
+              background: '#F9FAFB',
+              borderRadius: '8px',
+              padding: '12px 16px',
+              marginBottom: '16px',
+              border: '1px solid #E5E7EB',
+              fontSize: '13px',
+              color: '#374151',
+              maxHeight: '120px',
+              overflowY: 'auto',
+              whiteSpace: 'pre-wrap'
+            }}>
+              {replyTicket.message}
+            </div>
+
+            <textarea
+              value={replyMessage}
+              onChange={(e) => setReplyMessage(e.target.value)}
+              placeholder="Type your reply to the customer..."
+              disabled={sendingReply}
+              rows={6}
+              style={{
+                width: '100%',
+                padding: '12px',
+                border: '1px solid #D1D5DB',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontFamily: 'inherit',
+                resize: 'vertical',
+                marginBottom: '20px',
+                boxSizing: 'border-box'
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                onClick={cancelReply}
+                disabled={sendingReply}
+                style={{
+                  padding: '12px 28px',
+                  background: 'white',
+                  color: '#374151',
+                  border: '2px solid #E5E7EB',
+                  borderRadius: '8px',
+                  cursor: sendingReply ? 'not-allowed' : 'pointer',
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  opacity: sendingReply ? 0.5 : 1
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={sendReply}
+                disabled={sendingReply || !replyMessage.trim()}
+                style={{
+                  padding: '12px 28px',
+                  background: (sendingReply || !replyMessage.trim()) ? '#9CA3AF' : 'linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: (sendingReply || !replyMessage.trim()) ? 'not-allowed' : 'pointer',
+                  fontSize: '15px',
+                  fontWeight: '700',
+                  minWidth: '120px'
+                }}
+              >
+                {sendingReply ? 'Sending...' : 'Send Reply'}
               </button>
             </div>
           </div>
