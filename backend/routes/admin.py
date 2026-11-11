@@ -1094,6 +1094,213 @@ def convert_guest_user():
         return jsonify({'error': str(e)}), 500
 
 # =========================================================
+# 4c. USER DETAIL VIEW (admin panel — click a user, see everything)
+# =========================================================
+# ✅ NEW: aggregates one user's full history across users, blast_campaigns,
+# payments, support_tickets (+ their reply threads), and — best-effort,
+# since guest_users has no email column of its own — their pre-signup guest
+# history. Full design notes: implementation-plan-admin-user-detail-view.md
+# in the project.
+
+def _dedupe_by_id(rows):
+    seen = set()
+    out = []
+    for r in rows:
+        rid = r.get('id')
+        if rid in seen:
+            continue
+        seen.add(rid)
+        out.append(r)
+    return out
+
+def _campaign_total_recipients(campaign, plans_cache):
+    """Same recipients-count-with-plan-limit-fallback logic as /api/admin/drip-stats."""
+    total = campaign.get('recipients_count') or campaign.get('total_recruiters')
+    if total:
+        return total
+    plan_name = str(campaign.get('plan_name') or '').lower().strip()
+    for p in plans_cache:
+        k_name = str(p.get('key_name') or '').lower().strip()
+        d_name = str(p.get('display_name') or '').lower().strip()
+        if plan_name == k_name or plan_name == d_name:
+            return p.get('recruiter_limit') or 0
+    return 0
+
+@admin_bp.route('/api/admin/users/<user_id>/details', methods=['GET'])
+def get_user_details(user_id):
+    try:
+        users = get_all_rows('users', f'select=*&id=eq.{user_id}')
+        if not users:
+            return jsonify({'error': 'User not found'}), 404
+        user = users[0]
+        email = (user.get('email') or '').strip()
+
+        # Campaigns — keyed by user_id directly, with a candidate_email
+        # fallback for any older row a relink missed. Dedupe by id.
+        campaign_rows = get_all_rows('blast_campaigns', f'select=*&user_id=eq.{user_id}')
+        if email:
+            campaign_rows += get_all_rows('blast_campaigns', f'select=*&candidate_email=ilike.{email}')
+        campaign_rows = _dedupe_by_id(campaign_rows)
+        campaign_rows.sort(key=lambda c: c.get('initiated_at') or c.get('created_at') or '', reverse=True)
+
+        plans_cache = get_all_rows('plans', 'select=key_name,display_name,recruiter_limit') if campaign_rows else []
+        campaigns = [{
+            'id':                  c.get('id'),
+            'plan_name':           c.get('plan_name'),
+            'status':              c.get('status'),
+            'job_role':            c.get('job_role'),
+            'candidate_name':      c.get('candidate_name'),
+            'total_recipients':    _campaign_total_recipients(c, plans_cache),
+            'total_sent':          int(c.get('drip_day1_delivered') or 0) + int(c.get('drip_day2_delivered') or 0) + int(c.get('drip_day3_delivered') or 0),
+            'drip_day1_delivered': bool(c.get('drip_day1_delivered')),
+            'drip_day2_delivered': bool(c.get('drip_day2_delivered')),
+            'drip_day3_delivered': bool(c.get('drip_day3_delivered')),
+            'initiated_at':        c.get('initiated_at'),
+            'completed_at':        c.get('completed_at'),
+        } for c in campaign_rows]
+
+        # Payments — user_id first, ilike-email fallback (skipping the
+        # guest@resumeblast.ai Stripe placeholder), same pattern as the
+        # guest-users view above.
+        payment_rows = get_all_rows('payments', f'select=*&user_id=eq.{user_id}')
+        if _is_usable_email(email):
+            existing_ids = {p.get('id') for p in payment_rows}
+            for p in get_all_rows('payments', f'select=*&user_email=ilike.{email}'):
+                if p.get('id') not in existing_ids:
+                    payment_rows.append(p)
+        payment_rows.sort(key=lambda p: p.get('completed_at') or p.get('initiated_at') or '', reverse=True)
+
+        payments = [{
+            'id':             p.get('id'),
+            'plan_name':      p.get('plan_name'),
+            'amount':         p.get('amount'),
+            'currency':       p.get('currency'),
+            'status':         p.get('status'),
+            'payment_method': p.get('payment_method'),
+            'card_brand':     p.get('card_brand'),
+            'card_last4':     p.get('card_last4'),
+            'refund_amount':  p.get('refund_amount'),
+            'completed_at':   p.get('completed_at'),
+            'receipt_url':    p.get('receipt_url'),
+        } for p in payment_rows]
+
+        # Support tickets — matched by email (no user_id column on this
+        # table today; see the implementation plan doc's backfill idea) —
+        # each with its reply thread.
+        tickets = []
+        if email:
+            ticket_rows = get_all_rows('support_tickets', f'select=*&user_email=ilike.{email}&order=created_at.desc')
+            for t in ticket_rows:
+                replies_resp = requests.get(
+                    f"{SUPABASE_URL}/rest/v1/support_ticket_replies?ticket_row_id=eq.{t.get('id')}&select=*&order=created_at.asc",
+                    headers=_read_headers()
+                )
+                replies = replies_resp.json() if replies_resp.status_code in [200, 206] else []
+                tickets.append({
+                    'id':         t.get('id'),
+                    'ticket_id':  t.get('ticket_id'),
+                    'subject':    t.get('subject'),
+                    'message':    t.get('message'),
+                    'status':     t.get('status'),
+                    'created_at': t.get('created_at'),
+                    'replies':    replies if isinstance(replies, list) else [],
+                })
+
+        # Guest pre-signup history — best-effort. guest_users has no email
+        # column, so try any guest_id captured on a payment row first, then
+        # fall back to its JSONB metadata.candidate_email field.
+        guest_history = None
+        guest_id_hint = next((p.get('guest_id') for p in payment_rows if p.get('guest_id')), None)
+        if guest_id_hint:
+            g = get_all_rows('guest_users', f'select=*&id=eq.{guest_id_hint}')
+            guest_history = g[0] if g else None
+        if not guest_history and email:
+            g = get_all_rows('guest_users', f'select=*&metadata->>candidate_email=ilike.{email}')
+            guest_history = g[0] if g else None
+
+        notes_resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/user_admin_notes?user_id=eq.{user_id}&select=*&order=created_at.desc",
+            headers=_read_headers()
+        )
+        notes = notes_resp.json() if notes_resp.status_code in [200, 206] else []
+
+        return jsonify({
+            'user':             user,
+            'campaigns':        campaigns,
+            'payments':         payments,
+            'support_tickets':  tickets,
+            'guest_history':    guest_history,
+            'admin_notes':      notes if isinstance(notes, list) else [],
+        }), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/users/<user_id>/ban', methods=['POST'])
+def ban_user_route(user_id):
+    try:
+        reason = ((request.json or {}).get('reason') or '').strip() or 'Admin action'
+        UserService.ban_user(user_id, reason)
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/users/<user_id>/unban', methods=['POST'])
+def unban_user_route(user_id):
+    try:
+        UserService.unban_user(user_id)
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/users/<user_id>/send-reset-code', methods=['POST'])
+def send_reset_code_route(user_id):
+    try:
+        users = get_all_rows('users', f'select=email&id=eq.{user_id}')
+        if not users or not users[0].get('email'):
+            return jsonify({'success': False, 'error': 'No email on file for this user'}), 400
+        ok, err = _send_reset_code_email(users[0]['email'])
+        if not ok:
+            return jsonify({'success': False, 'error': err}), 500
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/users/<user_id>/notes', methods=['POST'])
+def add_user_note(user_id):
+    try:
+        body = request.json or {}
+        message = (body.get('message') or '').strip()
+        if not message:
+            return jsonify({'success': False, 'error': 'Note message is required'}), 400
+        admin_name = body.get('admin_name') or 'Admin'
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/user_admin_notes",
+            json={
+                'user_id':    user_id,
+                'admin_name': admin_name,
+                'message':    message,
+                'created_at': datetime.now(timezone.utc).isoformat(),
+            },
+            headers=_get_headers()
+        )
+        if resp.status_code not in [200, 201]:
+            return jsonify({'success': False, 'error': 'Failed to save note'}), 500
+        resp_json = resp.json() if resp.text else []
+        return jsonify({'success': True, 'note': resp_json[0] if resp_json else None}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# =========================================================
 # 5. APP REGISTERED RECRUITERS
 # =========================================================
 

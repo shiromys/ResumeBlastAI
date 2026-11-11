@@ -206,6 +206,22 @@ class UserService:
             print(f"⚠️  Error banning user: {e}")
 
     @staticmethod
+    def unban_user(user_id):
+        """Reverse ban_user — clears the ban and restores an active account."""
+        try:
+            url = f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}"
+            data = {
+                'is_banned': False,
+                'ban_reason': None,
+                'banned_at': None,
+                'account_status': 'active',
+                'updated_at': datetime.utcnow().isoformat()
+            }
+            requests.patch(url, json=data, headers=UserService._get_headers())
+        except Exception as e:
+            print(f"⚠️  Error unbanning user: {e}")
+
+    @staticmethod
     def delete_from_all_tables(user_id):
         """
         Delete user data from all tables

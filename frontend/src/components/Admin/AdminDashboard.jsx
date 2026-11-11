@@ -5,6 +5,7 @@ import IncompleteProfiles from './IncompleteProfiles'
 import './AdminStyles.css'
 import AppRegisteredRecruiters from './AppRegisteredRecruiters';
 import GuestUsers from './GuestUsers'
+import UserDetailDrawer from './UserDetailDrawer' // ✅ NEW: per-user detail panel
 
 function AdminDashboard({ user, onExit }) {
   const [activeTab, setActiveTab] = useState('monitoring')
@@ -31,6 +32,9 @@ function AdminDashboard({ user, onExit }) {
   // ✅ NEW: Guest-user alert state (paid guests with no linked account yet)
   const [guestUsersCount, setGuestUsersCount] = useState(0)
   const [guestAlertToast, setGuestAlertToast] = useState(null)
+
+  // ✅ NEW: which user's detail panel is open (null = closed)
+  const [selectedUserId, setSelectedUserId] = useState(null)
 
   // Drip Campaign States
   const [dripEmail, setDripEmail] = useState('')
@@ -1364,8 +1368,9 @@ function AdminDashboard({ user, onExit }) {
                             </td>
                             <td>{new Date(user.created_at).toLocaleDateString()}</td>
                             <td>
+                              {/* ✅ NEW: View Details — additive, existing Delete button untouched */}
                               <button
-                                onClick={() => handleDeleteUser(user.email, user.id)}
+                                onClick={() => setSelectedUserId(user.id)}
                                 style={{
                                   padding: '6px 12px',
                                   background: '#DC2626',
@@ -1375,10 +1380,24 @@ function AdminDashboard({ user, onExit }) {
                                   cursor: 'pointer',
                                   fontSize: '12px',
                                   fontWeight: '600',
+                                  marginRight: '8px',
+                                }}
+                              >
+                                View Details
+                              </button>
+                              <button
+                                onClick={() => handleDeleteUser(user.email, user.id)}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: 'white',
+                                  color: '#64748B',
+                                  border: '1px solid #E2E8F0',
+                                  borderRadius: '6px',
+                                  cursor: 'pointer',
+                                  fontSize: '12px',
+                                  fontWeight: '600',
                                   transition: 'background 0.2s'
                                 }}
-                                onMouseOver={(e) => e.target.style.background = '#B91C1C'}
-                                onMouseOut={(e) => e.target.style.background = '#DC2626'}
                               >
                                 Delete
                               </button>
@@ -1396,6 +1415,16 @@ function AdminDashboard({ user, onExit }) {
                   </table>
                 </div>
               </div>
+            )}
+
+            {/* ✅ NEW: user detail panel — rendered once, opened by setSelectedUserId above */}
+            {selectedUserId && (
+              <UserDetailDrawer
+                userId={selectedUserId}
+                adminEmail={user?.email}
+                onClose={() => setSelectedUserId(null)}
+                onChanged={() => fetchData('users')}
+              />
             )}
 
             {/* ✅ FIXED: DETAILED REVENUE ANALYTICS WITH REAL-TIME DATA */}
