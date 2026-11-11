@@ -192,8 +192,22 @@ def _start_drip_scheduler():
 
 # Start scheduler when the app starts (not during import/test)
 # ✅ FIXED: Cross-platform fix for Gunicorn double-scheduler issue
+#
+# ✅ NEW: Railway environment guard — the file-lock above only stops two
+# Gunicorn WORKERS inside the same container from double-starting the
+# scheduler. It does nothing across two separate Railway services (e.g. a
+# "staging" environment deployed alongside "production"), which share the
+# same database. Without this guard, a staging deploy would run its own
+# independent drip scheduler against the same blast_campaigns rows and could
+# send duplicate Day 4/Day 8 emails to real recruiters at the same time
+# production does. RAILWAY_ENVIRONMENT_NAME is auto-provided by Railway on
+# every service, no configuration needed — it's unset when running locally,
+# so local development is unaffected.
+_railway_env = os.getenv('RAILWAY_ENVIRONMENT_NAME')
+_scheduler_allowed_here = (_railway_env is None) or (_railway_env == 'production')
+
 _drip_scheduler = None
-if os.getenv('FLASK_ENV') != 'testing':
+if os.getenv('FLASK_ENV') != 'testing' and _scheduler_allowed_here:
     try:
         import fcntl
         # Linux / Railway behavior: Apply file lock to prevent double Gunicorn workers
@@ -208,6 +222,8 @@ if os.getenv('FLASK_ENV') != 'testing':
     except BlockingIOError:
         # Railway behavior: The lock is already held by Worker #1, do nothing here
         print("ℹ️ Scheduler already running in another Gunicorn worker. Skipping duplicate start.")
+elif not _scheduler_allowed_here:
+    print(f"ℹ️ Drip scheduler disabled — RAILWAY_ENVIRONMENT_NAME='{_railway_env}' is not 'production'.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
