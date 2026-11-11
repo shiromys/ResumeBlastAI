@@ -13,12 +13,6 @@ SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 BREVO_WEBHOOK_SECRET = os.getenv('BREVO_WEBHOOK_SECRET')
 
-# ✅ NEW: used as the reply-to address on admin→customer ticket replies, so
-# if the customer hits "Reply" in their inbox it lands back in the support
-# inbox rather than the no-reply sender address. Same address support_ticket.py
-# already notifies on new tickets.
-SUPPORT_EMAIL = 'support@shirotechnologies.com'
-
 # ── CHANGE 1: split into write headers and read headers ──────────────────────
 def _get_headers():
     """For write operations (POST / PATCH / DELETE)."""
@@ -623,109 +617,6 @@ def update_contact_notes(ticket_id):
         return jsonify({'success': True}), 200
     except Exception as e: return jsonify({'error': str(e)}), 500
 
-# ✅ NEW: reply to a support ticket from the admin panel itself.
-# Reuses the existing Brevo setup exactly as-is — same BREVO_API_KEY /
-# BREVO_SENDER_NAME / BREVO_SENDER_EMAIL env vars that support_ticket.py
-# already uses for the "new ticket" notification, so no new email config
-# is needed. The reply is emailed straight to the customer's address on
-# file for that ticket, and also saved to a separate support_ticket_replies
-# table (no FK to support_tickets, kept deliberately additive) purely so
-# the admin panel can show reply history for a ticket.
-@admin_bp.route('/api/admin/contact-submissions/<ticket_id>/reply', methods=['POST'])
-def reply_to_contact_submission(ticket_id):
-    try:
-        body = request.json or {}
-        message = (body.get('message') or '').strip()
-        if not message:
-            return jsonify({'error': 'Reply message is required'}), 400
-
-        # Look up the ticket to get the customer's email/name/subject.
-        lookup = requests.get(f"{SUPABASE_URL}/rest/v1/support_tickets?id=eq.{ticket_id}&select=*", headers=_read_headers())
-        rows = lookup.json() if lookup.status_code in [200, 206] else []
-        if not rows:
-            return jsonify({'error': 'Ticket not found'}), 404
-        ticket = rows[0]
-
-        user_email = ticket.get('user_email')
-        user_name = ticket.get('user_name') or 'there'
-        subject = ticket.get('subject') or 'your support ticket'
-        ref_id = ticket.get('ticket_id') or str(ticket_id)
-        if not user_email:
-            return jsonify({'error': 'This ticket has no customer email on file'}), 400
-
-        brevo_api_key = os.getenv('BREVO_API_KEY')
-        if not brevo_api_key:
-            return jsonify({'error': 'BREVO_API_KEY is not configured'}), 500
-
-        sender_name = os.getenv('BREVO_SENDER_NAME', 'ResumeBlast Support')
-        sender_email = os.getenv('BREVO_SENDER_EMAIL', 'info@resumeblast.ai')
-        admin_name = body.get('admin_name') or 'ResumeBlast Support Team'
-
-        email_payload = {
-            "sender": {"name": sender_name, "email": sender_email},
-            "replyTo": {"email": SUPPORT_EMAIL, "name": "Support Team"},
-            "to": [{"email": user_email, "name": user_name}],
-            "subject": f"Re: {subject} [{ref_id}]",
-            "htmlContent": f"""
-            <html>
-            <body style="font-family:Arial, sans-serif; padding:20px;">
-                <p>Hi {user_name},</p>
-                <p style="white-space: pre-wrap; color:#374151;">{message}</p>
-                <hr style="border:0;border-top:1px solid #eee;margin:20px 0;">
-                <p style="font-size:12px;color:#999;">
-                    Ticket reference: {ref_id}<br>
-                    &mdash; {admin_name}, ResumeBlast.ai Support
-                </p>
-            </body>
-            </html>
-            """
-        }
-
-        brevo_resp = requests.post(
-            'https://api.brevo.com/v3/smtp/email',
-            headers={'accept': 'application/json', 'api-key': brevo_api_key, 'content-type': 'application/json'},
-            json=email_payload,
-            timeout=10
-        )
-        if brevo_resp.status_code not in [200, 201]:
-            print(f"[Admin] ❌ Reply email failed to send: {brevo_resp.status_code} — {brevo_resp.text}")
-            return jsonify({'error': 'Failed to send reply email'}), 502
-
-        # Best-effort history save — the reply has already been sent at this
-        # point, so a failure here should not be reported as the reply failing.
-        try:
-            requests.post(
-                f"{SUPABASE_URL}/rest/v1/support_ticket_replies",
-                json={
-                    'ticket_row_id': str(ticket_id),
-                    'ticket_id': ref_id,
-                    'admin_name': admin_name,
-                    'message': message,
-                    'created_at': datetime.now(timezone.utc).isoformat(),
-                },
-                headers=_get_headers()
-            )
-        except Exception:
-            traceback.print_exc()
-
-        return jsonify({'success': True}), 200
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@admin_bp.route('/api/admin/contact-submissions/<ticket_id>/replies', methods=['GET'])
-def get_contact_submission_replies(ticket_id):
-    """Reply history for a ticket (oldest first), for the admin panel's thread view."""
-    try:
-        resp = requests.get(
-            f"{SUPABASE_URL}/rest/v1/support_ticket_replies?ticket_row_id=eq.{ticket_id}&select=*&order=created_at.asc",
-            headers=_read_headers()
-        )
-        rows = resp.json() if resp.status_code in [200, 206] else []
-        return jsonify({'replies': rows}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
 @admin_bp.route('/api/admin/stats', methods=['GET'])
 def get_stats():
     try:
@@ -858,6 +749,136 @@ def get_all_resumes():
 def get_user_count():
     try: return jsonify({'success': True, 'total_users': len(get_all_rows('users', 'select=id'))}), 200
     except Exception as e: return jsonify({'success': False, 'error': str(e)}), 500
+
+# =========================================================
+# 4b. GUEST USER ALERTS + CONVERSION
+# =========================================================
+# ✅ NEW: Surfaces guests who completed a paid blast purchase but have no
+# linked public.users account — payments.user_id is the signal: it's set
+# whenever identity resolution (registered OR guest) succeeds, and left
+# NULL whenever it doesn't, which is exactly the Kamyar/Tyiesha pattern
+# from earlier support tickets. A row disappears from this list the moment
+# it's converted (user_id gets set), so there's no separate "dismissed"
+# flag to maintain.
+
+def _guest_payment_rows():
+    """Completed payments with no linked user_id, newest first, email required."""
+    rows = get_all_rows('payments', 'select=*&status=eq.completed&user_id=is.null&order=completed_at.desc')
+    return [r for r in rows if r.get('user_email')]
+
+@admin_bp.route('/api/admin/guest-users', methods=['GET'])
+def get_guest_users():
+    try:
+        return jsonify({'guests': [{
+            'id':                 r.get('id'),
+            'email':              r.get('user_email'),
+            'name':               r.get('user_name'),
+            'plan_name':          r.get('plan_name'),
+            'amount':             r.get('amount'),
+            'currency':           r.get('currency'),
+            'completed_at':       r.get('completed_at'),
+            'stripe_session_id':  r.get('stripe_session_id'),
+            'is_guest_checkout':  bool(r.get('guest_id')),
+        } for r in _guest_payment_rows()]}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@admin_bp.route('/api/admin/guest-users/count', methods=['GET'])
+def get_guest_users_count():
+    try: return jsonify({'count': len(_guest_payment_rows())}), 200
+    except Exception as e: return jsonify({'error': str(e)}), 500
+
+@admin_bp.route('/api/admin/guest-users/convert', methods=['POST'])
+def convert_guest_user():
+    """
+    Flexible by design, per spec:
+      - If a public.users row already exists for this email, just relink
+        the orphaned payments/blast_campaigns rows to it.
+      - If none exists, create a new Supabase Auth account via the admin
+        invite endpoint (this also emails the guest a link to set their
+        own password and log in — same outcome as a normal signup, just
+        admin-initiated), write the matching public.users row in the same
+        shape the normal signup flow uses, then relink.
+    """
+    try:
+        body = request.json or {}
+        email = (body.get('email') or '').strip().lower()
+        if not email:
+            return jsonify({'error': 'Email is required'}), 400
+
+        # Best-effort name for the new account, from their payment record.
+        pay_lookup = requests.get(
+            f"{SUPABASE_URL}/rest/v1/payments?user_email=ilike.{email}&status=eq.completed&order=completed_at.desc&limit=1&select=user_name",
+            headers=_read_headers()
+        )
+        pay_rows = pay_lookup.json() if pay_lookup.status_code in [200, 206] else []
+        guest_name = (pay_rows[0].get('user_name') if pay_rows else None) or email.split('@')[0]
+
+        # 1. Does an account already exist for this email?
+        existing = requests.get(
+            f"{SUPABASE_URL}/rest/v1/users?email=ilike.{email}&select=id&limit=1",
+            headers=_read_headers()
+        )
+        existing_rows = existing.json() if existing.status_code in [200, 206] else []
+
+        created_new = False
+        if existing_rows:
+            user_id = existing_rows[0]['id']
+        else:
+            invite_resp = requests.post(
+                f"{SUPABASE_URL}/auth/v1/invite",
+                json={'email': email, 'data': {'full_name': guest_name}},
+                headers=_get_headers()
+            )
+            if invite_resp.status_code not in [200, 201]:
+                print(f"[Admin] ❌ Guest invite failed: {invite_resp.status_code} — {invite_resp.text}")
+                return jsonify({'error': 'Failed to create an account for this guest', 'details': invite_resp.text}), 502
+
+            invited = invite_resp.json()
+            user_id = invited.get('id') or (invited.get('user') or {}).get('id')
+            if not user_id:
+                return jsonify({'error': 'Account created but no user id was returned'}), 502
+
+            # Same users-row shape the normal signup flow writes
+            # (frontend/src/services/authService.js), so this account
+            # behaves identically to a self-registered one.
+            requests.post(
+                f"{SUPABASE_URL}/rest/v1/users",
+                json={
+                    'id':          user_id,
+                    'email':       email,
+                    'full_name':   guest_name,
+                    'role':        'job_seeker',
+                    'created_at':  datetime.now(timezone.utc).isoformat(),
+                },
+                headers=_get_headers()
+            )
+            created_new = True
+
+        # 2. Relink any orphaned data for this email to the (new or
+        # existing) user_id — same ilike-match pattern already used by
+        # the self-serve /api/user/campaign/reconcile endpoint.
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/payments?user_email=ilike.{email}&user_id=is.null",
+            json={'user_id': user_id},
+            headers=_get_headers()
+        )
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/blast_campaigns?candidate_email=ilike.{email}&user_id=is.null",
+            json={'user_id': user_id},
+            headers=_get_headers()
+        )
+
+        return jsonify({
+            'success':            True,
+            'user_id':            user_id,
+            'created_new_account': created_new,
+            'invite_email_sent':  created_new,
+        }), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 # =========================================================
 # 5. APP REGISTERED RECRUITERS

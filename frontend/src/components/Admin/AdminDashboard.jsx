@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ContactSubmissions from './ContactSubmissions'
-import RecruitersManager from './RecruitersManager' 
+import RecruitersManager from './RecruitersManager'
 import IncompleteProfiles from './IncompleteProfiles'
 import './AdminStyles.css'
 import AppRegisteredRecruiters from './AppRegisteredRecruiters';
+import GuestUsers from './GuestUsers'
 
 function AdminDashboard({ user, onExit }) {
   const [activeTab, setActiveTab] = useState('monitoring')
@@ -26,6 +27,10 @@ function AdminDashboard({ user, onExit }) {
   
   // ✅ NEW: State for pending employer signups
   const [pendingSignupsCount, setPendingSignupsCount] = useState(0)
+
+  // ✅ NEW: Guest-user alert state (paid guests with no linked account yet)
+  const [guestUsersCount, setGuestUsersCount] = useState(0)
+  const [guestAlertToast, setGuestAlertToast] = useState(null)
 
   // Drip Campaign States
   const [dripEmail, setDripEmail] = useState('')
@@ -85,7 +90,7 @@ function AdminDashboard({ user, onExit }) {
       return
     }
     
-    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip' && activeTab !== 'brevo-logs' && activeTab !== 'app-registered' && activeTab !== 'profiles') {
+    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip' && activeTab !== 'brevo-logs' && activeTab !== 'app-registered' && activeTab !== 'profiles' && activeTab !== 'guest-users') {
       fetchData(activeTab)
     } else {
       setLoading(false)
@@ -99,6 +104,12 @@ function AdminDashboard({ user, onExit }) {
       return () => clearInterval(interval)
     }
   }, [user])
+
+  // ✅ NEW: tracks the last known guest-alert count across polls, so a toast
+  // only fires when the count goes UP (a new guest purchase appeared) rather
+  // than on every 30s poll.
+  const prevGuestUsersCountRef = useRef(0)
+  const guestToastTimeoutRef = useRef(null)
 
   const fetchUnreadCount = async () => {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
@@ -115,6 +126,26 @@ function AdminDashboard({ user, onExit }) {
       if (signupsResponse.ok) {
         const signupsData = await signupsResponse.json()
         setPendingSignupsCount(signupsData.pending_count || 0)
+      }
+
+      // 3. ✅ NEW: Fetch guest-user alert count (paid guests, no linked account)
+      const guestResponse = await fetch(`${API_URL}/api/admin/guest-users/count`)
+      if (guestResponse.ok) {
+        const guestData = await guestResponse.json()
+        const newCount = guestData.count || 0
+        setGuestUsersCount(newCount)
+
+        if (newCount > prevGuestUsersCountRef.current) {
+          const justArrived = newCount - prevGuestUsersCountRef.current
+          setGuestAlertToast(
+            justArrived === 1
+              ? 'A guest just completed a paid blast — review and convert them in Guest Users.'
+              : `${justArrived} guests just completed a paid blast — review and convert them in Guest Users.`
+          )
+          if (guestToastTimeoutRef.current) clearTimeout(guestToastTimeoutRef.current)
+          guestToastTimeoutRef.current = setTimeout(() => setGuestAlertToast(null), 8000)
+        }
+        prevGuestUsersCountRef.current = newCount
       }
     } catch (error) {
       console.error('Error fetching counts:', error)
@@ -539,6 +570,20 @@ function AdminDashboard({ user, onExit }) {
             {pendingSignupsCount > 0 && (
               <span className="support-unread-badge">
                 {pendingSignupsCount}
+              </span>
+            )}
+          </button>
+
+          {/* ✅ NEW: Guest Users Tab with Badge */}
+          <button
+            className={`nav-item ${activeTab === 'guest-users' ? 'active' : ''}`}
+            onClick={() => setActiveTab('guest-users')}
+            style={{ position: 'relative' }}
+          >
+            Guest Users
+            {guestUsersCount > 0 && (
+              <span className="support-unread-badge">
+                {guestUsersCount}
               </span>
             )}
           </button>
@@ -1604,13 +1649,63 @@ function AdminDashboard({ user, onExit }) {
             )}
 
             {activeTab === 'support' && (
-              <ContactSubmissions 
+              <ContactSubmissions
                 onTicketUpdate={fetchUnreadCount}
+              />
+            )}
+
+            {activeTab === 'guest-users' && (
+              <GuestUsers
+                onConvert={fetchUnreadCount}
               />
             )}
           </>
         )}
       </div>
+
+      {/* ✅ NEW: Guest-alert toast — fires when a new paid guest appears while
+          the admin panel is open; the "Guest Users" badge above is the
+          persistent source of truth for anything missed while away. */}
+      {guestAlertToast && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            maxWidth: '360px',
+            background: '#111827',
+            color: 'white',
+            padding: '16px 20px',
+            borderRadius: '10px',
+            boxShadow: '0 10px 25px rgba(0, 0, 0, 0.3)',
+            zIndex: 10001,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '12px',
+            animation: 'guestToastIn 0.2s ease-out'
+          }}
+        >
+          <span style={{ fontSize: '20px', lineHeight: 1 }}>👤</span>
+          <div style={{ flex: 1, fontSize: '13.5px', lineHeight: '1.5' }}>
+            {guestAlertToast}
+          </div>
+          <button
+            onClick={() => setGuestAlertToast(null)}
+            style={{
+              background: 'none', border: 'none', color: '#9CA3AF',
+              cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: 0
+            }}
+          >
+            ✕
+          </button>
+          <style>{`
+            @keyframes guestToastIn {
+              from { opacity: 0; transform: translateY(12px); }
+              to { opacity: 1; transform: translateY(0); }
+            }
+          `}</style>
+        </div>
+      )}
     </div>
   )
 }
