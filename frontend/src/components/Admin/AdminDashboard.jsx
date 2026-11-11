@@ -1409,18 +1409,20 @@ function AdminDashboard({ user, onExit }) {
                     </span>
                   </div>
 
-                  {/* ✅ FIX: overflowX auto (not hidden) so a wide row scrolls instead of clipping the Actions column */}
+                  {/* ✅ FIX: columns sized to fit without a minWidth wider than the panel, so Actions
+                      never gets pushed off-screen behind a hidden horizontal scrollbar. overflowX:auto
+                      stays as a safety net only for very narrow windows. */}
                   <div className="stat-card" style={{ padding: '0', overflowX: 'auto', overflowY: 'hidden' }}>
-                    <table className="admin-table" style={{ minWidth: '880px' }}>
+                    <table className="admin-table" style={{ width: '100%', minWidth: '680px', tableLayout: 'fixed' }}>
                       <thead>
                         <tr>
-                          <th style={{ width: '90px' }}>Type</th>
+                          <th style={{ width: '70px' }}>Type</th>
                           <th>Email</th>
                           <th>Name</th>
-                          <th style={{ width: '130px' }}>User ID</th>
-                          <th style={{ width: '150px' }}>Status</th>
-                          <th style={{ width: '100px' }}>Created</th>
-                          <th style={{ width: '190px' }}>Actions</th>
+                          <th style={{ width: '90px' }}>User ID</th>
+                          <th style={{ width: '110px' }}>Status</th>
+                          <th style={{ width: '80px' }}>Created</th>
+                          <th style={{ width: '150px' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1446,7 +1448,7 @@ function AdminDashboard({ user, onExit }) {
                                         fontSize: '11px',
                                         color: '#374151',
                                         display: 'inline-block',
-                                        maxWidth: '110px',
+                                        maxWidth: '85px',
                                         overflow: 'hidden',
                                         textOverflow: 'ellipsis',
                                         whiteSpace: 'nowrap',
@@ -1476,52 +1478,56 @@ function AdminDashboard({ user, onExit }) {
                               </td>
                               <td>
                                 {row._rowType === 'registered' ? (
-                                  <>
+                                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
                                     <button
                                       onClick={() => setSelectedUserId(row.id)}
+                                      title="View full user details"
                                       style={{
-                                        padding: '6px 12px',
+                                        padding: '5px 9px',
                                         background: '#DC2626',
                                         color: 'white',
                                         border: 'none',
                                         borderRadius: '6px',
                                         cursor: 'pointer',
-                                        fontSize: '12px',
+                                        fontSize: '11px',
                                         fontWeight: '600',
-                                        marginRight: '8px',
+                                        whiteSpace: 'nowrap',
                                       }}
                                     >
-                                      View Details
+                                      View
                                     </button>
                                     <button
                                       onClick={() => handleDeleteUser(row.email, row.id)}
+                                      title="Delete this user"
                                       style={{
-                                        padding: '6px 12px',
+                                        padding: '5px 9px',
                                         background: 'white',
                                         color: '#64748B',
                                         border: '1px solid #E2E8F0',
                                         borderRadius: '6px',
                                         cursor: 'pointer',
-                                        fontSize: '12px',
+                                        fontSize: '11px',
                                         fontWeight: '600',
+                                        whiteSpace: 'nowrap',
                                       }}
                                     >
                                       Delete
                                     </button>
-                                  </>
+                                  </div>
                                 ) : (
                                   <button
                                     onClick={() => setActiveTab('guest-users')}
                                     title="Opens the Guest Users tab to convert this person"
                                     style={{
-                                      padding: '6px 12px',
+                                      padding: '5px 9px',
                                       background: '#FEF3C7',
                                       color: '#92400E',
                                       border: '1px solid #FDE68A',
                                       borderRadius: '6px',
                                       cursor: 'pointer',
-                                      fontSize: '12px',
+                                      fontSize: '11px',
                                       fontWeight: '600',
+                                      whiteSpace: 'nowrap',
                                     }}
                                   >
                                     Convert →
