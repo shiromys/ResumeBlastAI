@@ -25,6 +25,65 @@ def _get_headers():
         'Content-Type': 'application/json'
     }
 
+def _send_reset_code_email(email):
+    """
+    ✅ NEW: core logic extracted from send_reset_code() below, unchanged,
+    so it can also be called internally (e.g. by admin.py's guest-user
+    conversion flow) for any email that already has a users row — not
+    just from the public /send-reset-code route. Generates a 6-digit
+    code, stores it the same way, and sends it via Brevo (never via
+    Supabase's own auth email system).
+    Returns (success: bool, error: str | None).
+    """
+    code = str(random.randint(100000, 999999))
+    expires_at = time.time() + 600  # 10 minutes
+
+    _reset_codes[email] = {
+        'code': code,
+        'expires_at': expires_at,
+        'used': False
+    }
+
+    print(f"🔑 Reset code for {email}: {code}")
+
+    brevo_payload = {
+        "sender": {
+            "name": "ResumeBlast Support",
+            "email": "info@resumeblast.ai"
+        },
+        "to": [{"email": email}],
+        "subject": "Your ResumeBlast Password Reset Code",
+        "htmlContent": f"""
+        <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f9f9f9; border-radius: 8px;">
+          <h2 style="color: #1a1a2e; margin-bottom: 8px;">Password Reset Request</h2>
+          <p style="color: #555; font-size: 15px;">Use the verification code below to reset your ResumeBlast password. This code expires in <strong>10 minutes</strong>.</p>
+          <div style="background: #1a1a2e; color: #fff; font-size: 36px; font-weight: bold; letter-spacing: 10px; text-align: center; padding: 20px 32px; border-radius: 8px; margin: 24px 0;">
+            {code}
+          </div>
+          <p style="color: #888; font-size: 13px;">If you did not request a password reset, you can safely ignore this email.</p>
+          <p style="color: #888; font-size: 13px;">— The ResumeBlast Team</p>
+        </div>
+        """
+    }
+
+    brevo_resp = requests.post(
+        'https://api.brevo.com/v3/smtp/email',
+        json=brevo_payload,
+        headers={
+            'api-key': BREVO_API_KEY,
+            'Content-Type': 'application/json'
+        },
+        timeout=10
+    )
+
+    if brevo_resp.status_code not in (200, 201):
+        print(f"❌ Brevo error: {brevo_resp.status_code} {brevo_resp.text}")
+        return False, 'Failed to send email. Please try again.'
+
+    print(f"✅ Reset code email sent to {email}")
+    return True, None
+
+
 def is_user_blacklisted(email):
     """
     Check if user email is in the deleted_users table.
@@ -178,55 +237,9 @@ def send_reset_code():
         user_exists = resp.status_code == 200 and len(resp.json()) > 0
 
         if user_exists:
-            # Generate 6-digit code
-            code = str(random.randint(100000, 999999))
-            expires_at = time.time() + 600  # 10 minutes
-
-            # Store in memory
-            _reset_codes[email] = {
-                'code': code,
-                'expires_at': expires_at,
-                'used': False
-            }
-
-            print(f"🔑 Reset code for {email}: {code}")
-
-            # ── Send via Brevo transactional email ──
-            brevo_payload = {
-                "sender": {
-                    "name": "ResumeBlast Support",
-                    "email": "info@resumeblast.ai"
-                },
-                "to": [{"email": email}],
-                "subject": "Your ResumeBlast Password Reset Code",
-                "htmlContent": f"""
-                <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px; background: #f9f9f9; border-radius: 8px;">
-                  <h2 style="color: #1a1a2e; margin-bottom: 8px;">Password Reset Request</h2>
-                  <p style="color: #555; font-size: 15px;">Use the verification code below to reset your ResumeBlast password. This code expires in <strong>10 minutes</strong>.</p>
-                  <div style="background: #1a1a2e; color: #fff; font-size: 36px; font-weight: bold; letter-spacing: 10px; text-align: center; padding: 20px 32px; border-radius: 8px; margin: 24px 0;">
-                    {code}
-                  </div>
-                  <p style="color: #888; font-size: 13px;">If you did not request a password reset, you can safely ignore this email.</p>
-                  <p style="color: #888; font-size: 13px;">— The ResumeBlast Team</p>
-                </div>
-                """
-            }
-
-            brevo_resp = requests.post(
-                'https://api.brevo.com/v3/smtp/email',
-                json=brevo_payload,
-                headers={
-                    'api-key': BREVO_API_KEY,
-                    'Content-Type': 'application/json'
-                },
-                timeout=10
-            )
-
-            if brevo_resp.status_code not in (200, 201):
-                print(f"❌ Brevo error: {brevo_resp.status_code} {brevo_resp.text}")
-                return jsonify({'success': False, 'error': 'Failed to send email. Please try again.'}), 500
-
-            print(f"✅ Reset code email sent to {email}")
+            ok, err = _send_reset_code_email(email)
+            if not ok:
+                return jsonify({'success': False, 'error': err}), 500
 
         # Always return success (security: don't reveal whether account exists)
         return jsonify({
