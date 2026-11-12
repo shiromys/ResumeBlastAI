@@ -10,6 +10,7 @@ import UserDetailDrawer from './UserDetailDrawer' // ✅ NEW: per-user detail pa
 import AdminAccessManager from './AdminAccessManager' // ✅ NEW: super-admin-only grant/revoke screen
 import AdminGlobalSearch from './AdminGlobalSearch' // ✅ NEW: search users/payments/campaigns/tickets from anywhere in the panel
 import MaintenanceControl from './MaintenanceControl' // ✅ NEW: Maintenance Mode toggle
+import CampaignsOverview from './CampaignsOverview' // ✅ NEW: list of all active campaigns
 
 function AdminDashboard({ user, adminRole, onExit }) {
   const [activeTab, setActiveTab] = useState('monitoring')
@@ -51,6 +52,11 @@ function AdminDashboard({ user, adminRole, onExit }) {
   const [dripLoading, setDripLoading] = useState(false)
   const [dripError, setDripError] = useState(null)
   const [pollingActive, setPollingActive] = useState(false)
+  // ✅ NEW: bumped by Campaigns Overview's "Manage →" button, right after it
+  // pre-fills dripEmail/dripUserId and switches to this tab — triggers the
+  // lookup automatically instead of making the admin click "Check Blast
+  // Status" again for a campaign they just picked from the list.
+  const [dripAutoSearch, setDripAutoSearch] = useState(0)
 
   // ✅ NEW: BREVO LOGS STATES
   const [brevoLogs, setBrevoLogs] = useState([])
@@ -86,6 +92,16 @@ function AdminDashboard({ user, adminRole, onExit }) {
       if (interval) clearInterval(interval);
     };
   }, [activeTab, dripEmail, dripUserId, dripData]);
+
+  // ✅ NEW: fires the lookup once when Campaigns Overview hands off a
+  // specific campaign to this tab (see dripAutoSearch above). Guarded on
+  // dripAutoSearch > 0 so it never fires on initial mount.
+  useEffect(() => {
+    if (dripAutoSearch > 0 && activeTab === 'drip') {
+      handleSearchDrip()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dripAutoSearch])
 
   // ✅ NEW: Auto-fetch Brevo logs when tab is active
   useEffect(() => {
@@ -573,6 +589,13 @@ function AdminDashboard({ user, adminRole, onExit }) {
             onClick={() => setActiveTab('drip')}
           >
             Drip Campaigns
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === 'campaigns-overview' ? 'active' : ''}`}
+            onClick={() => setActiveTab('campaigns-overview')}
+          >
+          Campaigns Overview
           </button>
 
           {/* ✅ NEW: Brevo Logs Tab Button */}
@@ -1963,6 +1986,24 @@ function AdminDashboard({ user, adminRole, onExit }) {
 
             {activeTab === 'maintenance' && (
               <MaintenanceControl />
+            )}
+
+            {activeTab === 'campaigns-overview' && (
+              <CampaignsOverview
+                onManage={(c) => {
+                  // ✅ The Drip lookup's "user_id" field actually checks
+                  // `id=eq.<value>` FIRST (GET /api/admin/drip-stats,
+                  // backend/routes/admin.py ~line 320) before falling back
+                  // to a real user_id or an email match — so passing this
+                  // exact campaign's own id here always lands on the exact
+                  // row just clicked, even for a junk campaign with no
+                  // candidate_email or user_id at all.
+                  setDripUserId(c.id || '')
+                  setDripEmail('')
+                  setActiveTab('drip')
+                  setDripAutoSearch(n => n + 1)
+                }}
+              />
             )}
           </>
         )}

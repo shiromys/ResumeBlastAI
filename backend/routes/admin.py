@@ -334,9 +334,40 @@ def get_drip_stats():
                     if str(c.get('status')).lower() != 'cancelled':
                         campaign = c
                         break
-        
+
+            # ✅ FIX: "ids displayed in User Details show as no campaign
+            # found when pasted here, even though the campaign is present."
+            # Root cause — the three lookups above only match a campaign
+            # whose blast_campaigns.user_id column literally equals this
+            # real user id (or a guest_-prefixed variant of it). A campaign
+            # that was run while this person was still a guest, and only
+            # ever got "linked" to their account by matching
+            # candidate_email — exactly how GET /api/admin/users/<id>/details
+            # resolves campaigns for the User Details drawer, a few hundred
+            # lines below this function — has a user_id column that was
+            # never actually updated, so none of the three lookups above
+            # can ever find it, even though the drawer clearly lists it as
+            # theirs. This closes that exact gap: resolve user_id to the
+            # account's email and retry the same way get_user_details
+            # already does, so the "User ID" shown in User Details always
+            # finds what that same drawer already shows.
+            if not campaign:
+                user_rows = get_all_rows('users', f'select=email&id=eq.{user_id}')
+                resolved_email = (user_rows[0].get('email') if user_rows else None) or ''
+                if _is_usable_email(resolved_email):
+                    res = get_all_rows('blast_campaigns', f'candidate_email=ilike.{quote(resolved_email)}&order=created_at.desc')
+                    for c in res:
+                        if str(c.get('status')).lower() != 'cancelled':
+                            campaign = c
+                            break
+
         if not campaign and email:
-            res = get_all_rows('blast_campaigns', f'candidate_email=eq.{email}&order=created_at.desc')
+            # ✅ FIX: was an exact, case-sensitive 'eq.' match with no
+            # URL-quoting — silently missed a stored email that differed
+            # only in case, and broke outright on a '+' alias address
+            # (read as a literal space by the HTTP layer). Same ilike+quote
+            # pattern already used for this elsewhere in this file.
+            res = get_all_rows('blast_campaigns', f'candidate_email=ilike.{quote(email)}&order=created_at.desc')
             for c in res:
                 if str(c.get('status')).lower() != 'cancelled':
                     campaign = c
@@ -423,6 +454,59 @@ def force_drip_wave():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: Campaigns Overview — "show complete details of all active
+# campaigns" in one list, instead of having to already know a specific
+# email/user ID to look up via the single-campaign search above. "Active"
+# here means not yet completed or cancelled (initiated / active /
+# in_progress — matches exactly what services/drip_scheduler.py itself
+# still has to act on), so this doubles as "what still needs the
+# scheduler to finish, or might be stuck." Reuses
+# _campaign_total_recipients(), defined below for the user-detail view —
+# same recipients-count-with-plan-limit-fallback logic, kept as one
+# source of truth rather than duplicated here.
+# ─────────────────────────────────────────────────────────────────────────
+@admin_bp.route('/api/admin/campaigns/overview', methods=['GET'])
+def campaigns_overview():
+    try:
+        campaigns = get_all_rows(
+            'blast_campaigns',
+            'select=*&status=not.in.(completed,cancelled)&order=initiated_at.desc.nullslast'
+        )
+        plans_cache = get_all_rows('plans', 'select=key_name,display_name,recruiter_limit') if campaigns else []
+
+        def _last_activity(c):
+            dates = [c.get('drip_day1_last_date'), c.get('drip_day2_last_date'), c.get('drip_day3_last_date')]
+            dates = [d for d in dates if d]
+            return max(dates) if dates else None
+
+        rows = [{
+            'id':                 c.get('id'),
+            'status':             c.get('status'),
+            'candidate_name':     c.get('candidate_name'),
+            'candidate_email':    c.get('candidate_email'),
+            'job_role':           c.get('job_role'),
+            'plan_name':          c.get('plan_name'),
+            'user_id':            c.get('user_id'),
+            'total_recipients':   _campaign_total_recipients(c, plans_cache),
+            'wave1_sent':         int(c.get('drip_day1_delivered') or 0),
+            'wave2_sent':         int(c.get('drip_day2_delivered') or 0),
+            'wave3_sent':         int(c.get('drip_day3_delivered') or 0),
+            'drip_day1_sent_at':  c.get('drip_day1_sent_at'),
+            'drip_day2_sent_at':  c.get('drip_day2_sent_at'),
+            'drip_day3_sent_at':  c.get('drip_day3_sent_at'),
+            'last_activity':      _last_activity(c),
+            'initiated_at':       c.get('initiated_at') or c.get('created_at'),
+            'resume_url':         c.get('resume_url'),
+        } for c in campaigns]
+
+        return jsonify({'success': True, 'count': len(rows), 'campaigns': rows}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 # =========================================================
 # 3. BREVO LOGS ENDPOINTS
