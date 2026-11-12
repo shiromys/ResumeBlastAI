@@ -7,6 +7,7 @@ import time
 import traceback
 from urllib.parse import quote
 from services.user_service import UserService
+from services.guest_service import GuestService  # ✅ NEW: shared relink_to_user — same logic the guest self-serve setup flow uses
 from routes.auth import _send_reset_code_email  # ✅ NEW: reuse the existing Brevo-based reset-code flow for guest conversion
 
 admin_bp = Blueprint('admin', __name__)
@@ -1073,30 +1074,10 @@ def convert_guest_user():
                 print(f"[Admin] ⚠️ Guest account created but reset-code email failed: {email_err}")
 
         # 2. Relink any orphaned data to the (new or existing) user_id.
-        # ✅ FIX: relink the specific payments row by stripe_session_id first
-        # (exact match — works even when its user_email is still the
-        # placeholder and doesn't match `email` at all), then also sweep by
-        # email for both tables to pick up any other historical rows under
-        # the same real address. Without the session_id patch, a guest
-        # converted via the resume-email fallback would never actually get
-        # user_id set on their payments row, so they'd keep reappearing in
-        # the Guest Users list after being "converted."
-        if stripe_session_id:
-            requests.patch(
-                f"{SUPABASE_URL}/rest/v1/payments?stripe_session_id=eq.{stripe_session_id}&user_id=is.null",
-                json={'user_id': user_id},
-                headers=_get_headers()
-            )
-        requests.patch(
-            f"{SUPABASE_URL}/rest/v1/payments?user_email=ilike.{email}&user_id=is.null",
-            json={'user_id': user_id},
-            headers=_get_headers()
-        )
-        requests.patch(
-            f"{SUPABASE_URL}/rest/v1/blast_campaigns?candidate_email=ilike.{email}&user_id=is.null",
-            json={'user_id': user_id},
-            headers=_get_headers()
-        )
+        # ✅ Shared with the guest's own self-serve "Complete Account Setup"
+        # flow (GuestService.relink_to_user) so both conversion paths behave
+        # identically — one email, one user_id, never left half-linked.
+        GuestService.relink_to_user(email, user_id, stripe_session_id)
 
         return jsonify({
             'success':            True,
@@ -1613,4 +1594,3 @@ def get_profiles_overview():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
-        

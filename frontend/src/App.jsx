@@ -62,6 +62,8 @@ const detectGuestSession = (params, isAuth) => {
   return null
 }
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+
 function App() {
   usePageTracking()
 
@@ -72,8 +74,8 @@ function App() {
   const [isGuest, setIsGuest] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
   const [showSignup, setShowSignup] = useState(false)
-  const [isRestoring, setIsRestoring] = useState(true) 
-  const [paymentSuccess, setPaymentSuccess] = useState(false) 
+  const [isRestoring, setIsRestoring] = useState(true)
+  const [paymentSuccess, setPaymentSuccess] = useState(false)
   const [hasUploadedInSession, setHasUploadedInSession] = useState(false)
 
   const prevUserIdRef = useRef(null)
@@ -176,6 +178,25 @@ function App() {
           setIsGuest(true)
           setPaymentSuccess(true)
           restoreResumeData() // Restore state for guests
+
+          // ✅ NEW: Stripe Checkout now collects the guest's real email itself
+          // (mandatory, editable — see payment.py), replacing the old
+          // GuestEmailGate confirm-email step. Silently fetch what Stripe
+          // captured for this session and carry it forward in localStorage —
+          // ResumeAnalysis.jsx's blast payload and the later "Complete
+          // Account Setup" step both read guest_confirmed_email from here.
+          if (sessionId) {
+            try {
+              const resp = await fetch(`${API_URL}/api/guest/session-email/${sessionId}`)
+              const json = await resp.json()
+              if (json.success && json.email) {
+                localStorage.setItem('guest_confirmed_email', json.email)
+              }
+            } catch (e) {
+              console.error('⚠️ Could not fetch guest session email:', e)
+            }
+          }
+
           // 🔥 FIX: Pass window.location.search to preserve Stripe URL parameters for guests too!
           navigate(`/thank-you${window.location.search}`, { replace: true })
 
@@ -368,6 +389,9 @@ function App() {
                     />
                   </>
                 ) : (
+                  // ✅ FIX: no more email-confirm gate here — Stripe Checkout
+                  // already collected a real, mandatory email for guests, so
+                  // they go straight from payment to upload.
                   <ResumeUpload
                     user={user}
                     isGuest={isGuest}

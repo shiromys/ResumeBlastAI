@@ -311,6 +311,42 @@ class GuestService:
         return {'success': success}
 
     @staticmethod
+    def relink_to_user(email: str, user_id: str, stripe_session_id: str = None) -> None:
+        """
+        ✅ NEW: Relinks a guest's orphaned payments/blast_campaigns rows to a
+        real user_id. Shared by both the admin's "Convert" button
+        (routes/admin.py convert_guest_user) and the guest's own self-serve
+        "Complete Account Setup" flow (routes/guest_routes.py
+        complete_guest_account) — one code path, so both ways of converting
+        behave identically and never leave a guest half-linked.
+
+        stripe_session_id is tried first (exact match — works even when
+        payments.user_email is still the Stripe placeholder and doesn't
+        match `email` at all), then both tables are swept by email to catch
+        any other historical rows under the same real address.
+        """
+        base = os.getenv('SUPABASE_URL')
+        headers = GuestService._headers()
+        email = (email or '').strip().lower()
+        try:
+            if stripe_session_id:
+                requests.patch(
+                    f"{base}/rest/v1/payments?stripe_session_id=eq.{quote(stripe_session_id)}&user_id=is.null",
+                    json={'user_id': user_id}, headers=headers, timeout=10
+                )
+            if email:
+                requests.patch(
+                    f"{base}/rest/v1/payments?user_email=ilike.{quote(email)}&user_id=is.null",
+                    json={'user_id': user_id}, headers=headers, timeout=10
+                )
+                requests.patch(
+                    f"{base}/rest/v1/blast_campaigns?candidate_email=ilike.{quote(email)}&user_id=is.null",
+                    json={'user_id': user_id}, headers=headers, timeout=10
+                )
+        except Exception as e:
+            print(f"[GuestService] relink_to_user ERROR: {e}")
+
+    @staticmethod
     def get(guest_id: str) -> dict:
         try:
             url = f"{GuestService._base_url()}?id=eq.{guest_id}&order=created_at.desc&limit=1"

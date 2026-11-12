@@ -236,17 +236,28 @@ def create_checkout_session():
                 'quantity': 1,
             }]
 
-        checkout_session = stripe.checkout.Session.create(
+        # ✅ FIX: Stripe pre-fills AND LOCKS the checkout email field whenever
+        # customer_email is passed — that's exactly what made the old
+        # 'guest@resumeblast.ai' placeholder unchangeable by the guest. Only
+        # pass it for a real, known address (a logged-in user's own account
+        # email); for a guest, omit it entirely so Stripe shows its own
+        # blank, mandatory, EDITABLE email field, and the real address the
+        # guest types becomes session.customer_details.email — which the
+        # webhook and /api/payment/verify already read as the source of truth.
+        checkout_kwargs = dict(
             payment_method_types=['card'],
             line_items=line_items,
             mode='payment',
-            customer_email=user_email,
             client_reference_id=str(user_id),
             metadata=metadata,
             invoice_creation={"enabled": True},
             success_url=success_url,
             cancel_url=f'{frontend_url}?payment=cancelled',
         )
+        if user_email and user_email.strip().lower() != 'guest@resumeblast.ai':
+            checkout_kwargs['customer_email'] = user_email
+
+        checkout_session = stripe.checkout.Session.create(**checkout_kwargs)
 
         # ── FIX 1+2+3: safe UUID, correct headers, logged response ──────────
         safe_user_id  = _safe_uuid(user_id) if not is_guest else None

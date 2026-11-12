@@ -6,9 +6,11 @@
 //   4. Blast button hides correctly post-payment for registered users
 
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Lottie from 'lottie-react'
 import botAnimation from '../assets/bot-working.json'
 import BlastConfig from './BlastConfig'
+import GuestAccountSetup from './GuestAccountSetup'
 import { analyzeResumeForBlast, getSkillsByCategory, formatAllSkillsForDisplay } from '../utils/aiAnalyzer'
 import { trackResumeAnalysis } from '../services/activityTrackingService'
 import { saveGuestAnalysis } from '../services/guestTrackingService'
@@ -16,6 +18,7 @@ import { triggerEmailBlast } from '../services/blastService'
 import './ResumeAnalysis.css'
 
 function ResumeAnalysis({ user, isGuest, resumeText, resumeUrl, resumeId, isPaymentSuccess }) {
+  const navigate = useNavigate()
   const [analyzing, setAnalyzing]               = useState(false)
   const [analysis, setAnalysis]                 = useState(null)
   const [showBlastConfig, setShowBlastConfig]   = useState(false)
@@ -24,6 +27,10 @@ function ResumeAnalysis({ user, isGuest, resumeText, resumeUrl, resumeId, isPaym
   const [guestDisclaimerAccepted, setGuestDisclaimerAccepted] = useState(false)
   const [blastComplete, setBlastComplete]       = useState(false)
   const [progress, setProgress]                 = useState(0)
+  // ✅ NEW: post-blast "Complete Account Setup" step (replaces the old
+  // alert()+redirect-home behavior for guests)
+  const [blastSentCount, setBlastSentCount]     = useState(0)
+  const [showAccountSetup, setShowAccountSetup] = useState(false)
 
   // ── Start Analysis automatically ───────────────────────────────────────────
   useEffect(() => {
@@ -101,9 +108,12 @@ function ResumeAnalysis({ user, isGuest, resumeText, resumeUrl, resumeId, isPaym
         candidate_name:    (analysis.candidate_name && analysis.candidate_name !== 'Not Found')
                              ? analysis.candidate_name
                              : 'Candidate',
+        // ✅ Falls back to the email confirmed via GuestEmailGate before upload
+        // if the AI parser couldn't find one in the resume text itself — so
+        // the campaign always has a real, reachable email either way.
         candidate_email:   (analysis.candidate_email && analysis.candidate_email !== 'Not Found')
                              ? analysis.candidate_email
-                             : '',
+                             : (localStorage.getItem('guest_confirmed_email') || ''),
         candidate_phone:   analysis.candidate_phone !== 'Not Found' ? (analysis.candidate_phone || '') : '',
         job_role:          analysis.detected_role || 'Professional',
         years_experience:  String(analysis.years_of_experience || 0),
@@ -118,15 +128,12 @@ function ResumeAnalysis({ user, isGuest, resumeText, resumeUrl, resumeId, isPaym
       localStorage.removeItem('pending_blast_config')
       setGuestDisclaimerAccepted(true)
       setBlastComplete(true)
+      setBlastSentCount(result.successful_sends || 0)
 
-      alert(
-        '🎉 Blast Initiated Successfully!\n\n' +
-        `Your resume has been sent to ${result.successful_sends || 0} recruiters.\n` +
-        'Watch your email inbox for recruiter replies!'
-      )
-
-      // Guest goes to homepage after blast
-      window.location.href = '/'
+      // ✅ FIX: no more alert()+redirect to the homepage. The guest stays
+      // right here and sees the success banner below, with a clear path to
+      // "Complete Account Setup" instead of being bounced away with nothing
+      // but a browser alert.
 
     } catch (error) {
       console.error('[ResumeAnalysis] Guest blast error:', error)
@@ -405,6 +412,49 @@ function ResumeAnalysis({ user, isGuest, resumeText, resumeUrl, resumeId, isPaym
             </p>
           </div>
         </div>
+      )}
+
+      {/* ── GUEST POST-BLAST: "Complete Account Setup" banner ──
+          ✅ NEW: replaces the old alert()+redirect-to-homepage. A guest
+          cannot reach /dashboard until they do this (App.jsx only allows
+          /dashboard for `user`, not `isGuest`) — this is the "notification
+          saying complete account setup to get access for dashboard and
+          campaign details" step. */}
+      {isGuest && blastComplete && (
+        <div style={{
+          marginTop: '30px', padding: '28px', textAlign: 'center',
+          background: 'linear-gradient(135deg, #FEF2F2, #FEE2E2)',
+          border: '2px solid #DC2626', borderRadius: '12px'
+        }}>
+          <div style={{ fontSize: '40px', marginBottom: '10px' }}>🎉</div>
+          <h3 style={{ color: '#991B1B', margin: '0 0 8px 0', fontSize: '20px' }}>
+            Blast Sent to {blastSentCount} Recruiters!
+          </h3>
+          <p style={{ color: '#7F1D1D', margin: '0 0 20px 0', fontSize: '14px', lineHeight: '1.6' }}>
+            One last step — complete your account setup to unlock your dashboard and
+            track this campaign's recruiter replies and delivery status.
+          </p>
+          <button
+            onClick={() => setShowAccountSetup(true)}
+            style={{
+              padding: '14px 32px', background: '#DC2626', color: 'white',
+              border: 'none', borderRadius: '10px', fontSize: '16px', fontWeight: '700',
+              cursor: 'pointer'
+            }}
+          >
+            Complete Account Setup
+          </button>
+        </div>
+      )}
+
+      {/* ── GUEST ACCOUNT SETUP MODAL ── */}
+      {showAccountSetup && (
+        <GuestAccountSetup
+          email={localStorage.getItem('guest_confirmed_email') || ''}
+          stripeSessionId={new URLSearchParams(window.location.search).get('session_id') || ''}
+          onComplete={() => navigate('/dashboard', { replace: true })}
+          onClose={() => setShowAccountSetup(false)}
+        />
       )}
 
       {/* ── BLAST BUTTON — only shows before payment ── */}

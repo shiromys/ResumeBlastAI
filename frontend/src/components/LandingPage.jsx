@@ -183,7 +183,10 @@ function LandingPage({ onGetStarted, user }) {
       // selected_plan_type was set here, which nothing downstream ever reads,
       // causing the blast to silently fall back to the Starter plan.
       localStorage.setItem('pending_blast_config', JSON.stringify({ plan: planKey, location: 'Remote' }))
-      await initiateCheckout({ email: 'guest@resumeblast.ai', id: guestId, plan: planKey, disclaimer_accepted: true })
+      // ✅ FIX: no longer sends the 'guest@resumeblast.ai' placeholder — see
+      // PricingPage.jsx for the full reasoning (Stripe locks the email field
+      // whenever customer_email is set).
+      await initiateCheckout({ id: guestId, plan: planKey, disclaimer_accepted: true })
     } catch (err) { console.error('Payment failed:', err) }
   }
 

@@ -70,7 +70,12 @@ function PricingPage({ onGetStarted, user }) {
       // selected_plan_type was set here, which nothing downstream ever reads,
       // causing the blast to silently fall back to the Starter plan.
       localStorage.setItem('pending_blast_config', JSON.stringify({ plan: planKey, location: 'Remote' }))
-      await initiateCheckout({ email: 'guest@resumeblast.ai', id: guestId, plan: planKey, disclaimer_accepted: true, priceCents: cfg.defaultCents })
+      // ✅ FIX: no longer sends the 'guest@resumeblast.ai' placeholder — Stripe
+      // Checkout pre-fills (and locks) the email field whenever customer_email
+      // is set, so sending the placeholder made it impossible for a guest to
+      // ever enter their real address. Omitting it lets Stripe show its own
+      // blank, mandatory, editable email field instead.
+      await initiateCheckout({ id: guestId, plan: planKey, disclaimer_accepted: true, priceCents: cfg.defaultCents })
     } catch (err) { console.error('Payment failed:', err) }
   }
 
