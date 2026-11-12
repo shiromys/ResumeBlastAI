@@ -104,6 +104,25 @@ export const signUp = async (email, password, fullName) => {
 
     console.log('✅ Supabase auth user created:', data.user.id);
 
+    // ✅ NEW: this email might already have an orphaned guest payment/campaign
+    // sitting in the database — paid as a guest, never completed the
+    // post-blast "Complete Account Setup" step, and came back to sign up
+    // normally here instead. That's a different code path with no other way
+    // to know about it, so sweep for and relink it now via the same backend
+    // helper (GuestService.relink_to_user) the admin's "Convert" button and
+    // the guest setup flow both already use — one email, one user_id,
+    // whichever path someone takes to get a real account. Best-effort and
+    // non-blocking: it never affects whether signup itself succeeds.
+    try {
+      await fetch(`${API_URL}/api/auth/relink-guest-data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.toLowerCase(), user_id: data.user.id }),
+      });
+    } catch (relinkErr) {
+      console.warn('⚠️ relink-guest-data call failed (non-blocking):', relinkErr);
+    }
+
     // ✅ STEP 3: Insert user into users table (THIS WAS MISSING!)
     console.log('Step 3: Inserting user into users table...');
     const { data: userData, error: userError } = await supabase

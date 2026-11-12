@@ -4,6 +4,7 @@ import os
 import requests
 import random
 import time
+from services.guest_service import GuestService  # ✅ NEW: relink_to_user — same helper used by admin's "Convert" button and the guest self-serve setup flow
 
 auth_bp = Blueprint('auth', __name__)
 
@@ -210,6 +211,42 @@ def check_auth_status():
 @auth_bp.route('/api/auth/test', methods=['GET'])
 def test_auth():
     return jsonify({'success': True, 'message': 'Auth API is online'}), 200
+
+
+@auth_bp.route('/api/auth/relink-guest-data', methods=['POST'])
+def relink_guest_data():
+    """
+    ✅ NEW: called by authService.js's signUp() right after a brand-new
+    Supabase Auth user + users row is created through the NORMAL signup
+    page. That flow never talks to the backend otherwise, so without this
+    it has no way to discover that the same email may already have an
+    orphaned guest payment/campaign (paid as a guest, abandoned before
+    completing the post-blast "Complete Account Setup" step, then came
+    back and signed up the regular way instead).
+
+    Delegates to the same GuestService.relink_to_user() helper the admin's
+    "Convert" button and the guest self-serve setup flow both already use,
+    so every path that ends in a real account converges on identical
+    behavior — one email, one user_id, never left half-linked.
+
+    Best-effort: always returns 200-ish and never raises, since the
+    frontend calls this as a non-blocking side effect of signup and must
+    never have signup itself fail because of it.
+    """
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        user_id = (data.get('user_id') or '').strip()
+
+        if not email or not user_id:
+            return jsonify({'success': False, 'error': 'email and user_id are required'}), 400
+
+        GuestService.relink_to_user(email, user_id)
+        return jsonify({'success': True}), 200
+
+    except Exception as e:
+        print(f"⚠️ [Auth] relink-guest-data error (non-blocking): {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ─────────────────────────────────────────────
