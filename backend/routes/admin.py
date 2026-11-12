@@ -15,6 +15,7 @@ from routes.auth import _send_reset_code_email  # ✅ NEW: reuse the existing Br
 from services.admin_auth import get_requesting_admin, SUPER_ADMIN_EMAILS  # ✅ NEW: real server-side admin auth
 import stripe  # ✅ NEW: invoice lookup + refunds, same lazy per-request api_key pattern as routes/payment.py
 from services.invoice_email_service import InvoiceEmailService  # ✅ NEW: reuse the exact receipt template customers were emailed
+from services.maintenance_service import get_maintenance_status, set_maintenance_status  # ✅ NEW: Maintenance Mode toggle
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -1470,6 +1471,62 @@ def export_campaigns_csv():
                       'plan_name', 'status', 'user_id', 'drip_day1_delivered', 'drip_day2_delivered',
                       'drip_day3_delivered', 'id']
         return _csv_response('campaigns_export.csv', fieldnames, rows)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: Maintenance Mode — a toggle to show a "We'll be right back" page
+# to visitors while admin work is in progress.
+#
+# IMPORTANT, by design: this does NOT block any request on the backend
+# itself — no before_request check here flips every API call to a 503.
+# That would risk breaking things that must keep running no matter what
+# the toggle says: the Stripe webhook (a payment that completes while the
+# toggle is on must still be recorded), the drip-email scheduler, and
+# critically, the admin's own ability to log in and flip this right back
+# off. Enforcement happens entirely on the frontend: the public React app
+# polls GET /api/maintenance-status (routes/maintenance.py, unauthenticated,
+# NOT under this blueprint's auth guard) and shows the takeover page itself
+# when enabled=true, while a signed-in admin always keeps seeing the real
+# app regardless, so they're never locked out of their own toggle.
+# These two routes are the admin-only read/write side of that same row;
+# this blueprint's before_request guard above already protects them like
+# every other /api/admin/* route — no new allowlist entry needed.
+# ─────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route('/api/admin/maintenance', methods=['GET'])
+def get_maintenance():
+    try:
+        status = get_maintenance_status(use_cache=False)  # admin always sees the live value, never the cached one
+        return jsonify({'success': True, **status})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/maintenance', methods=['POST'])
+def update_maintenance():
+    try:
+        data = request.get_json(silent=True) or {}
+        if 'enabled' not in data:
+            return jsonify({'success': False, 'error': 'enabled is required'}), 400
+
+        message = data.get('message')
+        if message is not None and len(message) > 2000:
+            return jsonify({'success': False, 'error': 'Message is too long (max 2000 characters)'}), 400
+
+        admin = getattr(request, 'admin', None)
+        updated_by = (admin or {}).get('email')
+
+        result = set_maintenance_status(
+            enabled=bool(data.get('enabled')),
+            message=message,
+            estimated_back_at=data.get('estimated_back_at'),
+            updated_by=updated_by,
+        )
+        return jsonify({'success': True, **result})
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500

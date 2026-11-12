@@ -9,6 +9,7 @@ import GuestUsers from './GuestUsers'
 import UserDetailDrawer from './UserDetailDrawer' // ✅ NEW: per-user detail panel
 import AdminAccessManager from './AdminAccessManager' // ✅ NEW: super-admin-only grant/revoke screen
 import AdminGlobalSearch from './AdminGlobalSearch' // ✅ NEW: search users/payments/campaigns/tickets from anywhere in the panel
+import MaintenanceControl from './MaintenanceControl' // ✅ NEW: Maintenance Mode toggle
 
 function AdminDashboard({ user, adminRole, onExit }) {
   const [activeTab, setActiveTab] = useState('monitoring')
@@ -666,6 +667,13 @@ function AdminDashboard({ user, adminRole, onExit }) {
                 {unreadCount}
               </span>
             )}
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === 'maintenance' ? 'active' : ''}`}
+            onClick={() => setActiveTab('maintenance')}
+          >
+          Maintenance Mode
           </button>
 
           {/* ✅ NEW: only the two permanent super admins ever see this tab at
@@ -1951,6 +1959,10 @@ function AdminDashboard({ user, adminRole, onExit }) {
                 just the render-level mirror of that same gate. */}
             {activeTab === 'admin-access' && adminRole === 'super_admin' && (
               <AdminAccessManager />
+            )}
+
+            {activeTab === 'maintenance' && (
+              <MaintenanceControl />
             )}
           </>
         )}

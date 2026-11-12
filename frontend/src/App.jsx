@@ -25,6 +25,7 @@ import PricingPage from './pages/PricingPage'
 import ScrollToTop from './components/ScrollToTop' // ✅ ADDED
 import BlogPage from './pages/BlogPage'
 import BlogPostPage from './pages/BlogPostPage'
+import MaintenancePage from './components/MaintenancePage' // ✅ NEW: Maintenance Mode takeover
 
 import './App.css'
 import usePageTracking from './hooks/usePageTracking'
@@ -88,6 +89,13 @@ function App() {
   const [resumeText, setResumeText] = useState('')
   const [resumeUrl, setResumeUrl] = useState('')
   const [resumeId, setResumeId] = useState('')
+
+  // ✅ NEW: Maintenance Mode. Polled independently of the auth/session
+  // flow above — it has to work (and keep working) whether or not anyone
+  // is logged in. Fails open on any error (stays "not enabled") so a
+  // flaky network request can never be the thing that shows every
+  // visitor a maintenance page by accident.
+  const [maintenance, setMaintenance] = useState({ enabled: false, message: '', estimated_back_at: null })
 
   // ✅ CHANGED: this used to call a Postgres RPC (`check_is_admin`) that only
   // ever drove client-side UI state — the Flask backend never re-checked
@@ -279,6 +287,37 @@ function App() {
     return () => subscription.unsubscribe()
   }, [navigate])
 
+  // ✅ NEW: Maintenance Mode — checked once on load, then re-checked every
+  // 45s so an admin's toggle reaches tabs that are already open (an
+  // admin turning it off doesn't require every visitor to refresh), and
+  // so turning it ON reasonably promptly covers people already browsing.
+  // Deliberately independent of isRestoring/session state: this must
+  // keep working the same way whether or not anyone is signed in.
+  useEffect(() => {
+    let cancelled = false
+
+    const checkMaintenance = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/maintenance-status`)
+        const json = await res.json()
+        if (!cancelled && json && json.success) {
+          setMaintenance({
+            enabled: !!json.enabled,
+            message: json.message || '',
+            estimated_back_at: json.estimated_back_at || null,
+          })
+        }
+      } catch (e) {
+        // Fail open — never let a network hiccup flip this on by accident.
+        console.warn('⚠️ Could not check maintenance status:', e)
+      }
+    }
+
+    checkMaintenance()
+    const interval = setInterval(checkMaintenance, 45000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [])
+
   const handleStartBlast = () => {
     if (!user && !isGuest) {
       setShowSignup(true)
@@ -351,6 +390,18 @@ function App() {
         <div className="spinner" style={{ width: '50px', height: '50px' }}></div>
       </div>
     )
+  }
+
+  // ✅ NEW: Maintenance Mode full-page takeover. Signed-in admins always
+  // bypass it (isAdmin is already resolved by the time isRestoring is
+  // false) — they stay on the real app with the real sidebar and real
+  // "/admin" route, so they're never themselves locked out of the one
+  // screen that can flip this back off. Everyone else, on every route,
+  // sees this instead of the app underneath. The backend APIs
+  // (payments, webhooks, the scheduler) are completely unaffected by
+  // this — this is a frontend-only gate, nothing here blocks a request.
+  if (maintenance.enabled && !isAdmin) {
+    return <MaintenancePage message={maintenance.message} estimatedBackAt={maintenance.estimated_back_at} />
   }
 
   const currentPath = location.pathname
