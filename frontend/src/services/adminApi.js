@@ -34,3 +34,32 @@ export async function adminFetch(url, options = {}) {
 
   return fetch(url, { ...options, headers })
 }
+
+// ✅ NEW: downloads whatever a protected admin endpoint returns (CSV, the
+// rendered receipt HTML, etc.) as a real file save, instead of opening it
+// in a tab. A plain `<a href>` / `window.open(url)` can't attach the
+// Authorization header these routes require, so this fetches the content
+// with `adminFetch` (auth included) and hands the browser a Blob to save,
+// entirely client-side.
+export async function downloadViaAdminFetch(url, filename) {
+  const res = await adminFetch(url)
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`
+    try {
+      const json = await res.json()
+      message = json.error || message
+    } catch {
+      // response wasn't JSON (e.g. a real CSV/HTML body) — keep the generic message
+    }
+    throw new Error(message)
+  }
+  const blob = await res.blob()
+  const blobUrl = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = blobUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 30000)
+}

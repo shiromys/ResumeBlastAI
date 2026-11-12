@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
+import { adminFetch, downloadViaAdminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call; downloadViaAdminFetch saves CSV/HTML responses as real files
 import ContactSubmissions from './ContactSubmissions'
 import RecruitersManager from './RecruitersManager'
 import IncompleteProfiles from './IncompleteProfiles'
@@ -8,6 +8,7 @@ import AppRegisteredRecruiters from './AppRegisteredRecruiters';
 import GuestUsers from './GuestUsers'
 import UserDetailDrawer from './UserDetailDrawer' // ✅ NEW: per-user detail panel
 import AdminAccessManager from './AdminAccessManager' // ✅ NEW: super-admin-only grant/revoke screen
+import AdminGlobalSearch from './AdminGlobalSearch' // ✅ NEW: search users/payments/campaigns/tickets from anywhere in the panel
 
 function AdminDashboard({ user, adminRole, onExit }) {
   const [activeTab, setActiveTab] = useState('monitoring')
@@ -553,8 +554,11 @@ function AdminDashboard({ user, adminRole, onExit }) {
           <p style={{fontSize: '12px', color: '#9ca3af', marginTop: '8px'}}>
             {user?.email || 'Admin'}
           </p>
+          {/* ✅ NEW: global search — email, name, ticket ID, or Stripe session ID,
+              jump straight to the right record instead of hunting through tabs */}
+          <AdminGlobalSearch onOpenUser={(id) => setSelectedUserId(id)} />
         </div>
-        
+
         <nav className="sidebar-nav">
           <button
             className={`nav-item ${activeTab === 'monitoring' ? 'active' : ''}`}
@@ -1424,6 +1428,39 @@ function AdminDashboard({ user, adminRole, onExit }) {
                     <span style={{ fontSize: '13px', color: '#64748B' }}>
                       {q ? `${filtered.length} of ${combined.length} matching "${userSearch.trim()}"` : `${combined.length} total`}
                     </span>
+                    {/* ✅ NEW: export whatever's currently filtered/visible — built
+                        client-side since this data is already loaded in the browser,
+                        no extra backend call needed */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const header = ['Type', 'Email', 'Name', 'User ID', 'Status', 'Created']
+                        const escape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`
+                        const lines = [header.map(escape).join(',')]
+                        filtered.forEach(r => {
+                          lines.push([
+                            r._rowType,
+                            r.email || '',
+                            r.full_name || r.name || '',
+                            r.id || '',
+                            r.status || (r._rowType === 'guest' ? 'guest' : ''),
+                            r.created_at || '',
+                          ].map(escape).join(','))
+                        })
+                        const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+                        const blobUrl = URL.createObjectURL(blob)
+                        const a = document.createElement('a')
+                        a.href = blobUrl
+                        a.download = `users_export_${new Date().toISOString().slice(0, 10)}.csv`
+                        document.body.appendChild(a)
+                        a.click()
+                        document.body.removeChild(a)
+                        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000)
+                      }}
+                      style={{ padding: '9px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px', fontWeight: 600, background: '#fff', color: '#374151', cursor: 'pointer' }}
+                    >
+                      ⬇ Export CSV
+                    </button>
                   </div>
 
                   {/* ✅ FIX: columns sized to fit without a minWidth wider than the panel, so Actions
@@ -1603,7 +1640,53 @@ function AdminDashboard({ user, adminRole, onExit }) {
             {/* ✅ FIXED: DETAILED REVENUE ANALYTICS WITH REAL-TIME DATA */}
             {activeTab === 'stripe' && (
               <div>
-                <h2>Revenue Analytics</h2>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+                  <h2 style={{ margin: 0 }}>Revenue Analytics</h2>
+                  {/* ✅ NEW: CSV export for payments/campaigns — there's no per-row
+                      list in this UI (only the aggregate stats below), so these
+                      pull straight from the backend instead of exporting what's
+                      on screen. Payments respects the date range already set above. */}
+                  <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+                        const params = new URLSearchParams()
+                        if (startDate) params.set('start_date', startDate)
+                        if (endDate) params.set('end_date', endDate)
+                        const qs = params.toString()
+                        try {
+                          await downloadViaAdminFetch(
+                            `${API_URL}/api/admin/payments/export${qs ? `?${qs}` : ''}`,
+                            `payments_export_${new Date().toISOString().slice(0, 10)}.csv`
+                          )
+                        } catch (e) {
+                          alert(`Export failed: ${e.message}`)
+                        }
+                      }}
+                      style={{ padding: '9px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px', fontWeight: 600, background: '#fff', color: '#374151', cursor: 'pointer' }}
+                    >
+                      ⬇ Export Payments CSV
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+                        try {
+                          await downloadViaAdminFetch(
+                            `${API_URL}/api/admin/campaigns/export`,
+                            `campaigns_export_${new Date().toISOString().slice(0, 10)}.csv`
+                          )
+                        } catch (e) {
+                          alert(`Export failed: ${e.message}`)
+                        }
+                      }}
+                      style={{ padding: '9px 14px', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px', fontWeight: 600, background: '#fff', color: '#374151', cursor: 'pointer' }}
+                    >
+                      ⬇ Export Campaigns CSV
+                    </button>
+                  </div>
+                </div>
                 <div className="date-range-section">
                   <h3>Custom Date Range</h3>
                   <form onSubmit={handleDateRangeSubmit} className="date-range-form">

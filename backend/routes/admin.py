@@ -5,6 +5,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 import time
 import traceback
+import re  # ✅ NEW: UUID-shape check for the global search's exact-id lookups
+import csv  # ✅ NEW: CSV export
+import io  # ✅ NEW: CSV export
 from urllib.parse import quote
 from services.user_service import UserService
 from services.guest_service import GuestService  # ✅ NEW: shared relink_to_user — same logic the guest self-serve setup flow uses
@@ -1292,6 +1295,184 @@ def get_user_details(user_id):
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: Global search — one box across users, payments, campaigns, and
+# support tickets, so a rep can type an email, name, ticket ID, or Stripe
+# session ID and jump straight to the right record instead of guessing
+# which tab to check. Every hit is resolved to a real users.id wherever
+# possible, since that's the only thing the frontend can open a detail
+# drawer for; a hit that can't be resolved (an orphaned guest payment, a
+# ticket from someone who never registered) is still returned, flagged
+# "unlinked" rather than hidden — that gap is the known, separately-scoped
+# support_tickets.user_id fix, not something this search can paper over.
+#
+# Deliberately NOT using get_all_rows() here — it always paginates through
+# an ENTIRE table (ignores any limit= you pass it), which is right for a
+# full export but wrong for an interactive search box. _search_rows()
+# below does one direct, capped request instead.
+# ─────────────────────────────────────────────────────────────────────────
+
+_UUID_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+
+
+def _search_rows(table, filter_str, limit=6):
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/{table}?{filter_str}&limit={limit}",
+            headers=_read_headers(), timeout=8
+        )
+        if resp.status_code in (200, 206):
+            data = resp.json()
+            return data if isinstance(data, list) else []
+        return []
+    except Exception as e:
+        print(f"⚠️ [Admin] global search query failed for {table}: {e}")
+        return []
+
+
+@admin_bp.route('/api/admin/global-search', methods=['GET'])
+def global_search():
+    try:
+        q = (request.args.get('q') or '').strip()
+        if len(q) < 2:
+            return jsonify({'success': True, 'results': []}), 200
+
+        wildcard = f'*{quote(q)}*'
+        results = []
+        matched_user_ids = set()
+
+        def _resolve_user_by_email(email):
+            if not email or not _is_usable_email(email):
+                return None
+            rows = _search_rows('users', f'select=id&email=ilike.{quote(email)}', limit=1)
+            return rows[0]['id'] if rows else None
+
+        # Users — direct hits.
+        for col in ('email', 'full_name'):
+            for u in _search_rows('users', f'select=id,email,full_name&{col}=ilike.{wildcard}'):
+                uid = u.get('id')
+                if uid in matched_user_ids:
+                    continue
+                matched_user_ids.add(uid)
+                results.append({'type': 'user', 'user_id': uid, 'title': u.get('full_name') or u.get('email') or 'Unnamed user', 'subtitle': u.get('email'), 'source': 'Users'})
+
+        # Payments — by email or Stripe session id.
+        seen_payment_ids = set()
+        for col in ('user_email', 'stripe_session_id'):
+            for p in _search_rows('payments', f'select=id,user_email,user_name,plan_name,stripe_session_id&{col}=ilike.{wildcard}'):
+                if p.get('id') in seen_payment_ids:
+                    continue
+                seen_payment_ids.add(p.get('id'))
+                uid = _resolve_user_by_email(p.get('user_email'))
+                if uid and uid not in matched_user_ids:
+                    matched_user_ids.add(uid)
+                    results.append({'type': 'user', 'user_id': uid, 'title': p.get('user_name') or p.get('user_email'), 'subtitle': f"Payment · {p.get('plan_name') or ''}", 'source': 'Payments'})
+                elif not uid:
+                    results.append({'type': 'unlinked', 'title': p.get('user_email') or 'Unknown', 'subtitle': 'Payment — no linked account yet', 'source': 'Payments'})
+
+        # Campaigns — by candidate email or name.
+        seen_campaign_ids = set()
+        for col in ('candidate_email', 'candidate_name'):
+            for c in _search_rows('blast_campaigns', f'select=id,user_id,candidate_email,candidate_name,plan_name&{col}=ilike.{wildcard}'):
+                if c.get('id') in seen_campaign_ids:
+                    continue
+                seen_campaign_ids.add(c.get('id'))
+                uid = c.get('user_id') or _resolve_user_by_email(c.get('candidate_email'))
+                if uid and uid not in matched_user_ids:
+                    matched_user_ids.add(uid)
+                    results.append({'type': 'user', 'user_id': uid, 'title': c.get('candidate_name') or c.get('candidate_email'), 'subtitle': f"Campaign · {c.get('plan_name') or ''}", 'source': 'Campaigns'})
+                elif not uid:
+                    results.append({'type': 'unlinked', 'title': c.get('candidate_name') or c.get('candidate_email') or 'Unknown', 'subtitle': 'Campaign — no linked account yet', 'source': 'Campaigns'})
+
+        # Support tickets — by ticket ID, email, or subject.
+        seen_ticket_ids = set()
+        for col in ('ticket_id', 'user_email', 'subject'):
+            for t in _search_rows('support_tickets', f'select=id,ticket_id,user_email,subject&{col}=ilike.{wildcard}'):
+                if t.get('id') in seen_ticket_ids:
+                    continue
+                seen_ticket_ids.add(t.get('id'))
+                uid = _resolve_user_by_email(t.get('user_email'))
+                if uid and uid not in matched_user_ids:
+                    matched_user_ids.add(uid)
+                    results.append({'type': 'user', 'user_id': uid, 'title': t.get('user_email'), 'subtitle': f"Ticket {t.get('ticket_id')} · {t.get('subject') or ''}", 'source': 'Support'})
+                elif not uid:
+                    results.append({'type': 'unlinked', 'title': t.get('user_email') or 'Unknown', 'subtitle': f"Ticket {t.get('ticket_id')} — no linked account", 'source': 'Support'})
+
+        # Exact-id lookups — only attempted when the query is UUID-shaped,
+        # so a plain name/email search never risks a malformed-UUID query.
+        if _UUID_RE.match(q):
+            for p in _search_rows('payments', f'select=id,user_email,user_name,plan_name&id=eq.{q}', limit=1):
+                uid = _resolve_user_by_email(p.get('user_email'))
+                if uid and uid not in matched_user_ids:
+                    matched_user_ids.add(uid)
+                    results.append({'type': 'user', 'user_id': uid, 'title': p.get('user_name') or p.get('user_email'), 'subtitle': f"Payment {p.get('id')}", 'source': 'Payments'})
+            for c in _search_rows('blast_campaigns', f'select=id,user_id,candidate_email,candidate_name&id=eq.{q}', limit=1):
+                uid = c.get('user_id') or _resolve_user_by_email(c.get('candidate_email'))
+                if uid and uid not in matched_user_ids:
+                    matched_user_ids.add(uid)
+                    results.append({'type': 'user', 'user_id': uid, 'title': c.get('candidate_name') or c.get('candidate_email'), 'subtitle': f"Campaign {c.get('id')}", 'source': 'Campaigns'})
+
+        return jsonify({'success': True, 'results': results[:20]}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: CSV export for payments and campaigns — "pull me a list of X"
+# without a database query. Users already has its own export (client-side,
+# from the rows already loaded into that tab — see AdminDashboard.jsx)
+# since that table is small enough to hold in the browser already; these
+# two aren't loaded anywhere in the UI today, so they're real backend
+# endpoints that stream the full table as CSV.
+# ─────────────────────────────────────────────────────────────────────────
+
+def _csv_response(filename, fieldnames, rows):
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction='ignore')
+    writer.writeheader()
+    for r in rows:
+        writer.writerow({k: r.get(k, '') for k in fieldnames})
+    return buf.getvalue(), 200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': f'attachment; filename="{filename}"',
+    }
+
+
+@admin_bp.route('/api/admin/payments/export', methods=['GET'])
+def export_payments_csv():
+    try:
+        start_date = request.args.get('start_date')
+        end_date = request.args.get('end_date')
+        query = 'select=*'
+        if start_date:
+            query += f'&completed_at=gte.{start_date}'
+        if end_date:
+            query += f'&completed_at=lte.{end_date}T23:59:59'
+        rows = get_all_rows('payments', query)
+        fieldnames = ['completed_at', 'user_email', 'user_name', 'plan_name', 'amount', 'currency',
+                      'status', 'payment_method', 'card_brand', 'card_last4', 'refund_amount',
+                      'stripe_session_id', 'payment_intent_id', 'id']
+        return _csv_response('payments_export.csv', fieldnames, rows)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/campaigns/export', methods=['GET'])
+def export_campaigns_csv():
+    try:
+        rows = get_all_rows('blast_campaigns', 'select=*')
+        fieldnames = ['initiated_at', 'completed_at', 'candidate_email', 'candidate_name', 'job_role',
+                      'plan_name', 'status', 'user_id', 'drip_day1_delivered', 'drip_day2_delivered',
+                      'drip_day3_delivered', 'id']
+        return _csv_response('campaigns_export.csv', fieldnames, rows)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ─────────────────────────────────────────────────────────────────────────
