@@ -1,5 +1,6 @@
 // src/components/Admin/AppRegisteredRecruiters.jsx
 import React, { useState, useEffect } from 'react';
+import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
 import './AdminStyles.css';
 
 const AppRegisteredRecruiters = ({ onUpdate }) => {
@@ -15,7 +16,7 @@ const AppRegisteredRecruiters = ({ onUpdate }) => {
 
   const fetchRecruiters = async () => {
     try {
-      const response = await fetch(`${API_URL}/api/admin/app-registered-recruiters`);
+      const response = await adminFetch(`${API_URL}/api/admin/app-registered-recruiters`);
       const data = await response.json();
       
       if (data.success) {
@@ -32,7 +33,7 @@ const AppRegisteredRecruiters = ({ onUpdate }) => {
 
   const handleApprove = async (id) => {
     try {
-      const response = await fetch(`${API_URL}/api/admin/app-registered-recruiters/${id}/approve`, {
+      const response = await adminFetch(`${API_URL}/api/admin/app-registered-recruiters/${id}/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

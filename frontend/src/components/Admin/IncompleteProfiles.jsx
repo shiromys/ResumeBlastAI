@@ -4,6 +4,7 @@
 // Calls: GET /api/admin/profiles/overview , POST /api/admin/profiles/create
 
 import { useState, useEffect, useCallback } from 'react'
+import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
@@ -25,7 +26,7 @@ export default function IncompleteProfiles() {
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const res = await fetch(`${API_URL}/api/admin/profiles/overview`)
+      const res = await adminFetch(`${API_URL}/api/admin/profiles/overview`)
       const json = await res.json()
       if (json.success) {
         setCounts(json.counts || {})
@@ -139,7 +140,7 @@ function CreateModal({ user, onClose, onSaved }) {
   const save = async () => {
     setSaving(true); setErr('')
     try {
-      const res = await fetch(`${API_URL}/api/admin/profiles/create`, {
+      const res = await adminFetch(`${API_URL}/api/admin/profiles/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: user.email, ...form }),

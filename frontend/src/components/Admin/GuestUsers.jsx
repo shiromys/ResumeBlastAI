@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
 
 // ✅ NEW: Admin-panel alert + conversion feature for guests who completed a
 // paid blast purchase without a registered account. Mirrors ContactSubmissions.jsx's
@@ -19,7 +20,7 @@ function GuestUsers({ onConvert }) {
   const loadGuests = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_URL}/api/admin/guest-users`)
+      const response = await adminFetch(`${API_URL}/api/admin/guest-users`)
       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
       setGuests(data.guests || [])
@@ -49,10 +50,13 @@ function GuestUsers({ onConvert }) {
 
     setConverting(true)
     try {
-      const response = await fetch(`${API_URL}/api/admin/guest-users/convert`, {
+      const response = await adminFetch(`${API_URL}/api/admin/guest-users/convert`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: selectedGuest.email })
+        // ✅ stripe_session_id lets the backend relink the exact payments row
+        // even when its email is still 'guest@resumeblast.ai' and this
+        // displayed email actually came from the resume-based fallback.
+        body: JSON.stringify({ email: selectedGuest.email, stripe_session_id: selectedGuest.stripe_session_id })
       })
 
       const result = await response.json()
@@ -64,7 +68,11 @@ function GuestUsers({ onConvert }) {
       await loadGuests()
 
       if (result.created_new_account) {
-        alert(`✅ Account created for ${selectedGuest.email}. They've been emailed a link to set their password and log in.`)
+        alert(
+          result.invite_email_sent
+            ? `✅ Account created for ${selectedGuest.email}. They've been emailed a code to set their password and log in.`
+            : `⚠️ Account created for ${selectedGuest.email}, but the password-setup email failed to send. They can still use "Forgot Password" on the login page to get a code.`
+        )
       } else {
         alert(`✅ ${selectedGuest.email} already had an account — their guest purchase has been linked to it.`)
       }
@@ -219,7 +227,7 @@ function GuestUsers({ onConvert }) {
             </div>
 
             <p style={{ fontSize: '15px', color: '#374151', marginBottom: '20px', lineHeight: '1.6', textAlign: 'center' }}>
-              If no account exists for this email, one will be created and they'll be emailed a link to set
+              If no account exists for this email, one will be created and they'll be emailed a code to set
               their password. If an account already exists, their purchase will simply be linked to it.
             </p>
 

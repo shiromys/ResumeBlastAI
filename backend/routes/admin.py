@@ -9,12 +9,68 @@ from urllib.parse import quote
 from services.user_service import UserService
 from services.guest_service import GuestService  # ✅ NEW: shared relink_to_user — same logic the guest self-serve setup flow uses
 from routes.auth import _send_reset_code_email  # ✅ NEW: reuse the existing Brevo-based reset-code flow for guest conversion
+from services.admin_auth import get_requesting_admin, SUPER_ADMIN_EMAILS  # ✅ NEW: real server-side admin auth
 
 admin_bp = Blueprint('admin', __name__)
 
 SUPABASE_URL = os.getenv('SUPABASE_URL')
 SUPABASE_KEY = os.getenv('SUPABASE_SERVICE_ROLE_KEY')
 BREVO_WEBHOOK_SECRET = os.getenv('BREVO_WEBHOOK_SECRET')
+
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: server-side admin authentication guard.
+#
+# This runs before EVERY route on this blueprint, present and future — a
+# brand-new route added to this file tomorrow is admin-protected by
+# default with zero extra code, which is the right default now that this
+# panel has more than one person's login behind it. See
+# services/admin_auth.py for exactly what counts as "admin."
+#
+# Three paths are deliberately exempt, even though they live under
+# /api/admin for historical/misnaming reasons — they are NOT admin-only:
+#   - /api/admin/recruiters/add   — called by ordinary recruiters'
+#     self-signup (frontend/src/services/recruiterAuthService.js), not
+#     by the admin panel.
+#   - /api/admin/users/count      — called by the recruiter dashboard's
+#     candidate-pool counter (recruiterAnalyticsService.js).
+#   - /api/admin/resumes/all      — called by the same recruiter
+#     dashboard for skills aggregation (recruiterAnalyticsService.js).
+#   Locking these three down would break recruiter signup and the
+#   recruiter dashboard for every recruiter, not just protect admin
+#   data. The real fix is renaming them off the /api/admin prefix
+#   entirely — out of scope for this change, flagged here so it isn't
+#   mistaken for an oversight.
+#   - /api/admin/whoami           — must be callable by ANY logged-in
+#     user, admin or not: it's how the frontend asks "am I an admin at
+#     all," so it can't itself require already being one.
+# ─────────────────────────────────────────────────────────────────────────
+_PUBLIC_ADMIN_PATHS = {
+    '/api/admin/recruiters/add',
+    '/api/admin/users/count',
+    '/api/admin/resumes/all',
+    '/api/admin/whoami',
+}
+
+
+@admin_bp.before_request
+def _require_admin_auth():
+    if request.method == 'OPTIONS':
+        return None  # let CORS preflight through untouched
+    if request.path in _PUBLIC_ADMIN_PATHS:
+        return None
+    admin = get_requesting_admin(request)
+    if not admin:
+        return jsonify({'success': False, 'error': 'Admin authentication required'}), 401
+    request.admin = admin  # available to any route below, e.g. for audit fields like granted_by
+    return None
+
+
+def _require_super_admin():
+    """Returns the resolved admin dict if the caller is a super admin, else None."""
+    admin = getattr(request, 'admin', None)
+    if admin and admin.get('role') == 'super_admin':
+        return admin
+    return None
 
 # ✅ RESTORED: used as the reply-to address on admin→customer ticket replies,
 # so if the customer hits "Reply" in their inbox it lands back in the support
@@ -1590,6 +1646,156 @@ def get_profiles_overview():
         }
 
         return jsonify({'success': True, 'counts': counts, 'buckets': buckets}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: Admin access management — who can manage this panel at all.
+# "shuchitha@shiroapps.com" and "srikanth@shirotechnologies.com" are the
+# two permanent super admins (SUPER_ADMIN_EMAILS in services/admin_auth.py).
+# Only they can see or use these three endpoints; granted admins (anyone
+# they add below) get full use of the rest of the admin panel, but these
+# three routes 403 for them just like for anyone else.
+# ─────────────────────────────────────────────────────────────────────────
+
+@admin_bp.route('/api/admin/whoami', methods=['GET'])
+def admin_whoami():
+    """
+    ✅ NEW: tells the frontend whether the currently logged-in Supabase
+    user is an admin at all, and if so which role. Called right after
+    login so App.jsx knows whether to offer the Admin option, and so
+    AdminDashboard.jsx knows whether to show the "Manage Admin Access"
+    tab. This REPLACES the old client-side-only `check_is_admin` Postgres
+    RPC as the source of truth — that RPC only ever drove UI state and
+    was never re-checked by the backend, which is exactly the gap this
+    whole auth layer closes. Deliberately open to any logged-in user
+    (see _PUBLIC_ADMIN_PATHS above) — a non-admin just gets
+    is_admin: false instead of a 401.
+    """
+    admin = get_requesting_admin(request)
+    if not admin:
+        return jsonify({'success': True, 'is_admin': False, 'role': None}), 200
+    return jsonify({
+        'success': True,
+        'is_admin': True,
+        'role': admin['role'],
+        'email': admin['email'],
+    }), 200
+
+
+@admin_bp.route('/api/admin/admin-users', methods=['GET'])
+def list_admin_users():
+    """
+    ✅ NEW: lists everyone with admin access — the two permanent super
+    admins (always present, never editable) plus every row in
+    admin_users, active and revoked, so a super admin can see history
+    rather than just who's currently active. Super-admin only.
+    """
+    if not _require_super_admin():
+        return jsonify({'success': False, 'error': 'Super admin access required'}), 403
+
+    try:
+        resp = requests.get(
+            f"{SUPABASE_URL}/rest/v1/admin_users?select=*&order=granted_at.desc",
+            headers=_read_headers(), timeout=10
+        )
+        granted = resp.json() if resp.status_code == 200 else []
+    except Exception as e:
+        print(f"⚠️ [Admin] admin_users list error: {e}")
+        granted = []
+
+    super_admins = [
+        {'email': e, 'role': 'super_admin', 'revoked': False}
+        for e in sorted(SUPER_ADMIN_EMAILS)
+    ]
+    return jsonify({'success': True, 'super_admins': super_admins, 'granted_admins': granted}), 200
+
+
+@admin_bp.route('/api/admin/admin-users/grant', methods=['POST'])
+def grant_admin_access():
+    """
+    ✅ NEW: the actual "give this person admin access" action.
+    Super-admin only. Upserts an admin_users row by email — if that
+    address was previously revoked, this re-activates it and keeps the
+    row's history rather than creating a duplicate.
+    """
+    requester = _require_super_admin()
+    if not requester:
+        return jsonify({'success': False, 'error': 'Super admin access required'}), 403
+
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        if not email or '@' not in email:
+            return jsonify({'success': False, 'error': 'A valid email is required'}), 400
+        if email in SUPER_ADMIN_EMAILS:
+            return jsonify({'success': False, 'error': 'That address is already a permanent super admin'}), 400
+
+        payload = {
+            'email': email,
+            'role': 'admin',
+            'revoked': False,
+            'granted_by': requester['email'],
+            'granted_at': datetime.now(timezone.utc).isoformat(),
+        }
+        resp = requests.post(
+            f"{SUPABASE_URL}/rest/v1/admin_users?on_conflict=email",
+            json=payload,
+            headers={**_get_headers(), 'Prefer': 'resolution=merge-duplicates,return=representation'},
+            timeout=10
+        )
+        if resp.status_code not in (200, 201):
+            print(f"❌ [Admin] grant_admin_access upsert failed: {resp.status_code} {resp.text}")
+            return jsonify({'success': False, 'error': 'Failed to grant access'}), 500
+
+        print(f"✅ [Admin] {requester['email']} granted admin access to {email}")
+        return jsonify({'success': True, 'email': email}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/admin-users/revoke', methods=['POST'])
+def revoke_admin_access():
+    """
+    ✅ NEW: the counterpart to grant. Super-admin only. Soft-revoke
+    (revoked=true, not a row delete) so there's a record of who used to
+    have access rather than silently erasing it. Refuses outright for
+    either permanent super admin address, so this endpoint can never be
+    used — accidentally or otherwise — to lock either of them out of
+    their own panel.
+    """
+    requester = _require_super_admin()
+    if not requester:
+        return jsonify({'success': False, 'error': 'Super admin access required'}), 403
+
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        if not email:
+            return jsonify({'success': False, 'error': 'Email is required'}), 400
+        if email in SUPER_ADMIN_EMAILS:
+            return jsonify({'success': False, 'error': 'Super admin access cannot be revoked'}), 400
+
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/admin_users?email=eq.{quote(email)}",
+            json={
+                'revoked': True,
+                'revoked_by': requester['email'],
+                'revoked_at': datetime.now(timezone.utc).isoformat(),
+            },
+            headers=_get_headers(), timeout=10
+        )
+        if resp.status_code not in (200, 204):
+            print(f"❌ [Admin] revoke_admin_access failed: {resp.status_code} {resp.text}")
+            return jsonify({'success': False, 'error': 'Failed to revoke access'}), 500
+
+        print(f"✅ [Admin] {requester['email']} revoked admin access from {email}")
+        return jsonify({'success': True, 'email': email}), 200
 
     except Exception as e:
         traceback.print_exc()

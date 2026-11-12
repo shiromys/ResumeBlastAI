@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
 
 // ✅ NEW: Admin-panel "click a user, see everything" detail panel. Fetches
 // the aggregated /api/admin/users/<id>/details payload (profile, campaigns,
@@ -25,7 +26,7 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
     setLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API_URL}/api/admin/users/${userId}/details`)
+      const res = await adminFetch(`${API_URL}/api/admin/users/${userId}/details`)
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`)
       setDetails(json)
@@ -45,7 +46,7 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
       if (reason === null) return
       setBusy(true)
       try {
-        await fetch(`${API_URL}/api/admin/users/${userId}/ban`, {
+        await adminFetch(`${API_URL}/api/admin/users/${userId}/ban`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reason }),
@@ -61,7 +62,7 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
       if (!window.confirm('Unban this user and restore their account to active?')) return
       setBusy(true)
       try {
-        await fetch(`${API_URL}/api/admin/users/${userId}/unban`, { method: 'POST' })
+        await adminFetch(`${API_URL}/api/admin/users/${userId}/unban`, { method: 'POST' })
         await loadDetails()
         if (onChanged) onChanged()
       } catch (e) {
@@ -75,7 +76,7 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
   const handleSendResetCode = async () => {
     setBusy(true)
     try {
-      const res = await fetch(`${API_URL}/api/admin/users/${userId}/send-reset-code`, { method: 'POST' })
+      const res = await adminFetch(`${API_URL}/api/admin/users/${userId}/send-reset-code`, { method: 'POST' })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to send code')
       alert(`✅ Password reset code sent to ${details.user.email}`)
@@ -91,7 +92,7 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
     if (!message) return
     setBusy(true)
     try {
-      const res = await fetch(`${API_URL}/api/admin/users/${userId}/notes`, {
+      const res = await adminFetch(`${API_URL}/api/admin/users/${userId}/notes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message, admin_name: adminEmail || 'Admin' }),
@@ -124,7 +125,7 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
 
     setBusy(true)
     try {
-      const res = await fetch(`${API_URL}/api/admin/users/delete`, {
+      const res = await adminFetch(`${API_URL}/api/admin/users/delete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

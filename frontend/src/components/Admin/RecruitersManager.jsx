@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
 import { supabase } from '../../lib/supabase' // Ensure this path correctly points to your supabase client
 
 function RecruitersManager({ user }) {
@@ -42,7 +43,7 @@ function RecruitersManager({ user }) {
   const fetchStats = async () => {
     try {
       console.log('🔄 Fetching recruiter stats from:', `${API_URL}/api/admin/recruiters/stats`)
-      const res = await fetch(`${API_URL}/api/admin/recruiters/stats`)
+      const res = await adminFetch(`${API_URL}/api/admin/recruiters/stats`)
       
       if (res.ok) {
         const data = await res.json()
@@ -70,7 +71,7 @@ function RecruitersManager({ user }) {
 
   const fetchPlans = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/plans`)
+      const res = await adminFetch(`${API_URL}/api/admin/plans`)
       if (res.ok) {
         const data = await res.json()
         const planOrder = ['freemium', 'basic', 'pro'];
@@ -86,7 +87,7 @@ function RecruitersManager({ user }) {
     e.preventDefault()
     setLoading(true)
     try {
-      const res = await fetch(`${API_URL}/api/admin/recruiters/add`, {
+      const res = await adminFetch(`${API_URL}/api/admin/recruiters/add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newRecruiter)
@@ -136,7 +137,7 @@ function RecruitersManager({ user }) {
 
     setLoading(true)
     try {
-      const res = await fetch(`${API_URL}/api/admin/recruiters/delete`, {
+      const res = await adminFetch(`${API_URL}/api/admin/recruiters/delete`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -237,7 +238,7 @@ function RecruitersManager({ user }) {
     setLoading(true);
     setShowPlanDisclaimer(false);
     try {
-      const res = await fetch(`${API_URL}/api/admin/plans/update`, {
+      const res = await adminFetch(`${API_URL}/api/admin/plans/update`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, display_name: name, price_cents: priceInCents, recruiter_limit: parseInt(limit)})

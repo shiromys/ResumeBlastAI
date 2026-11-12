@@ -73,6 +73,12 @@ function App() {
   const [user, setUser] = useState(null)
   const [isGuest, setIsGuest] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  // ✅ NEW: 'super_admin' | 'admin' | null — mirrors what the backend actually
+  // resolved via /api/admin/whoami, so AdminDashboard can show the "Manage
+  // Admin Access" tab to the two permanent super admins only. Passed down
+  // alongside isAdmin rather than replacing it, so nothing that already
+  // reads isAdmin needs to change.
+  const [adminRole, setAdminRole] = useState(null)
   const [showSignup, setShowSignup] = useState(false)
   const [isRestoring, setIsRestoring] = useState(true)
   const [paymentSuccess, setPaymentSuccess] = useState(false)
@@ -83,18 +89,29 @@ function App() {
   const [resumeUrl, setResumeUrl] = useState('')
   const [resumeId, setResumeId] = useState('')
 
-  const checkAdminStatus = async (email) => {
-    if (!email) return false
+  // ✅ CHANGED: this used to call a Postgres RPC (`check_is_admin`) that only
+  // ever drove client-side UI state — the Flask backend never re-checked
+  // anything, so it was decoration, not security. The backend now has a
+  // real admin check (backend/services/admin_auth.py), exposed at
+  // GET /api/admin/whoami, so this calls that instead and returns both
+  // whether the signed-in user is an admin AND which role ('super_admin' or
+  // 'admin') — the role is new information the old RPC never provided, and
+  // is what gates the "Manage Admin Access" tab to the two permanent super
+  // admins only.
+  const checkAdminStatus = async (accessToken) => {
+    if (!accessToken) return { isAdmin: false, role: null }
     try {
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Admin check timed out')), 5000)
       )
-      const rpcPromise = supabase.rpc('check_is_admin', { check_email: email })
-      const { data, error } = await Promise.race([rpcPromise, timeoutPromise])
-      if (error) return false 
-      return !!data 
+      const fetchPromise = fetch(`${API_URL}/api/admin/whoami`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).then(r => r.json())
+      const data = await Promise.race([fetchPromise, timeoutPromise])
+      return { isAdmin: !!data?.is_admin, role: data?.role || null }
     } catch (err) {
-      return false
+      console.error('⚠️ Admin check failed:', err)
+      return { isAdmin: false, role: null }
     }
   }
 
@@ -155,8 +172,9 @@ function App() {
           localStorage.removeItem('guestId')
           prevUserIdRef.current = session.user.id
 
-          const adminStatus = await checkAdminStatus(session.user.email)
-          setIsAdmin(adminStatus)
+          const adminStatus = await checkAdminStatus(session.access_token)
+          setIsAdmin(adminStatus.isAdmin)
+          setAdminRole(adminStatus.role)
 
           if (isPaymentReturn) {
             setPaymentSuccess(true)
@@ -164,7 +182,7 @@ function App() {
             // 🔥 FIX: Pass window.location.search to preserve Stripe URL parameters!
             navigate(`/thank-you${window.location.search}`, { replace: true })
           } else if (window.location.pathname === '/') {
-             if (adminStatus) {
+             if (adminStatus.isAdmin) {
                 navigate('/admin', { replace: true })
              } else if (session.user.user_metadata?.role === 'recruiter') {
                 navigate('/recruiter', { replace: true })
@@ -233,9 +251,10 @@ function App() {
         prevUserIdRef.current = session.user.id
         setUser(session.user)
         
-        const adminStatus = await checkAdminStatus(session.user.email)
-        setIsAdmin(adminStatus)
-        if (adminStatus) navigate('/admin')
+        const adminStatus = await checkAdminStatus(session.access_token)
+        setIsAdmin(adminStatus.isAdmin)
+        setAdminRole(adminStatus.role)
+        if (adminStatus.isAdmin) navigate('/admin')
         else {
           const role = session?.user?.user_metadata?.role
           if (role === 'recruiter') navigate('/recruiter')
@@ -251,6 +270,7 @@ function App() {
         prevUserIdRef.current = null
         setUser(null)
         setIsAdmin(false)
+        setAdminRole(null)
         setIsGuest(false)
         navigate('/')
         setHasUploadedInSession(false)
@@ -319,6 +339,7 @@ function App() {
     await supabase.auth.signOut()
     setUser(null)
     setIsAdmin(false)
+    setAdminRole(null)
     setIsGuest(false)
     setHasUploadedInSession(false)
     navigate('/')
@@ -412,7 +433,7 @@ function App() {
           } />
 
           <Route path="/admin" element={
-            (user && isAdmin) ? <AdminDashboard user={user} onExit={() => navigate('/dashboard')} /> : <LandingPage onGetStarted={handleStartBlast} user={user} />
+            (user && isAdmin) ? <AdminDashboard user={user} adminRole={adminRole} onExit={() => navigate('/dashboard')} /> : <LandingPage onGetStarted={handleStartBlast} user={user} />
           } />
 
           <Route path="/employer-network" element={

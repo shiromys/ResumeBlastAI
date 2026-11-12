@@ -1,9 +1,11 @@
 from flask import Blueprint, request, jsonify
 from services.user_service import UserService
+from services.admin_auth import admin_required  # ✅ NEW: same real admin check as admin.py
 
 user_management_bp = Blueprint('user_management', __name__)
 
 @user_management_bp.route('/api/admin/users/delete', methods=['POST'])
+@admin_required()
 def delete_user():
     try:
         data = request.json

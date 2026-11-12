@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
 import ContactSubmissions from './ContactSubmissions'
 import RecruitersManager from './RecruitersManager'
 import IncompleteProfiles from './IncompleteProfiles'
@@ -6,8 +7,9 @@ import './AdminStyles.css'
 import AppRegisteredRecruiters from './AppRegisteredRecruiters';
 import GuestUsers from './GuestUsers'
 import UserDetailDrawer from './UserDetailDrawer' // ✅ NEW: per-user detail panel
+import AdminAccessManager from './AdminAccessManager' // ✅ NEW: super-admin-only grant/revoke screen
 
-function AdminDashboard({ user, onExit }) {
+function AdminDashboard({ user, adminRole, onExit }) {
   const [activeTab, setActiveTab] = useState('monitoring')
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState({
@@ -123,21 +125,21 @@ function AdminDashboard({ user, onExit }) {
     const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
     try {
       // 1. Fetch support tickets count
-      const response = await fetch(`${API_URL}/api/admin/contact-submissions/unread-count`)
+      const response = await adminFetch(`${API_URL}/api/admin/contact-submissions/unread-count`)
       if (response.ok) {
         const data = await response.json()
         setUnreadCount(data.unread_count || 0)
       }
 
       // 2. ✅ NEW: Fetch pending signups count
-      const signupsResponse = await fetch(`${API_URL}/api/admin/app-registered-recruiters/pending-count`)
+      const signupsResponse = await adminFetch(`${API_URL}/api/admin/app-registered-recruiters/pending-count`)
       if (signupsResponse.ok) {
         const signupsData = await signupsResponse.json()
         setPendingSignupsCount(signupsData.pending_count || 0)
       }
 
       // 3. ✅ NEW: Fetch guest-user alert count (paid guests, no linked account)
-      const guestResponse = await fetch(`${API_URL}/api/admin/guest-users/count`)
+      const guestResponse = await adminFetch(`${API_URL}/api/admin/guest-users/count`)
       if (guestResponse.ok) {
         const guestData = await guestResponse.json()
         const newCount = guestData.count || 0
@@ -187,7 +189,7 @@ function AdminDashboard({ user, onExit }) {
 
       console.log(`📡 Fetching Brevo Logs: ${API_URL}/api/admin/brevo-logs?${queryParams.toString()}`)
 
-      const response = await fetch(`${API_URL}/api/admin/brevo-logs?${queryParams.toString()}`)
+      const response = await adminFetch(`${API_URL}/api/admin/brevo-logs?${queryParams.toString()}`)
       
       if (response.ok) {
         const resData = await response.json()
@@ -223,7 +225,7 @@ function AdminDashboard({ user, onExit }) {
         queryParams.append('email_to', brevoFilters.email_to)
       }
 
-      const response = await fetch(`${API_URL}/api/admin/brevo-logs/summary?${queryParams.toString()}`)
+      const response = await adminFetch(`${API_URL}/api/admin/brevo-logs/summary?${queryParams.toString()}`)
       
       if (response.ok) {
         const resData = await response.json()
@@ -302,7 +304,7 @@ function AdminDashboard({ user, onExit }) {
       
       if (tab === 'monitoring') {
         endpoint = '/api/admin/stats'
-        const serverStatusRes = await fetch(`${API_URL}/api/admin/server-status`)
+        const serverStatusRes = await adminFetch(`${API_URL}/api/admin/server-status`)
         if (serverStatusRes.ok) {
           const serverData = await serverStatusRes.json()
           setData(prev => ({ ...prev, serverStatus: serverData }))
@@ -326,7 +328,7 @@ function AdminDashboard({ user, onExit }) {
       if (endpoint) {
         console.log(`📡 Fetching: ${API_URL}${endpoint}`)
         
-        const res = await fetch(`${API_URL}${endpoint}`, {
+        const res = await adminFetch(`${API_URL}${endpoint}`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -356,7 +358,7 @@ function AdminDashboard({ user, onExit }) {
       // guest side alongside the registered-users fetch above.
       if (tab === 'users') {
         try {
-          const guestRes = await fetch(`${API_URL}/api/admin/guest-users`)
+          const guestRes = await adminFetch(`${API_URL}/api/admin/guest-users`)
           if (guestRes.ok) {
             const guestJson = await guestRes.json()
             setData(prev => ({ ...prev, guestUsersForUsersTab: guestJson.guests || [] }))
@@ -402,7 +404,7 @@ function AdminDashboard({ user, onExit }) {
       
       console.log(`🔍 Searching drip campaign with URL: ${url}`);
       
-      const response = await fetch(url);
+      const response = await adminFetch(url);
       const result = await response.json();
       
       console.log(`📊 Drip search result:`, result);
@@ -460,7 +462,7 @@ function AdminDashboard({ user, onExit }) {
     try {
       console.log(` Deleting user: ${userEmail}`)
       
-      const response = await fetch(`${API_URL}/api/admin/users/delete`, {
+      const response = await adminFetch(`${API_URL}/api/admin/users/delete`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -515,7 +517,7 @@ function AdminDashboard({ user, onExit }) {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
       console.log(`Forcing Wave ${wave} for campaign ${campaignId}`)
       
-      const res = await fetch(`${API_URL}/api/admin/drip-campaign/force-wave`, {
+      const res = await adminFetch(`${API_URL}/api/admin/drip-campaign/force-wave`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ campaign_id: campaignId, wave })
@@ -661,6 +663,21 @@ function AdminDashboard({ user, onExit }) {
               </span>
             )}
           </button>
+
+          {/* ✅ NEW: only the two permanent super admins ever see this tab at
+              all — a granted admin has full use of everything else above,
+              but managing who else gets access is reserved to the two
+              hardcoded super admin accounts. The backend enforces this
+              independently (super-admin-only on every /api/admin/admin-users*
+              route), so hiding the tab here is purely UX, not the real gate. */}
+          {adminRole === 'super_admin' && (
+            <button
+              className={`nav-item ${activeTab === 'admin-access' ? 'active' : ''}`}
+              onClick={() => setActiveTab('admin-access')}
+            >
+            Manage Admin Access
+            </button>
+          )}
         </nav>
         
         <div className="sidebar-footer">
@@ -1843,6 +1860,14 @@ function AdminDashboard({ user, onExit }) {
               <GuestUsers
                 onConvert={fetchUnreadCount}
               />
+            )}
+
+            {/* ✅ NEW: the nav button above already hides this tab from anyone
+                who isn't a super admin, and AdminAccessManager's own fetch
+                calls still 403 for a non-super-admin regardless — this is
+                just the render-level mirror of that same gate. */}
+            {activeTab === 'admin-access' && adminRole === 'super_admin' && (
+              <AdminAccessManager />
             )}
           </>
         )}

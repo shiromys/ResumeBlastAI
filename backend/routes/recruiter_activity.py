@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify
 from services.recruiter_activity_service import RecruiterActivityService
+from services.admin_auth import admin_required  # ✅ NEW: same real admin check as admin.py
 
 recruiter_activity_bp = Blueprint('recruiter_activity', __name__, url_prefix='/api/recruiter-activity')
 
@@ -54,6 +55,7 @@ def get_activities(recruiter_id):
         }), 500
 
 @recruiter_activity_bp.route('/admin/all', methods=['GET'])
+@admin_required()
 def get_all_activities():
     """Get all recruiter activities (admin only)"""
     try:

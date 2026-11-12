@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
 
 function ContactSubmissions({ onTicketUpdate }) {
   const [tickets, setTickets] = useState([])
@@ -23,7 +24,7 @@ function ContactSubmissions({ onTicketUpdate }) {
   const loadTickets = async () => {
     setLoading(true)
     try {
-      const response = await fetch(`${API_URL}/api/admin/contact-submissions?filter=${filter}`)
+      const response = await adminFetch(`${API_URL}/api/admin/contact-submissions?filter=${filter}`)
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`)
@@ -57,7 +58,7 @@ function ContactSubmissions({ onTicketUpdate }) {
     try {
       console.log('🔄 Marking ticket as resolved:', selectedTicket.id)
       
-      const response = await fetch(
+      const response = await adminFetch(
         `${API_URL}/api/admin/contact-submissions/${selectedTicket.id}/resolve`,
         {
           method: 'PATCH',
@@ -121,7 +122,7 @@ function ContactSubmissions({ onTicketUpdate }) {
 
     setSendingReply(true)
     try {
-      const response = await fetch(
+      const response = await adminFetch(
         `${API_URL}/api/admin/contact-submissions/${replyTicket.id}/reply`,
         {
           method: 'POST',
