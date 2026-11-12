@@ -15,7 +15,7 @@ const BUCKETS = [
   { key: 'nonpaid_complete',   label: 'Non-paid · Complete',      bg: '#eef2ff', fg: '#3730a3' },
 ]
 
-export default function IncompleteProfiles() {
+export default function IncompleteProfiles({ onViewUser }) {
   const [loading, setLoading] = useState(true)
   const [counts, setCounts] = useState({})
   const [buckets, setBuckets] = useState({})
@@ -110,6 +110,15 @@ export default function IncompleteProfiles() {
                   <td style={{ padding: '10px 14px', color: '#374151', textTransform: 'capitalize' }}>{(u.user_type || '').replace('-', ' ')}</td>
                   <td style={{ padding: '10px 14px', color: '#374151' }}>{u.campaign_status || '—'}</td>
                   <td style={{ padding: '10px 14px', textAlign: 'right' }}>
+                    {/* ✅ NEW: these rows are real users.id entries (just with an
+                        incomplete profile), so the same full detail drawer the
+                        Users tab opens applies here too — "complete details of
+                        every user," not just the ones already on the Users tab. */}
+                    {onViewUser && (
+                      <button onClick={() => onViewUser(u.id)} style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', marginRight: 8 }}>
+                        View Details
+                      </button>
+                    )}
                     <button onClick={() => setEditing(u)} style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid #e5e7eb', background: '#fff', color: '#dc2626', fontWeight: 700, fontSize: 12.5, cursor: 'pointer' }}>
                       {active.endsWith('complete') && !active.includes('incomplete') ? 'Edit' : 'Create manually'}
                     </button>

@@ -46,36 +46,26 @@ class InvoiceEmailService:
         }
         return counts.get(str(plan_name).lower(), "250")
 
-    def send_payment_receipt(
+    def build_receipt_html(
         self,
-        recipient_email: str,
         recipient_name: str,
+        recipient_email: str,
         amount_cents: int,
         currency: str,
         plan_name: str,
         stripe_session_id: str,
         payment_date: str = None,
-    ) -> dict:
+    ) -> str:
         """
-        Send a professional payment receipt email to the customer.
-
-        Args:
-            recipient_email:   Customer email address
-            recipient_name:    Customer name (or email prefix)
-            amount_cents:      Amount charged in cents (e.g. 999 = $9.99)
-            currency:          Currency code (e.g. "usd")
-            plan_name:         Plan key_name (e.g. "starter")
-            stripe_session_id: Stripe checkout session ID for reference
-            payment_date:      ISO date string (defaults to now)
+        ✅ NEW: the exact HTML-building half of send_payment_receipt(), pulled
+        out into its own method so the admin panel's "View Receipt" button
+        (GET /api/admin/payments/<id>/receipt in routes/admin.py) can render
+        byte-for-byte the same receipt a customer was actually emailed,
+        instead of a second, separately-maintained copy of this template
+        quietly drifting out of sync with it over time. send_payment_receipt()
+        below now just calls this and emails the result — no template logic
+        changed, only where it lives.
         """
-        if not self.api_key:
-            print("[Invoice] BREVO_API_KEY not configured — skipping receipt email")
-            return {"success": False, "error": "BREVO_API_KEY not set"}
-
-        if not recipient_email or "@" not in recipient_email:
-            print(f"[Invoice] Invalid recipient email: {recipient_email!r}")
-            return {"success": False, "error": "Invalid recipient email"}
-
         amount_display = f"${amount_cents / 100:.2f} {currency.upper()}"
         plan_label     = self._plan_display(plan_name)
         plan_recruiter_count = self._plan_recruiters(plan_name)
@@ -225,6 +215,51 @@ class InvoiceEmailService:
 </body>
 </html>
 """
+        return html_content
+
+    def send_payment_receipt(
+        self,
+        recipient_email: str,
+        recipient_name: str,
+        amount_cents: int,
+        currency: str,
+        plan_name: str,
+        stripe_session_id: str,
+        payment_date: str = None,
+    ) -> dict:
+        """
+        Send a professional payment receipt email to the customer.
+
+        Args:
+            recipient_email:   Customer email address
+            recipient_name:    Customer name (or email prefix)
+            amount_cents:      Amount charged in cents (e.g. 999 = $9.99)
+            currency:          Currency code (e.g. "usd")
+            plan_name:         Plan key_name (e.g. "starter")
+            stripe_session_id: Stripe checkout session ID for reference
+            payment_date:      ISO date string (defaults to now)
+        """
+        if not self.api_key:
+            print("[Invoice] BREVO_API_KEY not configured — skipping receipt email")
+            return {"success": False, "error": "BREVO_API_KEY not set"}
+
+        if not recipient_email or "@" not in recipient_email:
+            print(f"[Invoice] Invalid recipient email: {recipient_email!r}")
+            return {"success": False, "error": "Invalid recipient email"}
+
+        display_name  = recipient_name or recipient_email.split("@")[0].title()
+        plan_label    = self._plan_display(plan_name)
+        amount_display = f"${amount_cents / 100:.2f} {currency.upper()}"
+
+        html_content = self.build_receipt_html(
+            recipient_name=recipient_name,
+            recipient_email=recipient_email,
+            amount_cents=amount_cents,
+            currency=currency,
+            plan_name=plan_name,
+            stripe_session_id=stripe_session_id,
+            payment_date=payment_date,
+        )
 
         email_payload = {
             "sender": {

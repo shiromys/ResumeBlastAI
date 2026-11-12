@@ -1369,7 +1369,7 @@ function AdminDashboard({ user, adminRole, onExit }) {
             )}
 
             {activeTab === 'profiles' && (
-              <IncompleteProfiles />
+              <IncompleteProfiles onViewUser={(id) => setSelectedUserId(id)} />
             )}
 
             {activeTab === 'users' && data.users && (() => {

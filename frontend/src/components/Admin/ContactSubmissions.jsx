@@ -1,6 +1,34 @@
 import { useState, useEffect } from 'react'
 import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
 
+// ✅ NEW: canned replies — the handful of things that come up constantly in
+// support tickets, as one-click starting points instead of retyping them
+// every time. Clicking one REPLACES the reply box's current text (not
+// appends), since {{name}} needs to sit at the very start of a clean
+// message — a rep can still edit afterward before sending.
+const CANNED_REPLIES = [
+  {
+    label: 'Stuck campaign',
+    text: (name) => `Hi ${name},\n\nThanks for flagging this — I can see your campaign and I'm looking into why it hasn't moved forward. I'll get this resolved and update you here shortly.\n\n`,
+  },
+  {
+    label: 'Refund request',
+    text: (name) => `Hi ${name},\n\nThanks for reaching out. I've processed a refund for your payment — you should see it reflected on your original payment method within 5-10 business days, depending on your bank.\n\n`,
+  },
+  {
+    label: 'Guest account setup help',
+    text: (name) => `Hi ${name},\n\nHappy to help you get your account set up. After your campaign finishes sending, you'll see a "Complete Account Setup" button on that page — using the same email you paid with there will link everything (your campaign and payment history) to your new account automatically.\n\n`,
+  },
+  {
+    label: 'Wrong plan applied',
+    text: (name) => `Hi ${name},\n\nThanks for catching that — I've checked your account and corrected your campaign to match the plan you paid for. The updated recruiter count will reflect in your dashboard shortly.\n\n`,
+  },
+  {
+    label: 'General follow-up',
+    text: (name) => `Hi ${name},\n\nJust following up on this — let us know if you have any other questions in the meantime!\n\n`,
+  },
+]
+
 function ContactSubmissions({ onTicketUpdate }) {
   const [tickets, setTickets] = useState([])
   const [loading, setLoading] = useState(true)
@@ -684,6 +712,29 @@ function ContactSubmissions({ onTicketUpdate }) {
               whiteSpace: 'pre-wrap'
             }}>
               {replyTicket.message}
+            </div>
+
+            {/* ✅ NEW: canned replies */}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+              {CANNED_REPLIES.map((c) => (
+                <button
+                  key={c.label}
+                  type="button"
+                  onClick={() => setReplyMessage(c.text((replyTicket.name || replyTicket.email || 'there').split(' ')[0]))}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    color: '#2563EB',
+                    background: '#EFF6FF',
+                    border: '1px solid #DBEAFE',
+                    borderRadius: '999px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {c.label}
+                </button>
+              ))}
             </div>
 
             <textarea

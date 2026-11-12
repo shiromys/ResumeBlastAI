@@ -10,6 +10,8 @@ from services.user_service import UserService
 from services.guest_service import GuestService  # ✅ NEW: shared relink_to_user — same logic the guest self-serve setup flow uses
 from routes.auth import _send_reset_code_email  # ✅ NEW: reuse the existing Brevo-based reset-code flow for guest conversion
 from services.admin_auth import get_requesting_admin, SUPER_ADMIN_EMAILS  # ✅ NEW: real server-side admin auth
+import stripe  # ✅ NEW: invoice lookup + refunds, same lazy per-request api_key pattern as routes/payment.py
+from services.invoice_email_service import InvoiceEmailService  # ✅ NEW: reuse the exact receipt template customers were emailed
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -1290,6 +1292,177 @@ def get_user_details(user_id):
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: Invoice, receipt, and refund — so a rep never has to open the
+# Stripe dashboard or dig through Supabase for "can you resend my invoice"
+# or "I need a refund" tickets. All three key off a payments.id (the same
+# id already shown per-row in UserDetailDrawer's Payments tab).
+# ─────────────────────────────────────────────────────────────────────────
+
+def _get_payment_row(payment_id):
+    rows = get_all_rows('payments', f'select=*&id=eq.{payment_id}')
+    return rows[0] if rows else None
+
+
+@admin_bp.route('/api/admin/payments/<payment_id>/invoice', methods=['GET'])
+def get_payment_invoice(payment_id):
+    """
+    ✅ NEW: "the invoice sent from Stripe." Looks up the Checkout Session
+    this payment came from and returns Stripe's own hosted invoice link
+    and PDF link — Stripe generates both automatically because
+    routes/payment.py's create_checkout_session() already passes
+    invoice_creation={"enabled": True}. Nothing is stored locally; this
+    always asks Stripe live, so it's correct even if the invoice's status
+    changes later (e.g. after a refund). Sessions created before that
+    invoice_creation flag existed simply have no invoice — reported as
+    such, not as an error.
+    """
+    try:
+        payment = _get_payment_row(payment_id)
+        if not payment:
+            return jsonify({'success': False, 'error': 'Payment not found'}), 404
+
+        session_id = payment.get('stripe_session_id')
+        if not session_id:
+            return jsonify({'success': True, 'available': False, 'reason': 'No Stripe checkout session on record for this payment'}), 200
+
+        stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+        session = stripe.checkout.Session.retrieve(session_id, expand=['invoice'])
+        invoice = session.invoice
+        if not invoice:
+            return jsonify({'success': True, 'available': False, 'reason': 'Stripe has no invoice for this checkout session'}), 200
+
+        return jsonify({
+            'success':          True,
+            'available':        True,
+            'hosted_invoice_url': invoice.hosted_invoice_url,
+            'invoice_pdf':       invoice.invoice_pdf,
+            'invoice_number':   invoice.number,
+        }), 200
+
+    except stripe.error.StripeError as e:
+        print(f"⚠️ [Admin] Stripe error fetching invoice for payment {payment_id}: {e}")
+        return jsonify({'success': False, 'error': f'Stripe error: {str(e)}'}), 502
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/payments/<payment_id>/receipt', methods=['GET'])
+def get_payment_receipt(payment_id):
+    """
+    ✅ NEW: "the receipt sent from the application" — i.e. the Brevo email
+    built by InvoiceEmailService.send_payment_receipt() after a successful
+    payment. Renders the exact same template (via the new
+    InvoiceEmailService.build_receipt_html() — see that file) using this
+    payment row's own stored data, so what a rep sees here is guaranteed
+    to match what the customer actually received, not a re-approximation
+    of it. Returns raw HTML (not JSON) so the frontend can open it as a
+    real page in a new tab — see adminFetch + Blob handling in
+    UserDetailDrawer.jsx, since a plain window.open() can't carry the
+    Authorization header this route requires.
+    """
+    try:
+        payment = _get_payment_row(payment_id)
+        if not payment:
+            return jsonify({'success': False, 'error': 'Payment not found'}), 404
+
+        recipient_email = payment.get('user_email') or ''
+        recipient_name = payment.get('user_name') or ''
+        svc = InvoiceEmailService()
+        html = svc.build_receipt_html(
+            recipient_name=recipient_name,
+            recipient_email=recipient_email or 'customer@resumeblast.ai',
+            amount_cents=payment.get('amount') or 0,
+            currency=payment.get('currency') or 'usd',
+            plan_name=payment.get('plan_name') or '',
+            stripe_session_id=payment.get('stripe_session_id') or '',
+            payment_date=(payment.get('completed_at') or '')[:10] or None,
+        )
+        return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+    except Exception as e:
+        traceback.print_exc()
+        return f"<p>Failed to render receipt: {e}</p>", 500, {'Content-Type': 'text/html; charset=utf-8'}
+
+
+@admin_bp.route('/api/admin/payments/<payment_id>/refund', methods=['POST'])
+def refund_payment(payment_id):
+    """
+    ✅ NEW: issues a real Stripe refund so a rep never has to be given
+    Stripe dashboard access just to process "I want a refund" tickets.
+    Full refund only (no partial-amount UI yet — the common case here is
+    "refund the whole purchase," and a partial refund can still be done
+    in Stripe directly if ever needed). Updates the payments row so the
+    Payments tab immediately reflects it without a page reload.
+    """
+    try:
+        payment = _get_payment_row(payment_id)
+        if not payment:
+            return jsonify({'success': False, 'error': 'Payment not found'}), 404
+
+        if payment.get('status') == 'refunded':
+            return jsonify({'success': False, 'error': 'This payment has already been refunded'}), 400
+
+        payment_intent_id = payment.get('payment_intent_id')
+        if not payment_intent_id:
+            return jsonify({'success': False, 'error': 'No Stripe payment_intent on record for this payment — cannot refund automatically'}), 400
+
+        stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+        refund = stripe.Refund.create(payment_intent=payment_intent_id)
+
+        # Only touching columns already confirmed to exist elsewhere in this
+        # file (status, refund_amount) — not guessing at a refunded_at
+        # column this sandbox has no way to verify against the live schema.
+        update_resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/payments?id=eq.{payment_id}",
+            json={
+                'status':         'refunded',
+                'refund_amount':  payment.get('amount'),
+            },
+            headers=_get_headers(), timeout=10
+        )
+        if update_resp.status_code not in (200, 204):
+            # Stripe already refunded the money — surface this loudly rather
+            # than silently leaving the DB row out of sync with reality.
+            print(f"⚠️ [Admin] Refund succeeded in Stripe ({refund.id}) but updating payments row failed: {update_resp.status_code} {update_resp.text}")
+            return jsonify({'success': True, 'refund_id': refund.id, 'warning': 'Refunded in Stripe, but the local record may not have updated — refresh to confirm'}), 200
+
+        admin = getattr(request, 'admin', None)
+        print(f"✅ [Admin] {admin['email'] if admin else 'unknown'} refunded payment {payment_id} (Stripe refund {refund.id})")
+        return jsonify({'success': True, 'refund_id': refund.id}), 200
+
+    except stripe.error.StripeError as e:
+        print(f"⚠️ [Admin] Stripe error refunding payment {payment_id}: {e}")
+        return jsonify({'success': False, 'error': f'Stripe error: {str(e)}'}), 502
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/admin/users/<user_id>/dashboard-view', methods=['GET'])
+def get_user_dashboard_view(user_id):
+    """
+    ✅ NEW: backs "View as this user" in UserDetailDrawer.jsx. Returns the
+    same latest-campaign data UserDashboard.jsx itself would show, fetched
+    with the service-role key — the real UserDashboard.jsx talks to
+    Supabase directly with the ANON key under the SIGNED-IN USER's own
+    RLS policy, which only lets someone read their own rows, so simply
+    reusing that component's data-fetching for an arbitrary user_id from
+    the admin's own session would just come back empty. This endpoint
+    exists so "view as user" can get real data without faking a login as
+    them. UserDashboard.jsx itself is completely untouched by this —
+    AdminViewAsUser.jsx is a separate, read-only component that renders
+    this data.
+    """
+    try:
+        rows = get_all_rows('blast_campaigns', f'select=*&user_id=eq.{user_id}&order=created_at.desc&limit=1')
+        return jsonify({'success': True, 'blast': rows[0] if rows else None}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @admin_bp.route('/api/admin/users/<user_id>/ban', methods=['POST'])

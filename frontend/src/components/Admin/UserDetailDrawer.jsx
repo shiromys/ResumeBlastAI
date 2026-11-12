@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { adminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call
+import AdminViewAsUser from './AdminViewAsUser' // ✅ NEW: read-only "view as this user" overlay
 
 // ✅ NEW: Admin-panel "click a user, see everything" detail panel. Fetches
 // the aggregated /api/admin/users/<id>/details payload (profile, campaigns,
@@ -14,6 +15,9 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
   const [details, setDetails] = useState(null)
   const [busy, setBusy] = useState(false)
   const [noteText, setNoteText] = useState('')
+  const [docBusyId, setDocBusyId] = useState('')      // ✅ NEW: which payment's invoice/receipt is currently loading
+  const [refundBusyId, setRefundBusyId] = useState('') // ✅ NEW: which payment is currently being refunded
+  const [viewingAsUser, setViewingAsUser] = useState(false) // ✅ NEW: "View as this user" overlay toggle
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
@@ -105,6 +109,69 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
       alert(`Failed to add note: ${e.message}`)
     } finally {
       setBusy(false)
+    }
+  }
+
+  // ✅ NEW: "the invoice sent from Stripe." Fetches the Stripe-hosted
+  // invoice link + PDF for this payment and opens whichever is available —
+  // these are Stripe's own URLs, so no auth header is needed for that
+  // second hop, only for the lookup call itself.
+  const handleViewInvoice = async (paymentId) => {
+    setDocBusyId(`invoice-${paymentId}`)
+    try {
+      const res = await adminFetch(`${API_URL}/api/admin/payments/${paymentId}/invoice`)
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || `HTTP ${res.status}`)
+      if (!json.available) {
+        alert(json.reason || 'No Stripe invoice is available for this payment.')
+        return
+      }
+      window.open(json.invoice_pdf || json.hosted_invoice_url, '_blank', 'noopener,noreferrer')
+    } catch (e) {
+      alert(`Couldn't load the invoice: ${e.message}`)
+    } finally {
+      setDocBusyId('')
+    }
+  }
+
+  // ✅ NEW: "the receipt sent from the application." This route returns raw
+  // HTML (not JSON), and it requires the same admin Authorization header
+  // as everything else — a plain window.open(url) can't attach that
+  // header, so instead we fetch the HTML with adminFetch (auth included),
+  // then hand the browser a Blob URL to open. The admin can print/save
+  // that tab as a PDF if they want a downloadable file.
+  const handleViewReceipt = async (paymentId) => {
+    setDocBusyId(`receipt-${paymentId}`)
+    try {
+      const res = await adminFetch(`${API_URL}/api/admin/payments/${paymentId}/receipt`)
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const html = await res.text()
+      const blob = new Blob([html], { type: 'text/html' })
+      const blobUrl = URL.createObjectURL(blob)
+      window.open(blobUrl, '_blank', 'noopener,noreferrer')
+      // Revoke later rather than immediately — the new tab needs the blob
+      // URL to still resolve by the time it finishes loading.
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 30000)
+    } catch (e) {
+      alert(`Couldn't load the receipt: ${e.message}`)
+    } finally {
+      setDocBusyId('')
+    }
+  }
+
+  const handleRefund = async (payment) => {
+    if (!window.confirm(`Refund ${formatMoney(payment.amount, payment.currency)} for this payment? This issues a real refund in Stripe and cannot be undone from here.`)) return
+    setRefundBusyId(payment.id)
+    try {
+      const res = await adminFetch(`${API_URL}/api/admin/payments/${payment.id}/refund`, { method: 'POST' })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || `HTTP ${res.status}`)
+      if (json.warning) alert(`✅ Refunded in Stripe — ${json.warning}`)
+      await loadDetails()
+    } catch (e) {
+      alert(`Failed to refund: ${e.message}`)
+    } finally {
+      setRefundBusyId('')
     }
   }
 
@@ -339,35 +406,60 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
                 details.payments.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '40px', color: '#9CA3AF', fontSize: '13px' }}>No payments yet</div>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-                    <thead>
-                      <tr>
-                        <th style={{ textAlign: 'left', padding: '8px 0', fontSize: '11px', color: '#94A3B8', textTransform: 'uppercase', borderBottom: '1px solid #F1F5F9' }}>Date</th>
-                        <th style={{ textAlign: 'left', padding: '8px 0', fontSize: '11px', color: '#94A3B8', textTransform: 'uppercase', borderBottom: '1px solid #F1F5F9' }}>Plan</th>
-                        <th style={{ textAlign: 'left', padding: '8px 0', fontSize: '11px', color: '#94A3B8', textTransform: 'uppercase', borderBottom: '1px solid #F1F5F9' }}>Amount</th>
-                        <th style={{ textAlign: 'left', padding: '8px 0', fontSize: '11px', color: '#94A3B8', textTransform: 'uppercase', borderBottom: '1px solid #F1F5F9' }}>Status</th>
-                        <th style={{ textAlign: 'left', padding: '8px 0', fontSize: '11px', color: '#94A3B8', textTransform: 'uppercase', borderBottom: '1px solid #F1F5F9' }}>Receipt</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {details.payments.map((p) => (
-                        <tr key={p.id}>
-                          <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC', color: '#374151' }}>
-                            <div>{formatDate(p.completed_at)}</div>
-                            <div style={{ fontSize: '9px', color: '#CBD5E1', fontFamily: 'monospace', marginTop: '2px' }} title={p.id}>{p.id}</div>
-                          </td>
-                          <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC', color: '#374151' }}>{p.plan_name || '—'}</td>
-                          <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC', color: '#0F172A', fontWeight: 600 }}>{formatMoney(p.amount, p.currency)}</td>
-                          <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC' }}>
-                            {p.status === 'completed' ? badge('Completed', '#D1FAE5', '#065F46') : badge(p.status || 'Unknown', '#F1F5F9', '#475569')}
-                          </td>
-                          <td style={{ padding: '10px 0', borderBottom: '1px solid #F8FAFC' }}>
-                            {p.receipt_url ? <a href={p.receipt_url} target="_blank" rel="noreferrer">View</a> : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                    {details.payments.map((p) => (
+                      <div key={p.id} style={{ border: '1px solid #E2E8F0', borderRadius: '12px', padding: '14px 16px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
+                          <div>
+                            <div style={{ fontSize: '14px', fontWeight: 700, color: '#0F172A' }}>{formatMoney(p.amount, p.currency)} · {p.plan_name || 'Plan'}</div>
+                            <div style={{ fontSize: '12px', color: '#64748B', marginTop: '2px' }}>{formatDate(p.completed_at)}</div>
+                          </div>
+                          {p.status === 'refunded'
+                            ? badge('Refunded', '#F1F5F9', '#64748B')
+                            : p.status === 'completed'
+                              ? badge('Completed', '#D1FAE5', '#065F46')
+                              : badge(p.status || 'Unknown', '#F1F5F9', '#475569')}
+                        </div>
+                        <div style={{ fontSize: '9px', color: '#CBD5E1', fontFamily: 'monospace', marginBottom: '10px' }} title={p.id}>{p.id}</div>
+
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          {/* Stripe's own charge receipt — unchanged, same field/link as before */}
+                          {p.receipt_url && (
+                            <a href={p.receipt_url} target="_blank" rel="noreferrer"
+                               style={{ padding: '6px 12px', fontSize: '12px', fontWeight: 600, color: '#374151', border: '1px solid #E2E8F0', borderRadius: '6px', textDecoration: 'none' }}>
+                              Stripe receipt
+                            </a>
+                          )}
+                          {/* ✅ NEW: Stripe invoice (hosted_invoice_url / invoice_pdf) */}
+                          <button
+                            onClick={() => handleViewInvoice(p.id)}
+                            disabled={docBusyId === `invoice-${p.id}`}
+                            style={{ padding: '6px 12px', fontSize: '12px', fontWeight: 600, color: '#374151', background: 'white', border: '1px solid #E2E8F0', borderRadius: '6px', cursor: docBusyId === `invoice-${p.id}` ? 'not-allowed' : 'pointer' }}
+                          >
+                            {docBusyId === `invoice-${p.id}` ? 'Loading…' : 'Stripe invoice'}
+                          </button>
+                          {/* ✅ NEW: app-generated receipt email, rendered on demand */}
+                          <button
+                            onClick={() => handleViewReceipt(p.id)}
+                            disabled={docBusyId === `receipt-${p.id}`}
+                            style={{ padding: '6px 12px', fontSize: '12px', fontWeight: 600, color: '#374151', background: 'white', border: '1px solid #E2E8F0', borderRadius: '6px', cursor: docBusyId === `receipt-${p.id}` ? 'not-allowed' : 'pointer' }}
+                          >
+                            {docBusyId === `receipt-${p.id}` ? 'Loading…' : 'App receipt'}
+                          </button>
+                          {/* ✅ NEW: refund */}
+                          {p.status !== 'refunded' && (
+                            <button
+                              onClick={() => handleRefund(p)}
+                              disabled={refundBusyId === p.id}
+                              style={{ padding: '6px 12px', fontSize: '12px', fontWeight: 600, color: '#DC2626', background: 'white', border: '1px solid #FECACA', borderRadius: '6px', cursor: refundBusyId === p.id ? 'not-allowed' : 'pointer' }}
+                            >
+                              {refundBusyId === p.id ? 'Refunding…' : 'Refund'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )
               )}
 
@@ -412,6 +504,11 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
                     <button disabled={busy} onClick={handleBanToggle} style={{ padding: '10px 18px', background: 'white', color: '#92400E', border: '1px solid #FDE68A', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
                       {user.account_status === 'banned' ? 'Unban user' : 'Ban user'}
                     </button>
+                    {/* ✅ NEW: read-only "View as this user" — see AdminViewAsUser.jsx.
+                        Does not create a session as them or touch UserDashboard.jsx at all. */}
+                    <button disabled={busy} onClick={() => setViewingAsUser(true)} style={{ padding: '10px 18px', background: 'white', color: '#1E40AF', border: '1px solid #BFDBFE', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                      View as this user
+                    </button>
                   </div>
 
                   <div>
@@ -450,6 +547,17 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
             </div>
           </>
         ) : null}
+
+        {/* ✅ NEW: rendered on top of the drawer, not instead of it — closing
+            it just returns to this same drawer, no re-fetch needed. */}
+        {viewingAsUser && user && (
+          <AdminViewAsUser
+            userId={userId}
+            userEmail={user.email}
+            userName={user.full_name}
+            onClose={() => setViewingAsUser(false)}
+          />
+        )}
       </div>
     </div>
   )
