@@ -929,6 +929,21 @@ def _guest_payment_rows():
         row['_resolved_email'] = email
         row['_email_from_resume_fallback'] = used_fallback
         result.append(row)
+
+    # ✅ FIX: a guest who later self-registers (frontend/src/services/authService.js
+    # signUp) gets a brand-new users row, but that flow has no idea the same email
+    # already has an orphaned, unlinked payment — it never touches payments.user_id.
+    # Only the admin's "Convert" button (convert_guest_user above) does that relink.
+    # So without this check, someone who signed up themselves after paying as a
+    # guest would show up as "guest" forever, even though they're fully registered.
+    # Filter out anyone whose resolved email already matches a real users row.
+    if result:
+        registered_emails = {
+            (u.get('email') or '').strip().lower()
+            for u in get_all_rows('users', 'select=email')
+        }
+        result = [r for r in result if r['_resolved_email'].strip().lower() not in registered_emails]
+
     return result
 
 @admin_bp.route('/api/admin/guest-users', methods=['GET'])
@@ -1598,3 +1613,4 @@ def get_profiles_overview():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+        
