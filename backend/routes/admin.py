@@ -16,6 +16,7 @@ from services.admin_auth import get_requesting_admin, SUPER_ADMIN_EMAILS  # ✅ 
 import stripe  # ✅ NEW: invoice lookup + refunds, same lazy per-request api_key pattern as routes/payment.py
 from services.invoice_email_service import InvoiceEmailService  # ✅ NEW: reuse the exact receipt template customers were emailed
 from services.maintenance_service import get_maintenance_status, set_maintenance_status  # ✅ NEW: Maintenance Mode toggle
+from services.audit_log_service import log_admin_action, get_recent_actions  # ✅ NEW: admin audit log
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -448,8 +449,14 @@ def force_drip_wave():
             update_data = {'drip_day2_sent_at': now, 'day8_scheduled_for': now, 'status': 'in_progress'}
 
         patch_resp = requests.patch(f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}", json=update_data, headers=_get_headers())
-        
-        if patch_resp.status_code in [200, 204]: return jsonify({'success': True, 'message': f'Wave {target_wave} forced.'}), 200
+
+        if patch_resp.status_code in [200, 204]:
+            # ✅ NEW: admin audit log
+            admin = getattr(request, 'admin', None)
+            if admin:
+                log_admin_action(admin['email'], 'force_drip_wave', target=campaign_id,
+                                  details={'wave': target_wave}, admin_role=admin.get('role'))
+            return jsonify({'success': True, 'message': f'Wave {target_wave} forced.'}), 200
         else: return jsonify({'error': f'Failed: {patch_resp.text}'}), 500
     except Exception as e:
         traceback.print_exc()
@@ -711,10 +718,22 @@ def get_users():
 
 @admin_bp.route('/api/admin/users/delete', methods=['POST'])
 def delete_user():
+    # ✅ RESTRICTED: deleting a user is permanent and irreversible — super
+    # admin only now. A normal admin's panel simply no longer shows this
+    # button (AdminDashboard.jsx / UserDetailDrawer.jsx); this is the
+    # server-side enforcement, since hiding a button alone never stops a
+    # direct API call.
+    requester = _require_super_admin()
+    if not requester:
+        return jsonify({'success': False, 'error': 'Super admin access required'}), 403
     try:
         data = request.json
         if not data.get('email'): return jsonify({'success': False, 'error': 'Email is required'}), 400
-        return jsonify({'success': True, 'message': f"User {data.get('email')} deleted", 'details': UserService.delete_user_data(email=data.get('email'), user_id=data.get('user_id'), reason=data.get('reason', 'Admin deletion'), deleted_by=data.get('admin_email', 'system'))}), 200
+        result = UserService.delete_user_data(email=data.get('email'), user_id=data.get('user_id'), reason=data.get('reason', 'Admin deletion'), deleted_by=requester['email'])
+        log_admin_action(requester['email'], 'delete_user', target=data.get('email'),
+                          details={'user_id': data.get('user_id'), 'reason': data.get('reason', 'Admin deletion')},
+                          admin_role=requester.get('role'))
+        return jsonify({'success': True, 'message': f"User {data.get('email')} deleted", 'details': result}), 200
     except Exception as e: return jsonify({'success': False, 'error': str(e)}), 500
 
 @admin_bp.route('/api/admin/health', methods=['GET'])
@@ -1582,6 +1601,11 @@ def export_campaigns_csv():
 
 @admin_bp.route('/api/admin/maintenance', methods=['GET'])
 def get_maintenance():
+    # ✅ RESTRICTED: maintenance mode affects every user of the live site —
+    # super admin only now.
+    requester = _require_super_admin()
+    if not requester:
+        return jsonify({'success': False, 'error': 'Super admin access required'}), 403
     try:
         status = get_maintenance_status(use_cache=False)  # admin always sees the live value, never the cached one
         return jsonify({'success': True, **status})
@@ -1592,6 +1616,10 @@ def get_maintenance():
 
 @admin_bp.route('/api/admin/maintenance', methods=['POST'])
 def update_maintenance():
+    # ✅ RESTRICTED: see get_maintenance() above.
+    requester = _require_super_admin()
+    if not requester:
+        return jsonify({'success': False, 'error': 'Super admin access required'}), 403
     try:
         data = request.get_json(silent=True) or {}
         if 'enabled' not in data:
@@ -1601,8 +1629,7 @@ def update_maintenance():
         if message is not None and len(message) > 2000:
             return jsonify({'success': False, 'error': 'Message is too long (max 2000 characters)'}), 400
 
-        admin = getattr(request, 'admin', None)
-        updated_by = (admin or {}).get('email')
+        updated_by = requester['email']
 
         result = set_maintenance_status(
             enabled=bool(data.get('enabled')),
@@ -1610,6 +1637,10 @@ def update_maintenance():
             estimated_back_at=data.get('estimated_back_at'),
             updated_by=updated_by,
         )
+        # ✅ NEW: admin audit log
+        log_admin_action(requester['email'], 'maintenance_mode_toggle',
+                          details={'enabled': bool(data.get('enabled')), 'message': message},
+                          admin_role=requester.get('role'))
         return jsonify({'success': True, **result})
     except Exception as e:
         traceback.print_exc()
@@ -1719,7 +1750,12 @@ def refund_payment(payment_id):
     "refund the whole purchase," and a partial refund can still be done
     in Stripe directly if ever needed). Updates the payments row so the
     Payments tab immediately reflects it without a page reload.
+
+    ✅ RESTRICTED: refunding real money is super admin only now.
     """
+    requester = _require_super_admin()
+    if not requester:
+        return jsonify({'success': False, 'error': 'Super admin access required'}), 403
     try:
         payment = _get_payment_row(payment_id)
         if not payment:
@@ -1750,10 +1786,16 @@ def refund_payment(payment_id):
             # Stripe already refunded the money — surface this loudly rather
             # than silently leaving the DB row out of sync with reality.
             print(f"⚠️ [Admin] Refund succeeded in Stripe ({refund.id}) but updating payments row failed: {update_resp.status_code} {update_resp.text}")
+            log_admin_action(requester['email'], 'refund_payment', target=payment_id,
+                              details={'refund_id': refund.id, 'amount': payment.get('amount'), 'warning': 'payments row update failed'},
+                              admin_role=requester.get('role'))
             return jsonify({'success': True, 'refund_id': refund.id, 'warning': 'Refunded in Stripe, but the local record may not have updated — refresh to confirm'}), 200
 
-        admin = getattr(request, 'admin', None)
-        print(f"✅ [Admin] {admin['email'] if admin else 'unknown'} refunded payment {payment_id} (Stripe refund {refund.id})")
+        print(f"✅ [Admin] {requester['email']} refunded payment {payment_id} (Stripe refund {refund.id})")
+        # ✅ NEW: admin audit log
+        log_admin_action(requester['email'], 'refund_payment', target=payment_id,
+                          details={'refund_id': refund.id, 'amount': payment.get('amount')},
+                          admin_role=requester.get('role'))
         return jsonify({'success': True, 'refund_id': refund.id}), 200
 
     except stripe.error.StripeError as e:
@@ -1792,6 +1834,10 @@ def ban_user_route(user_id):
     try:
         reason = ((request.json or {}).get('reason') or '').strip() or 'Admin action'
         UserService.ban_user(user_id, reason)
+        # ✅ NEW: admin audit log
+        admin = getattr(request, 'admin', None)
+        if admin:
+            log_admin_action(admin['email'], 'ban_user', target=user_id, details={'reason': reason}, admin_role=admin.get('role'))
         return jsonify({'success': True}), 200
     except Exception as e:
         traceback.print_exc()
@@ -1802,6 +1848,10 @@ def ban_user_route(user_id):
 def unban_user_route(user_id):
     try:
         UserService.unban_user(user_id)
+        # ✅ NEW: admin audit log
+        admin = getattr(request, 'admin', None)
+        if admin:
+            log_admin_action(admin['email'], 'unban_user', target=user_id, admin_role=admin.get('role'))
         return jsonify({'success': True}), 200
     except Exception as e:
         traceback.print_exc()
@@ -2247,6 +2297,8 @@ def grant_admin_access():
             return jsonify({'success': False, 'error': 'Failed to grant access'}), 500
 
         print(f"✅ [Admin] {requester['email']} granted admin access to {email}")
+        # ✅ NEW: admin audit log
+        log_admin_action(requester['email'], 'grant_admin_access', target=email, admin_role=requester.get('role'))
         return jsonify({'success': True, 'email': email}), 200
 
     except Exception as e:
@@ -2290,8 +2342,35 @@ def revoke_admin_access():
             return jsonify({'success': False, 'error': 'Failed to revoke access'}), 500
 
         print(f"✅ [Admin] {requester['email']} revoked admin access from {email}")
+        # ✅ NEW: admin audit log
+        log_admin_action(requester['email'], 'revoke_admin_access', target=email, admin_role=requester.get('role'))
         return jsonify({'success': True, 'email': email}), 200
 
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: Admin Audit Log — "whatever an admin does should be visible to
+# super admins." Read-only, super-admin only, backed by
+# services/audit_log_service.py / the admin_audit_log table (migration:
+# backend/admin_audit_log_migration.sql). Every state-changing route
+# above (delete_user, refund_payment, update_maintenance, ban/unban,
+# force_drip_wave, grant/revoke_admin_access) writes into that table —
+# this endpoint just reads it back out.
+# ─────────────────────────────────────────────────────────────────────────
+@admin_bp.route('/api/admin/audit-log', methods=['GET'])
+def admin_audit_log_route():
+    if not _require_super_admin():
+        return jsonify({'success': False, 'error': 'Super admin access required'}), 403
+
+    try:
+        limit = request.args.get('limit', default=200, type=int) or 200
+        limit = max(1, min(limit, 500))
+        admin_email_filter = (request.args.get('admin_email') or '').strip() or None
+        entries = get_recent_actions(limit=limit, admin_email=admin_email_filter)
+        return jsonify({'success': True, 'entries': entries}), 200
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500

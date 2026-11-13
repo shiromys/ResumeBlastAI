@@ -11,6 +11,7 @@ import AdminAccessManager from './AdminAccessManager' // ✅ NEW: super-admin-on
 import AdminGlobalSearch from './AdminGlobalSearch' // ✅ NEW: search users/payments/campaigns/tickets from anywhere in the panel
 import MaintenanceControl from './MaintenanceControl' // ✅ NEW: Maintenance Mode toggle
 import CampaignsOverview from './CampaignsOverview' // ✅ NEW: list of all active campaigns
+import AdminAuditLog from './AdminAuditLog' // ✅ NEW: super-admin-only "who did what, when" log
 
 function AdminDashboard({ user, adminRole, onExit }) {
   const [activeTab, setActiveTab] = useState('monitoring')
@@ -692,12 +693,18 @@ function AdminDashboard({ user, adminRole, onExit }) {
             )}
           </button>
 
-          <button
-            className={`nav-item ${activeTab === 'maintenance' ? 'active' : ''}`}
-            onClick={() => setActiveTab('maintenance')}
-          >
-          Maintenance Mode
-          </button>
+          {/* ✅ RESTRICTED: Maintenance Mode — super admin only now (was
+              open to every admin before). Backend independently gates
+              both /api/admin/maintenance routes with _require_super_admin(),
+              so this hide is UX only, not the real gate. */}
+          {adminRole === 'super_admin' && (
+            <button
+              className={`nav-item ${activeTab === 'maintenance' ? 'active' : ''}`}
+              onClick={() => setActiveTab('maintenance')}
+            >
+            Maintenance Mode
+            </button>
+          )}
 
           {/* ✅ NEW: only the two permanent super admins ever see this tab at
               all — a granted admin has full use of everything else above,
@@ -711,6 +718,20 @@ function AdminDashboard({ user, adminRole, onExit }) {
               onClick={() => setActiveTab('admin-access')}
             >
             Manage Admin Access
+            </button>
+          )}
+
+          {/* ✅ NEW: Admin Audit Log — super admin only. Shows every
+              state-changing action any admin has taken (deletes, bans,
+              refunds, admin-access grants/revokes, forced waves,
+              maintenance toggles). Backend independently gates
+              GET /api/admin/audit-log with _require_super_admin(). */}
+          {adminRole === 'super_admin' && (
+            <button
+              className={`nav-item ${activeTab === 'audit-log' ? 'active' : ''}`}
+              onClick={() => setActiveTab('audit-log')}
+            >
+            Audit Log
             </button>
           )}
         </nav>
@@ -1581,23 +1602,26 @@ function AdminDashboard({ user, adminRole, onExit }) {
                                     >
                                       View
                                     </button>
-                                    <button
-                                      onClick={() => handleDeleteUser(row.email, row.id)}
-                                      title="Delete this user"
-                                      style={{
-                                        padding: '5px 9px',
-                                        background: 'white',
-                                        color: '#64748B',
-                                        border: '1px solid #E2E8F0',
-                                        borderRadius: '6px',
-                                        cursor: 'pointer',
-                                        fontSize: '11px',
-                                        fontWeight: '600',
-                                        whiteSpace: 'nowrap',
-                                      }}
-                                    >
-                                      Delete
-                                    </button>
+                                    {/* ✅ RESTRICTED: delete-user — super admin only now */}
+                                    {adminRole === 'super_admin' && (
+                                      <button
+                                        onClick={() => handleDeleteUser(row.email, row.id)}
+                                        title="Delete this user"
+                                        style={{
+                                          padding: '5px 9px',
+                                          background: 'white',
+                                          color: '#64748B',
+                                          border: '1px solid #E2E8F0',
+                                          borderRadius: '6px',
+                                          cursor: 'pointer',
+                                          fontSize: '11px',
+                                          fontWeight: '600',
+                                          whiteSpace: 'nowrap',
+                                        }}
+                                      >
+                                        Delete
+                                      </button>
+                                    )}
                                   </div>
                                 ) : (
                                   <button
@@ -1663,6 +1687,7 @@ function AdminDashboard({ user, adminRole, onExit }) {
               <UserDetailDrawer
                 userId={selectedUserId}
                 adminEmail={user?.email}
+                adminRole={adminRole}
                 onClose={() => setSelectedUserId(null)}
                 onChanged={() => fetchData('users')}
               />
@@ -1984,8 +2009,16 @@ function AdminDashboard({ user, adminRole, onExit }) {
               <AdminAccessManager />
             )}
 
-            {activeTab === 'maintenance' && (
+            {/* ✅ RESTRICTED: Maintenance Mode — super admin only now (the
+                nav button above already hides this tab from anyone else;
+                this is the render-level mirror of that same gate). */}
+            {activeTab === 'maintenance' && adminRole === 'super_admin' && (
               <MaintenanceControl />
+            )}
+
+            {/* ✅ NEW: Admin Audit Log — super admin only. */}
+            {activeTab === 'audit-log' && adminRole === 'super_admin' && (
+              <AdminAuditLog />
             )}
 
             {activeTab === 'campaigns-overview' && (

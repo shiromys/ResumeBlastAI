@@ -22,6 +22,14 @@ function MaintenanceControl() {
   const [etaLocal, setEtaLocal] = useState('') // datetime-local string, e.g. 2026-11-12T15:00
   const [meta, setMeta] = useState({ updated_at: null, updated_by: null })
 
+  // ✅ NEW: confirmation popup before the toggle actually takes effect.
+  // The toggle button no longer calls save() directly — it opens this
+  // modal with the value it WOULD switch to, and only "Accept" calls
+  // save(pendingValue). The separate "Save changes" button below (for
+  // editing message/ETA text without flipping state) is unaffected.
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [pendingValue, setPendingValue] = useState(null)
+
   const load = useCallback(async () => {
     setLoading(true)
     setError('')
@@ -68,6 +76,25 @@ function MaintenanceControl() {
     }
   }
 
+  // ✅ NEW: opens the confirmation popup instead of saving immediately.
+  const requestToggle = () => {
+    if (saving) return
+    setPendingValue(!enabled)
+    setConfirmOpen(true)
+  }
+
+  const confirmToggle = async () => {
+    const next = pendingValue
+    setConfirmOpen(false)
+    setPendingValue(null)
+    await save(next)
+  }
+
+  const cancelToggle = () => {
+    setConfirmOpen(false)
+    setPendingValue(null)
+  }
+
   if (loading) {
     return <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>Loading…</div>
   }
@@ -94,7 +121,7 @@ function MaintenanceControl() {
           <button
             type="button"
             disabled={saving}
-            onClick={() => save(!enabled)}
+            onClick={requestToggle}
             aria-pressed={enabled}
             aria-label="Toggle maintenance mode"
             style={{
@@ -162,6 +189,53 @@ function MaintenanceControl() {
           </div>
         )}
       </div>
+
+      {/* ✅ NEW: confirmation popup before the toggle takes effect */}
+      {confirmOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.55)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            zIndex: 1000, padding: 20,
+          }}
+          onClick={cancelToggle}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff', borderRadius: 14, padding: 26, maxWidth: 420,
+              width: '100%', boxShadow: '0 20px 50px rgba(0,0,0,.25)',
+            }}
+          >
+            <div style={{ fontSize: 17, fontWeight: 800, color: '#111827', marginBottom: 8 }}>
+              {pendingValue ? 'Turn ON maintenance mode?' : 'Turn OFF maintenance mode?'}
+            </div>
+            <div style={{ fontSize: 13.5, color: '#4b5563', lineHeight: 1.5, marginBottom: 20 }}>
+              {pendingValue
+                ? 'Every visitor to the site will immediately see the maintenance page instead of the real application. Admins will stay signed in and keep seeing the real app. You can turn this off again at any time from this same screen.'
+                : 'The site will immediately go live for all visitors again — the maintenance page will stop showing right away.'}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={cancelToggle}
+                style={{ padding: '9px 16px', background: '#fff', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 8, fontWeight: 600, fontSize: 13.5, cursor: 'pointer' }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmToggle}
+                style={{ padding: '9px 16px', background: pendingValue ? '#DC2626' : '#059669', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13.5, cursor: 'pointer' }}
+              >
+                Accept
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

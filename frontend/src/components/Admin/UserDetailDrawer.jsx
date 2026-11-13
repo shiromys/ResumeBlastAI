@@ -8,7 +8,7 @@ import AdminViewAsUser from './AdminViewAsUser' // ✅ NEW: read-only "view as t
 // admin notes) and renders it as a right-side slide-over, matching the
 // preview mockup approved for this feature. Activity timeline is a phase-2
 // tab — not included yet (see implementation-plan-admin-user-detail-view.md).
-function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
+function UserDetailDrawer({ userId, adminEmail, adminRole, onClose, onChanged }) {
   const [tab, setTab] = useState('overview')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -446,8 +446,8 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
                           >
                             {docBusyId === `receipt-${p.id}` ? 'Loading…' : 'App receipt'}
                           </button>
-                          {/* ✅ NEW: refund */}
-                          {p.status !== 'refunded' && (
+                          {/* ✅ RESTRICTED: refund — super admin only now */}
+                          {p.status !== 'refunded' && adminRole === 'super_admin' && (
                             <button
                               onClick={() => handleRefund(p)}
                               disabled={refundBusyId === p.id}
@@ -534,13 +534,16 @@ function UserDetailDrawer({ userId, adminEmail, onClose, onChanged }) {
                     </button>
                   </div>
 
-                  <div style={{ border: '1px solid #FECACA', borderRadius: '10px', padding: '14px 16px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#991B1B', textTransform: 'uppercase', marginBottom: '8px' }}>Danger zone</div>
-                    <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '10px' }}>Permanently deletes this user and all associated records. This cannot be undone.</div>
-                    <button disabled={busy} onClick={handleDeleteUser} style={{ padding: '9px 16px', background: 'white', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
-                      Delete user
-                    </button>
-                  </div>
+                  {/* ✅ RESTRICTED: delete-user — super admin only now */}
+                  {adminRole === 'super_admin' && (
+                    <div style={{ border: '1px solid #FECACA', borderRadius: '10px', padding: '14px 16px' }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#991B1B', textTransform: 'uppercase', marginBottom: '8px' }}>Danger zone</div>
+                      <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '10px' }}>Permanently deletes this user and all associated records. This cannot be undone.</div>
+                      <button disabled={busy} onClick={handleDeleteUser} style={{ padding: '9px 16px', background: 'white', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                        Delete user
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
