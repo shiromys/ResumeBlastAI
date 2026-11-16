@@ -14,6 +14,7 @@ function AdminAccessManager() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [newEmail, setNewEmail] = useState('')
+  const [newRole, setNewRole] = useState('') // ✅ NEW: descriptive role/title the super admin assigns alongside the email
   const [granting, setGranting] = useState(false)
   const [revokingEmail, setRevokingEmail] = useState('')
 
@@ -43,8 +44,13 @@ function AdminAccessManager() {
   const handleGrant = async (e) => {
     e.preventDefault()
     const email = newEmail.trim().toLowerCase()
+    const role = newRole.trim()
     if (!email || !email.includes('@')) {
       alert('Enter a valid email address.')
+      return
+    }
+    if (!role) {
+      alert('Enter a role/title for this person (e.g. "Support Admin", "Billing").')
       return
     }
 
@@ -53,12 +59,13 @@ function AdminAccessManager() {
       const response = await adminFetch(`${API_URL}/api/admin/admin-users/grant`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, role }),
       })
       const result = await response.json()
       if (!response.ok || !result.success) throw new Error(result.error || `HTTP ${response.status}`)
 
       setNewEmail('')
+      setNewRole('')
       await loadAdmins()
     } catch (err) {
       console.error('❌ Error granting admin access:', err)
@@ -138,6 +145,21 @@ function AdminAccessManager() {
               fontSize: '14px',
             }}
           />
+          {/* ✅ NEW: role/title, required alongside the email */}
+          <input
+            type="text"
+            placeholder="Role / title (e.g. Support Admin)"
+            value={newRole}
+            onChange={(e) => setNewRole(e.target.value)}
+            disabled={granting}
+            style={{
+              flex: '1 1 220px',
+              padding: '10px 14px',
+              borderRadius: '8px',
+              border: '1px solid #D1D5DB',
+              fontSize: '14px',
+            }}
+          />
           <button
             type="submit"
             disabled={granting}
@@ -158,7 +180,8 @@ function AdminAccessManager() {
         </form>
         <p style={{ margin: '12px 0 0 0', fontSize: '12px', color: '#9CA3AF' }}>
           They'll be able to use every tab in this panel except this one — only the two permanent
-          super admins can grant or revoke access.
+          super admins can grant or revoke access. The role/title is a label for your own records
+          (shown in the table below) — it does not change what they can access.
         </p>
       </div>
 
@@ -190,7 +213,8 @@ function AdminAccessManager() {
           <thead>
             <tr>
               <th style={{ width: '220px' }}>EMAIL</th>
-              <th style={{ width: '150px' }}>STATUS</th>
+              <th style={{ width: '160px' }}>ROLE</th>
+              <th style={{ width: '130px' }}>STATUS</th>
               <th style={{ width: '170px' }}>GRANTED BY</th>
               <th style={{ width: '160px' }}>GRANTED ON</th>
               <th style={{ width: '120px' }}>ACTION</th>
@@ -199,7 +223,7 @@ function AdminAccessManager() {
           <tbody>
             {activeGranted.length === 0 && revokedGranted.length === 0 ? (
               <tr>
-                <td colSpan="5" style={{ textAlign: 'center', padding: '40px', color: '#9CA3AF' }}>
+                <td colSpan="6" style={{ textAlign: 'center', padding: '40px', color: '#9CA3AF' }}>
                   No one else has been granted admin access yet
                 </td>
               </tr>
@@ -208,6 +232,7 @@ function AdminAccessManager() {
                 {activeGranted.map((a) => (
                   <tr key={a.email} style={{ borderBottom: '1px solid #E5E7EB' }}>
                     <td style={{ fontWeight: '600', color: '#111827', fontSize: '14px' }}>{a.email}</td>
+                    <td style={{ fontSize: '13px', color: '#374151' }}>{a.role || 'Admin'}</td>
                     <td>
                       <span style={{
                         fontSize: '12px', fontWeight: '600', padding: '3px 10px', borderRadius: '999px',
@@ -245,6 +270,7 @@ function AdminAccessManager() {
                 {revokedGranted.map((a) => (
                   <tr key={a.email} style={{ borderBottom: '1px solid #E5E7EB', opacity: 0.6 }}>
                     <td style={{ fontWeight: '600', color: '#111827', fontSize: '14px' }}>{a.email}</td>
+                    <td style={{ fontSize: '13px', color: '#9CA3AF' }}>{a.role || 'Admin'}</td>
                     <td>
                       <span style={{
                         fontSize: '12px', fontWeight: '600', padding: '3px 10px', borderRadius: '999px',

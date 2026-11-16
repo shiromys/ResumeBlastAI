@@ -1193,6 +1193,23 @@ def get_recruiters_stats():
         return jsonify({'error': str(e)}), 500
 
 
+# ✅ NEW: backs the "Download Recruiter Emails" button on the Recruiters
+# page. Returns every email address in the `recruiters` table (the paid
+# recruiters database) so the frontend can build a CSV download from it —
+# same client-side "build a CSV from JSON" pattern Brevo Logs' Export CSV
+# button already uses. get_all_rows() paginates past Supabase's 1000-row
+# cap on its own, so this returns the full list even with 1500+ recruiters.
+@admin_bp.route('/api/admin/recruiters/emails', methods=['GET'])
+def get_recruiter_emails():
+    try:
+        rows = get_all_rows('recruiters', 'select=email&order=email.asc')
+        emails = sorted({(r.get('email') or '').strip() for r in rows if r.get('email')})
+        return jsonify({'success': True, 'count': len(emails), 'emails': emails}), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @admin_bp.route('/api/admin/recruiters/add', methods=['POST'])
 def add_recruiter():
     try:
@@ -2081,6 +2098,93 @@ def unban_user_route(user_id):
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@admin_bp.route('/api/admin/users/<user_id>/update', methods=['PATCH'])
+def update_user_details(user_id):
+    """
+    ✅ NEW: lets an admin fix a user's basic details (name, email, phone)
+    directly from the panel — e.g. a typo at signup, or a changed work
+    email. Available to BOTH 'admin' and 'super_admin' — there is no
+    _require_super_admin() call here, unlike delete_user/refund above,
+    because this one isn't restricted to super admins only.
+
+    Updates the public.users row, and — only when the email actually
+    changes — also updates the matching Supabase Auth account's email via
+    the Auth Admin API, so the user can still log in with their new
+    address afterward. auth.users.id and public.users.id are the same
+    uuid throughout this app, so user_id is used directly for both calls.
+    """
+    try:
+        data = request.json or {}
+        full_name = data.get('full_name')
+        email = data.get('email')
+        phone = data.get('phone')
+
+        if full_name is not None:
+            full_name = full_name.strip()
+        if email is not None:
+            email = email.strip().lower()
+            if not email or '@' not in email:
+                return jsonify({'success': False, 'error': 'A valid email is required'}), 400
+        if phone is not None:
+            phone = phone.strip()
+
+        if full_name is None and email is None and phone is None:
+            return jsonify({'success': False, 'error': 'Nothing to update'}), 400
+
+        existing = get_all_rows('users', f'select=id,email&id=eq.{user_id}')
+        if not existing:
+            return jsonify({'success': False, 'error': 'User not found'}), 404
+        current = existing[0]
+
+        # If the email is changing, make sure no other user already has it.
+        email_changed = email is not None and email != (current.get('email') or '').strip().lower()
+        if email_changed:
+            dupe = get_all_rows('users', f'select=id&email=ilike.{quote(email)}')
+            if any(d.get('id') != user_id for d in dupe):
+                return jsonify({'success': False, 'error': 'Another user already has that email address'}), 409
+
+        update_payload = {}
+        if full_name is not None:
+            update_payload['full_name'] = full_name
+        if email is not None:
+            update_payload['email'] = email
+        if phone is not None:
+            update_payload['phone'] = phone
+
+        resp = requests.patch(
+            f"{SUPABASE_URL}/rest/v1/users?id=eq.{user_id}",
+            json=update_payload,
+            headers=_get_headers()
+        )
+        if resp.status_code not in [200, 204]:
+            return jsonify({'success': False, 'error': f'Failed to update user: {resp.text}'}), 500
+
+        # ✅ Keep Supabase Auth's email in sync so login still works.
+        if email_changed:
+            auth_resp = requests.put(
+                f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
+                json={'email': email, 'email_confirm': True},
+                headers=_get_headers()
+            )
+            if auth_resp.status_code not in [200, 201]:
+                # The profile row is already updated — surface this clearly
+                # rather than silently leaving Auth out of sync.
+                return jsonify({
+                    'success': True,
+                    'warning': f"Profile updated, but the login email could not be updated in the authentication system ({auth_resp.status_code}). The user may need to log in with their old email.",
+                }), 200
+
+        admin = getattr(request, 'admin', None)
+        if admin:
+            log_admin_action(admin['email'], 'edit_user_details', target=user_id, details=update_payload, admin_role=admin.get('role'))
+
+        return jsonify({'success': True}), 200
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @admin_bp.route('/api/admin/users/<user_id>/send-reset-code', methods=['POST'])
 def send_reset_code_route(user_id):
     try:
@@ -2531,9 +2635,19 @@ def grant_admin_access():
         if email in SUPER_ADMIN_EMAILS:
             return jsonify({'success': False, 'error': 'That address is already a permanent super admin'}), 400
 
+        # ✅ NEW: the super admin now labels WHAT this person's role/title is
+        # (e.g. "Support Admin", "Billing") alongside the email. This is
+        # stored as-is in admin_users.role for record-keeping/display only —
+        # it is NOT a permission level. Permission-wise, every granted row
+        # still grants exactly the same 'admin' access: admin_auth.py's
+        # _granted_admin_role() never even selects this column, so no value
+        # typed here can ever grant super-admin-level access. That can only
+        # ever come from the hardcoded SUPER_ADMIN_EMAILS set.
+        role_label = (data.get('role') or '').strip() or 'Admin'
+
         payload = {
             'email': email,
-            'role': 'admin',
+            'role': role_label,
             'revoked': False,
             'granted_by': requester['email'],
             'granted_at': datetime.now(timezone.utc).isoformat(),

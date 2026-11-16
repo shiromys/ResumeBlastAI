@@ -8,6 +8,7 @@ function RecruitersManager({ user }) {
   // tab switcher here, this component is "Manage Recruiters" only.
   const [loading, setLoading] = useState(false)
   const [stats, setStats] = useState(null)
+  const [downloadingEmails, setDownloadingEmails] = useState(false) // ✅ NEW: "Download Recruiter Emails" button
 
   const [newRecruiter, setNewRecruiter] = useState({
     target_table: 'recruiters',
@@ -141,6 +142,37 @@ function RecruitersManager({ user }) {
     }
   }
 
+  // ✅ NEW: "Download Recruiter Emails" — fetches every email in the
+  // `recruiters` table (paid recruiters DB) and saves it as a CSV file.
+  // Same client-side CSV-from-JSON pattern Brevo Logs' Export CSV button
+  // already uses elsewhere in the panel.
+  const handleDownloadEmails = async () => {
+    setDownloadingEmails(true)
+    try {
+      const res = await adminFetch(`${API_URL}/api/admin/recruiters/emails`)
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to fetch recruiter emails')
+
+      if (!data.emails || data.emails.length === 0) {
+        alert('No recruiter emails found.')
+        return
+      }
+
+      const csvContent = ['Email', ...data.emails].join('\n')
+      const blob = new Blob([csvContent], { type: 'text/csv' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `recruiter-emails-${new Date().toISOString().split('T')[0]}.csv`
+      link.click()
+      window.URL.revokeObjectURL(url)
+    } catch (e) {
+      alert('❌ ' + e.message)
+    } finally {
+      setDownloadingEmails(false)
+    }
+  }
+
   const redButtonStyle = {
     padding: '12px 24px',
     background: 'linear-gradient(135deg, #DC2626 0%, #991B1B 100%)',
@@ -172,6 +204,26 @@ function RecruitersManager({ user }) {
             <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', fontWeight: '500' }}>
               <strong>System Note:</strong> Please make sure to update the plans and pricing limits whenever a recruiter is added or deleted in the Manage Recruiter section to maintain accurate system settings.
             </p>
+          </div>
+
+          {/* ✅ NEW: Download Recruiter Emails */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+            <button
+              onClick={handleDownloadEmails}
+              disabled={downloadingEmails}
+              style={{
+                padding: '10px 20px',
+                background: downloadingEmails ? '#9CA3AF' : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                color: 'white',
+                border: 'none',
+                borderRadius: '8px',
+                cursor: downloadingEmails ? 'not-allowed' : 'pointer',
+                fontWeight: '600',
+                fontSize: '13px',
+              }}
+            >
+              {downloadingEmails ? '⏳ Preparing...' : '📥 Download Recruiter Emails'}
+            </button>
           </div>
 
           <div className="stats-grid" style={{ marginBottom: '30px' }}>

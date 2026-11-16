@@ -19,6 +19,14 @@ function UserDetailDrawer({ userId, adminEmail, adminRole, onClose, onChanged })
   const [refundBusyId, setRefundBusyId] = useState('') // ✅ NEW: which payment is currently being refunded
   const [viewingAsUser, setViewingAsUser] = useState(false) // ✅ NEW: "View as this user" overlay toggle
 
+  // ✅ NEW: edit user details (name/email/phone) — available to BOTH admin
+  // and super_admin, unlike ban/refund/delete below which are restricted.
+  const [editOpen, setEditOpen] = useState(false)
+  const [editName, setEditName] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editPhone, setEditPhone] = useState('')
+  const [savingEdit, setSavingEdit] = useState(false)
+
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
   useEffect(() => {
@@ -172,6 +180,56 @@ function UserDetailDrawer({ userId, adminEmail, adminRole, onClose, onChanged })
       alert(`Failed to refund: ${e.message}`)
     } finally {
       setRefundBusyId('')
+    }
+  }
+
+  // ✅ NEW: opens the edit form pre-filled with this user's current values.
+  const handleOpenEdit = () => {
+    setEditName(user?.full_name || '')
+    setEditEmail(user?.email || '')
+    setEditPhone(user?.phone || '')
+    setEditOpen(true)
+  }
+
+  // ✅ NEW: saves name/email/phone changes. Changing the email also
+  // updates the Supabase Auth account server-side (see
+  // update_user_details() in routes/admin.py) so the user can still log
+  // in afterward.
+  const handleSaveEdit = async () => {
+    const name = editName.trim()
+    const email = editEmail.trim()
+    const phone = editPhone.trim()
+
+    if (!email || !email.includes('@')) {
+      alert('Enter a valid email address.')
+      return
+    }
+
+    const emailChanged = email.toLowerCase() !== (user?.email || '').toLowerCase()
+    if (emailChanged && !window.confirm(`Change this user's login email from "${user.email}" to "${email}"?\n\nThey will need to use the new address to log in afterward.`)) {
+      return
+    }
+
+    setSavingEdit(true)
+    try {
+      const res = await adminFetch(`${API_URL}/api/admin/users/${userId}/update`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ full_name: name, email, phone }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || 'Failed to save changes')
+
+      if (json.warning) alert(`⚠️ ${json.warning}`)
+      else alert('✅ User details updated.')
+
+      setEditOpen(false)
+      await loadDetails()
+      if (onChanged) onChanged()
+    } catch (e) {
+      alert(`Failed to save changes: ${e.message}`)
+    } finally {
+      setSavingEdit(false)
     }
   }
 
@@ -497,6 +555,58 @@ function UserDetailDrawer({ userId, adminEmail, adminRole, onClose, onChanged })
 
               {tab === 'actions' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                  {/* ✅ NEW: edit name/email/phone — available to both admin
+                      and super_admin (no adminRole check here). */}
+                  <div style={{ border: '1px solid #E2E8F0', borderRadius: '10px', padding: '14px 16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: editOpen ? '14px' : 0 }}>
+                      <div style={{ fontSize: '12px', fontWeight: 700, color: '#64748B', textTransform: 'uppercase' }}>User details</div>
+                      {!editOpen && (
+                        <button disabled={busy} onClick={handleOpenEdit} style={{ padding: '6px 14px', background: 'white', color: '#1E40AF', border: '1px solid #BFDBFE', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
+                          ✏️ Edit details
+                        </button>
+                      )}
+                    </div>
+                    {editOpen && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div>
+                          <label style={{ fontSize: '12px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Full name</label>
+                          <input
+                            type="text"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '12px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Email</label>
+                          <input
+                            type="email"
+                            value={editEmail}
+                            onChange={(e) => setEditEmail(e.target.value)}
+                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px' }}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '12px', color: '#64748B', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Phone</label>
+                          <input
+                            type="text"
+                            value={editPhone}
+                            onChange={(e) => setEditPhone(e.target.value)}
+                            style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px' }}
+                          />
+                        </div>
+                        <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+                          <button disabled={savingEdit} onClick={handleSaveEdit} style={{ padding: '9px 16px', background: '#DC2626', color: 'white', border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: savingEdit ? 'not-allowed' : 'pointer' }}>
+                            {savingEdit ? 'Saving…' : 'Save changes'}
+                          </button>
+                          <button disabled={savingEdit} onClick={() => setEditOpen(false)} style={{ padding: '9px 16px', background: 'white', color: '#64748B', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: savingEdit ? 'not-allowed' : 'pointer' }}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                     <button disabled={busy} onClick={handleSendResetCode} style={{ padding: '10px 18px', background: 'white', color: '#0F172A', border: '1px solid #E2E8F0', borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: busy ? 'not-allowed' : 'pointer' }}>
                       Send password reset code
