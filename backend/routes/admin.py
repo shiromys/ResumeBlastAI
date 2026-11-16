@@ -2215,7 +2215,36 @@ def approve_app_registered_recruiter(recruiter_id):
             return jsonify({"success": True, "message": "Recruiter approved and added successfully"}), 200
         else:
             return jsonify({"success": False, "error": "Added recruiter, but failed to update status. Have you added the 'status' column to the database?"}), 500
-            
+
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ✅ NEW: "Reject" — the signup is simply removed from the queue and never
+# touches the recruiters table at all. Mirrors approve_app_registered_recruiter
+# above (same table, same id-based lookup) but does the opposite of its
+# insert step: no row is ever written to `recruiters`.
+@admin_bp.route('/api/admin/app-registered-recruiters/<string:recruiter_id>/reject', methods=['DELETE', 'POST'])
+def reject_app_registered_recruiter(recruiter_id):
+    try:
+        rec_response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?id=eq.{recruiter_id}&select=id",
+            headers=_read_headers()
+        )
+        if rec_response.status_code not in [200, 206] or not rec_response.json():
+            return jsonify({"success": False, "error": "Recruiter not found"}), 404
+
+        delete_response = requests.delete(
+            f"{SUPABASE_URL}/rest/v1/app_registered_recruiters?id=eq.{recruiter_id}",
+            headers=_get_headers()
+        )
+
+        if delete_response.status_code in [200, 204]:
+            return jsonify({"success": True, "message": "Signup rejected and removed"}), 200
+        else:
+            return jsonify({"success": False, "error": f"Failed to reject: {delete_response.text}"}), 500
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({"success": False, "error": str(e)}), 500
@@ -2597,4 +2626,3 @@ def admin_audit_log_route():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
-    

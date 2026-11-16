@@ -31,6 +31,9 @@ const AppRegisteredRecruiters = ({ onUpdate }) => {
     }
   };
 
+  // ✅ "Accept" — unchanged functionality, just renamed from "Add to System".
+  // Still the same approve endpoint, still adds the recruiter to the same
+  // `recruiters` table, still shows the same green "✓ Added" badge.
   const handleApprove = async (id) => {
     try {
       const response = await adminFetch(`${API_URL}/api/admin/app-registered-recruiters/${id}/approve`, {
@@ -43,12 +46,12 @@ const AppRegisteredRecruiters = ({ onUpdate }) => {
 
       if (data.success) {
         // Dynamically update the list so the green badge appears instantly
-        setRecruiters(prevRecruiters => 
-          prevRecruiters.map(rec => 
+        setRecruiters(prevRecruiters =>
+          prevRecruiters.map(rec =>
             rec.id === id ? { ...rec, status: 'added' } : rec
           )
         );
-        
+
         // Trigger the parent dashboard to update the sidebar counter
         if (onUpdate) onUpdate();
       } else {
@@ -56,6 +59,36 @@ const AppRegisteredRecruiters = ({ onUpdate }) => {
       }
     } catch (err) {
       alert('❌ An error occurred while adding the recruiter.');
+    }
+  };
+
+  // ✅ NEW: "Reject" — removes the signup from this list. It is never added
+  // to the recruiters table.
+  const handleReject = async (id, name) => {
+    if (!window.confirm(`Reject this signup${name ? ` from ${name}` : ''}?\n\nThis removes it from the Employer Signups list and it will NOT be added to the recruiters table.`)) {
+      return;
+    }
+
+    try {
+      const response = await adminFetch(`${API_URL}/api/admin/app-registered-recruiters/${id}/reject`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        // Remove it from the list immediately
+        setRecruiters(prevRecruiters => prevRecruiters.filter(rec => rec.id !== id));
+
+        // Trigger the parent dashboard to update the sidebar counter
+        if (onUpdate) onUpdate();
+      } else {
+        alert('❌ ' + (data.error || 'Failed to reject signup'));
+      }
+    } catch (err) {
+      alert('❌ An error occurred while rejecting the signup.');
     }
   };
 
@@ -73,7 +106,7 @@ const AppRegisteredRecruiters = ({ onUpdate }) => {
     <div>
       <h2>Employer Signups</h2>
       <p style={{ color: '#6b7280', marginBottom: '20px' }}>
-        Recruiters who signed up via the Employer Network page. Click "Add to System" to move them to the active recruiters database.
+        Recruiters who signed up via the Employer Network page. Click "Accept" to move them to the active recruiters database, or "Reject" to remove the signup.
       </p>
       
       <div className="stat-card" style={{ padding: '0', overflow: 'hidden' }}>
@@ -129,14 +162,25 @@ const AppRegisteredRecruiters = ({ onUpdate }) => {
                         ✓ Added
                       </span>
                     ) : (
-                      /* THE ACTION BUTTON */
-                      <button 
-                        className="btn-primary"
-                        style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#3b82f6', border: 'none', boxShadow: '0 1px 2px rgba(59,130,246,0.5)' }}
-                        onClick={() => handleApprove(recruiter.id)}
-                      >
-                        + Add to System
-                      </button>
+                      /* ✅ NEW: Accept / Reject — Accept keeps the exact same
+                         "Add to System" behavior (same endpoint, same table),
+                         Reject just removes the signup from this list. */
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          className="btn-primary"
+                          style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#3b82f6', border: 'none', boxShadow: '0 1px 2px rgba(59,130,246,0.5)' }}
+                          onClick={() => handleApprove(recruiter.id)}
+                        >
+                          ✓ Accept
+                        </button>
+                        <button
+                          className="btn-primary"
+                          style={{ padding: '6px 12px', fontSize: '12px', backgroundColor: '#DC2626', border: 'none', boxShadow: '0 1px 2px rgba(220,38,38,0.5)' }}
+                          onClick={() => handleReject(recruiter.id, recruiter.recruiter_name)}
+                        >
+                          ✕ Reject
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
