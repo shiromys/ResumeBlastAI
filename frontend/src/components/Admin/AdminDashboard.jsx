@@ -518,46 +518,52 @@ function AdminDashboard({ user, adminRole, onExit }) {
     }
   }
 
-  // ✅ FIXED: Force Wave with proper campaign ID and immediate UI refresh
-  const forceWave = async (wave) => {
-    const campaignId = dripData?.id; 
+  // ✅ REPLACES the old forceWave() override. Instead of an admin having to
+  // pick a wave and bypass completion checks, this resumes whichever wave
+  // the backend has already identified as the campaign's current one
+  // (dripData.current_wave / current_wave_label, from GET /api/admin/drip-stats) —
+  // the server runs the exact same send logic the automatic scheduler uses,
+  // so it can never skip a prerequisite or double-send.
+  const resumeCampaign = async () => {
+    const campaignId = dripData?.id;
     if (!campaignId) {
       alert("❌ No active campaign selected. Please search for a campaign first.");
       return;
     }
 
-    const waveName = wave === 2 ? 'Day 4 Follow-up' : 'Day 8 Reminder'
-    if (!window.confirm(`⚠️ Override Warning:\n\nAre you sure you want to force start the ${waveName} (Wave ${wave})?\n\nThis will:\n• Bypass daily sending limits\n• Skip prerequisite checks\n• Trigger immediate scheduler execution\n\nCampaign ID: ${campaignId}`)) {
+    const waveLabel = dripData.current_wave_label || 'the current wave'
+    if (!window.confirm(`Resume ${waveLabel} for this campaign?\n\nThis sends the next batch of recruiter emails exactly as the automatic scheduler would — it will not re-send anything already sent today, and will not skip ahead of a wave that hasn't actually finished.\n\nCampaign ID: ${campaignId}`)) {
       return;
     }
 
     setDripLoading(true)
     try {
       const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
-      console.log(`Forcing Wave ${wave} for campaign ${campaignId}`)
-      
-      const res = await adminFetch(`${API_URL}/api/admin/drip-campaign/force-wave`, {
+      console.log(`Resuming ${waveLabel} for campaign ${campaignId}`)
+
+      const res = await adminFetch(`${API_URL}/api/admin/drip-campaign/resume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ campaign_id: campaignId, wave })
+        body: JSON.stringify({ campaign_id: campaignId })
       })
       const result = await res.json()
-      
-      if (!res.ok) {
-        console.error(`❌ Force wave failed:`, result)
-        throw new Error(result.error || 'Failed to force wave')
+
+      if (!res.ok || !result.success) {
+        console.error(`❌ Resume failed:`, result)
+        throw new Error(result.error || 'Failed to resume campaign')
       }
-      
-      console.log(`✅ Wave ${wave} forced successfully:`, result)
-      alert(`✅ ${result.message}\n\nThe scheduler will process this shortly.`)
-      
-      // ✅ FIXED: Refresh data immediately after forcing wave
+
+      console.log(`✅ Resume triggered:`, result)
+      alert(`✅ ${result.message}`)
+
+      // Sending happens in the background on the server, so give it a
+      // moment before refreshing the counts shown here.
       setTimeout(() => {
         handleSearchDrip()
-      }, 2000)
-      
+      }, 3000)
+
     } catch (err) {
-      console.error(`Error forcing wave:`, err)
+      console.error(`Error resuming campaign:`, err)
       alert(`❌ Error: ${err.message}`)
     } finally {
       setDripLoading(false)
@@ -1020,29 +1026,35 @@ function AdminDashboard({ user, adminRole, onExit }) {
                       </div>
                     </div>
 
-                    <div className="stat-card" style={{ marginBottom: '32px' }}>
-                      <h3>Manual Overrides</h3>
-                      <p style={{ fontSize: '13px', color: '#64748B', marginBottom: '16px' }}>
-                        Force the scheduler to skip completion requirements and start next waves immediately.
-                      </p>
-                      <div style={{ display: 'flex', gap: '16px' }}>
-                        <button 
-                          className="btn-primary" 
-                          onClick={() => forceWave(2)} 
-                          disabled={dripData.wave2_sent > 0 || dripLoading}
-                          style={{ background: dripData.wave2_sent > 0 ? '#94A3B8' : '#DC2626', boxShadow: 'none', opacity: (dripData.wave2_sent > 0 || dripLoading) ? 0.6 : 1 }}
-                        >
-                          {dripLoading ? '⏳ Processing...' : dripData.wave2_sent > 0 ? '✓ Wave 2 In Progress' : '🚀 Force Start Wave 2'}
-                        </button>
-                        <button 
-                          className="btn-primary" 
-                          onClick={() => forceWave(3)} 
-                          disabled={dripData.wave3_sent > 0 || dripLoading}
-                          style={{ background: dripData.wave3_sent > 0 ? '#94A3B8' : '#DC2626', boxShadow: 'none', opacity: (dripData.wave3_sent > 0 || dripLoading) ? 0.6 : 1 }}
-                        >
-                          {dripLoading ? '⏳ Processing...' : dripData.wave3_sent > 0 ? '✓ Wave 3 In Progress' : '🚀 Force Start Wave 3'}
-                        </button>
-                      </div>
+                    {/* ✅ REPLACES the old "Manual Overrides" / Force Start Wave 2-3
+                        card. Shows a real alert with details when this campaign's
+                        current wave looks genuinely stalled (not just waiting on
+                        its normal schedule), with a single Resume button driven
+                        by the backend's own diagnosis (dripData.is_paused /
+                        current_wave_label / pause_reason from GET /api/admin/drip-stats). */}
+                    <div className="stat-card" style={{ marginBottom: '32px', borderLeft: dripData.is_paused ? '4px solid #DC2626' : '4px solid #10B981' }}>
+                      <h3>{dripData.is_paused ? '⚠️ Campaign Looks Paused' : '✅ Campaign On Track'}</h3>
+                      {dripData.is_paused ? (
+                        <>
+                          <p style={{ fontSize: '13px', color: '#991B1B', marginBottom: '16px' }}>
+                            {dripData.pause_reason}
+                          </p>
+                          <button
+                            className="btn-primary"
+                            onClick={resumeCampaign}
+                            disabled={dripLoading}
+                            style={{ background: '#DC2626', boxShadow: 'none', opacity: dripLoading ? 0.6 : 1 }}
+                          >
+                            {dripLoading ? '⏳ Resuming...' : `🔁 Resume ${dripData.current_wave_label || 'Campaign'}`}
+                          </button>
+                        </>
+                      ) : (
+                        <p style={{ fontSize: '13px', color: '#64748B', margin: 0 }}>
+                          {dripData.current_wave_label
+                            ? `${dripData.current_wave_label} is sending normally — no action needed.`
+                            : 'All waves for this campaign have completed.'}
+                        </p>
+                      )}
                     </div>
 
                     <div className="stat-card">

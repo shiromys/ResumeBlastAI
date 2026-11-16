@@ -5,10 +5,18 @@
 // for, which is all the existing Drip Campaign Monitoring tab supports.
 // Calls: GET /api/admin/campaigns/overview
 //
-// "Manage" on a row doesn't duplicate the force-wave logic here — it jumps
+// "Manage" on a row doesn't duplicate the resume logic here — it jumps
 // to the existing Drip Monitoring tab with that campaign pre-loaded, so the
-// already-built (and already-tested) search + Force Start Wave 2/3 buttons
-// there are reused as-is.
+// already-built (and already-tested) search + Resume Campaign button there
+// are reused as-is.
+//
+// ✅ NEW: a "Paused Campaigns" alert banner at the top — the backend now
+// flags, per campaign, whether its current wave looks genuinely stalled
+// (is_paused / current_wave_label / pause_reason, computed server-side in
+// the same GET /api/admin/campaigns/overview response this component
+// already fetches), so this doesn't need its own separate request. Each
+// paused campaign gets its own Resume button right there, so an admin
+// doesn't have to go find it in the table below first.
 import { useState, useEffect, useCallback } from 'react'
 import { adminFetch } from '../../services/adminApi'
 
@@ -56,6 +64,7 @@ export default function CampaignsOverview({ onManage }) {
   const [error, setError] = useState('')
   const [campaigns, setCampaigns] = useState([])
   const [search, setSearch] = useState('')
+  const [resumingId, setResumingId] = useState('')  // ✅ NEW: which campaign's Resume button is mid-click
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -74,6 +83,31 @@ export default function CampaignsOverview({ onManage }) {
 
   useEffect(() => { load() }, [load])
 
+  // ✅ NEW: resumes a paused campaign's current wave directly from this
+  // list — same POST /api/admin/drip-campaign/resume the single-campaign
+  // Drip Monitoring view uses, so it's the real scheduler logic either way.
+  const handleResume = async (campaign) => {
+    if (!window.confirm(`Resume ${campaign.current_wave_label || 'the current wave'} for ${campaign.candidate_name || 'this campaign'}?\n\nThis sends the next batch of recruiter emails exactly as the automatic scheduler would.`)) {
+      return
+    }
+    setResumingId(campaign.id)
+    try {
+      const res = await adminFetch(`${API_URL}/api/admin/drip-campaign/resume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ campaign_id: campaign.id }),
+      })
+      const result = await res.json()
+      if (!res.ok || !result.success) throw new Error(result.error || 'Failed to resume campaign')
+      alert(`✅ ${result.message}`)
+      setTimeout(load, 3000)  // sending runs in the background server-side
+    } catch (e) {
+      alert(`❌ ${e.message}`)
+    } finally {
+      setResumingId('')
+    }
+  }
+
   const q = search.trim().toLowerCase()
   const filtered = q
     ? campaigns.filter(c => {
@@ -83,12 +117,45 @@ export default function CampaignsOverview({ onManage }) {
       })
     : campaigns
 
+  const paused = campaigns.filter(c => c.is_paused)
+
   return (
     <div style={{ padding: '10px 4px' }}>
       <h2 style={{ fontSize: 24, fontWeight: 800, margin: '0 0 4px', color: '#111827' }}>Campaigns Overview</h2>
       <p style={{ color: '#6b7280', fontSize: 14, margin: '0 0 18px' }}>
-        Every campaign that isn't completed or cancelled yet — initiated, actively sending, or waves forced manually.
+        Every campaign that isn't completed or cancelled yet — initiated, actively sending, or resumed manually.
       </p>
+
+      {/* ✅ NEW: proactive alert for any campaign whose current wave looks
+          genuinely stalled — "show an alert whenever a daily campaign is
+          paused, show the details, give the option to restart it" — right
+          here, not buried in the table below. */}
+      {!loading && paused.length > 0 && (
+        <div style={{ border: '1px solid #FECACA', background: '#FEF2F2', borderRadius: 12, padding: '16px 18px', marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: '#991B1B', marginBottom: 10 }}>
+            ⚠️ {paused.length} campaign{paused.length === 1 ? '' : 's'} may have stalled
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {paused.map(c => (
+              <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, background: '#fff', border: '1px solid #FECACA', borderRadius: 8, padding: '10px 14px', flexWrap: 'wrap' }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: '#111827', fontSize: 13.5 }}>
+                    {c.candidate_name || 'No candidate data'} <span style={{ color: '#9ca3af', fontWeight: 600 }}>— {c.candidate_email || '—'}</span>
+                  </div>
+                  <div style={{ color: '#991B1B', fontSize: 12.5, marginTop: 2 }}>{c.pause_reason}</div>
+                </div>
+                <button
+                  onClick={() => handleResume(c)}
+                  disabled={resumingId === c.id}
+                  style={{ padding: '7px 16px', borderRadius: 7, border: 'none', background: resumingId === c.id ? '#94A3B8' : '#DC2626', color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: resumingId === c.id ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+                >
+                  {resumingId === c.id ? '⏳ Resuming…' : `🔁 Resume ${c.current_wave_label || ''}`}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
         <div style={{ padding: '12px 18px', background: '#f9fafb', borderRadius: 12, minWidth: 140 }}>
@@ -135,7 +202,14 @@ export default function CampaignsOverview({ onManage }) {
             <tbody>
               {filtered.map(c => (
                 <tr key={c.id} style={{ borderTop: '1px solid #e5e7eb' }}>
-                  <td style={{ padding: '10px 14px' }}>{statusBadge(c.status)}</td>
+                  <td style={{ padding: '10px 14px' }}>
+                    {statusBadge(c.status)}
+                    {c.is_paused && (
+                      <span style={{ display: 'block', marginTop: 4, padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 800, background: '#FEF2F2', color: '#991B1B', whiteSpace: 'nowrap' }}>
+                        ⚠️ Paused
+                      </span>
+                    )}
+                  </td>
                   <td style={{ padding: '10px 14px' }}>
                     <div style={{ fontWeight: 700, color: '#111827' }}>{c.candidate_name || <span style={{ color: '#9ca3af', fontWeight: 600 }}>No candidate data</span>}</div>
                     <div style={{ color: '#6b7280', fontSize: 12 }}>{c.candidate_email || '—'}</div>
@@ -154,12 +228,23 @@ export default function CampaignsOverview({ onManage }) {
                   <td style={{ padding: '10px 14px', color: '#374151', whiteSpace: 'nowrap' }}>{fmtDate(c.last_activity)}</td>
                   <td style={{ padding: '10px 14px', color: '#374151', whiteSpace: 'nowrap' }}>{fmtDate(c.initiated_at)}</td>
                   <td style={{ padding: '10px 14px', textAlign: 'right' }}>
-                    <button
-                      onClick={() => onManage && onManage(c)}
-                      style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
-                    >
-                      Manage →
-                    </button>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      {c.is_paused && (
+                        <button
+                          onClick={() => handleResume(c)}
+                          disabled={resumingId === c.id}
+                          style={{ padding: '6px 14px', borderRadius: 7, border: 'none', background: resumingId === c.id ? '#94A3B8' : '#DC2626', color: '#fff', fontWeight: 700, fontSize: 12.5, cursor: resumingId === c.id ? 'not-allowed' : 'pointer', whiteSpace: 'nowrap' }}
+                        >
+                          {resumingId === c.id ? '⏳…' : '🔁 Resume'}
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onManage && onManage(c)}
+                        style={{ padding: '6px 14px', borderRadius: 7, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontWeight: 700, fontSize: 12.5, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                      >
+                        Manage →
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

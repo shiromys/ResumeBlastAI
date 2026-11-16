@@ -17,6 +17,16 @@ import stripe  # ✅ NEW: invoice lookup + refunds, same lazy per-request api_ke
 from services.invoice_email_service import InvoiceEmailService  # ✅ NEW: reuse the exact receipt template customers were emailed
 from services.maintenance_service import get_maintenance_status, set_maintenance_status  # ✅ NEW: Maintenance Mode toggle
 from services.audit_log_service import log_admin_action, get_recent_actions  # ✅ NEW: admin audit log
+import threading  # ✅ NEW: resume-drip-campaign sends real emails with a per-email delay — runs off-request, see resume_drip_campaign()
+# ✅ NEW: reused directly from the real scheduler so a manually "resumed"
+# wave runs through EXACTLY the same send/quota/completion logic the
+# automatic scheduler uses on its own tick — never a separate, divergent
+# copy of that logic. These are underscore-"private" in their home module
+# by convention only; importing them here is intentional, not a mistake.
+from services.drip_scheduler import (
+    _send_drip_wave, _update_campaign_after_wave, _already_sent_today,
+    _get_limit_for_plan, WAVE_FIELDS,
+)
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -306,6 +316,128 @@ def get_revenue():
 # 2. DRIP CAMPAIGNS
 # =========================================================
 
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ NEW: pause/stall detection for drip campaigns.
+#
+# Replaces the old "Force Start Wave 2/3" override, which worked by lying
+# to the scheduler's own queries (stamping the PRIOR wave as complete
+# "right now" so the next wave's query would pick the campaign up) —
+# that could skip real recipients in the wave it faked as finished, and
+# gave the admin no way to tell a genuinely stuck campaign apart from one
+# that's simply waiting its normal turn (business hours, a weekend, or
+# today's quota already used).
+#
+# Instead: figure out which wave is still incomplete, and how many days
+# it's been since that wave last actually sent anything. A real stall —
+# a technical problem, not just the normal schedule — shows up as "no
+# activity for longer than this wave could ever legitimately go quiet."
+# Wave 1 runs every scheduler tick with no business-hours gate, so even
+# two full quiet days is already abnormal. Wave 2/3 only run in business
+# hours and skip weekends, so a Friday-afternoon send can legitimately
+# wait until Monday — four quiet days covers that gap without false
+# alarms.
+# ─────────────────────────────────────────────────────────────────────────
+_WAVE_LABELS = {1: 'Wave 1 (Day 1 blast)', 4: 'Wave 2 (Day 4 follow-up)', 8: 'Wave 3 (Day 8 reminder)'}
+_WAVE_STALE_THRESHOLD_DAYS = {1: 2, 4: 4, 8: 4}
+
+
+def _current_incomplete_wave(campaign):
+    """The first wave (1/4/8, matching WAVE_FIELDS) that hasn't finished
+    yet, or None if every wave for this campaign is already complete."""
+    if not campaign.get('drip_day1_sent_at'):
+        return 1
+    if not campaign.get('drip_day2_sent_at'):
+        return 4
+    if not campaign.get('drip_day3_sent_at'):
+        return 8
+    return None
+
+
+def _parse_any_date(value):
+    """blast_campaigns mixes full ISO timestamps (initiated_at, created_at)
+    with date-only strings (drip_dayX_last_date, e.g. '2026-11-10') —
+    parse either into a tz-aware datetime, or None if it's missing/junk."""
+    if not value:
+        return None
+    s = str(value)
+    try:
+        dt = datetime.fromisoformat(s.replace('Z', '+00:00'))
+    except ValueError:
+        try:
+            dt = datetime.strptime(s[:10], '%Y-%m-%d')
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _wave_pause_status(campaign):
+    """Read-only diagnosis — never writes anything. Returns is_paused,
+    which wave is current, how many days since that wave last sent
+    anything, and a human-readable reason for the admin-panel alert."""
+    base = {'is_paused': False, 'current_wave': None, 'current_wave_label': None,
+            'days_since_activity': None, 'pause_reason': None}
+
+    status = str(campaign.get('status') or '').lower()
+    if status in ('completed', 'cancelled'):
+        return base
+
+    # Same junk-campaign guard the scheduler itself uses (routes/../
+    # drip_scheduler.py run_scheduler_tick()) — nothing to resume here,
+    # and no point alerting on it.
+    if not campaign.get('candidate_name') or not campaign.get('plan_name'):
+        return base
+
+    wave_day = _current_incomplete_wave(campaign)
+    if wave_day is None:
+        return base
+
+    fields = WAVE_FIELDS[wave_day]
+
+    # Reference point for "how long has this wave been quiet": its own
+    # last send date if it has one, otherwise the moment THIS wave became
+    # eligible to start — not the campaign's original creation time, which
+    # would overstate staleness for a wave that simply hasn't had its
+    # first turn yet. "Eligible since" is the previous wave's completion
+    # (drip_day1_sent_at is when Wave 1 finished = when Wave 2 became
+    # eligible, etc.); Wave 1 has no previous wave, so it falls back to
+    # when the campaign itself was created.
+    own_last_date = campaign.get(fields['last_date'])
+    if own_last_date:
+        reference = own_last_date
+    elif wave_day == 1:
+        reference = campaign.get('initiated_at') or campaign.get('created_at')
+    elif wave_day == 4:
+        reference = campaign.get('drip_day1_sent_at')
+    else:  # wave_day == 8
+        reference = campaign.get('drip_day2_sent_at')
+    reference_dt = _parse_any_date(reference)
+
+    days_since = None
+    if reference_dt:
+        days_since = (datetime.now(timezone.utc) - reference_dt).days
+
+    threshold = _WAVE_STALE_THRESHOLD_DAYS.get(wave_day, 3)
+    is_paused = days_since is not None and days_since >= threshold
+    label = _WAVE_LABELS.get(wave_day)
+
+    if not is_paused:
+        return {**base, 'current_wave': wave_day, 'current_wave_label': label, 'days_since_activity': days_since}
+
+    sent_so_far = int(campaign.get(fields['delivered']) or 0)
+    return {
+        'is_paused': True,
+        'current_wave': wave_day,
+        'current_wave_label': label,
+        'days_since_activity': days_since,
+        'pause_reason': (
+            f"No sending activity for {days_since} day(s) on {label} ({sent_so_far} sent so far) — "
+            f"this looks stalled rather than just waiting on its normal schedule."
+        ),
+    }
+
+
 @admin_bp.route('/api/admin/drip-stats', methods=['GET'])
 def get_drip_stats():
     user_id = request.args.get('user_id', '').strip()
@@ -401,6 +533,11 @@ def get_drip_stats():
 
         actual_status = campaign.get('status', 'unknown')
 
+        # ✅ NEW: pause/stall diagnosis — drives the alert + "Resume" button
+        # in the admin panel's single-campaign view, same source of truth
+        # the Campaigns Overview list uses.
+        pause_info = _wave_pause_status(campaign)
+
         return jsonify({
             'success': True,
             'data': {
@@ -418,7 +555,12 @@ def get_drip_stats():
                 'user_id': campaign.get('user_id'),
                 'user_email': campaign.get('candidate_email'),
                 'brevo_sync': True,
-                'fetched_at': datetime.now(timezone.utc).isoformat()
+                'fetched_at': datetime.now(timezone.utc).isoformat(),
+                'is_paused':            pause_info['is_paused'],
+                'current_wave':         pause_info['current_wave'],
+                'current_wave_label':   pause_info['current_wave_label'],
+                'days_since_activity':  pause_info['days_since_activity'],
+                'pause_reason':         pause_info['pause_reason'],
             }
         }), 200
         
@@ -426,41 +568,100 @@ def get_drip_stats():
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@admin_bp.route('/api/admin/drip-campaign/force-wave', methods=['POST'])
-def force_drip_wave():
-    data = request.json
-    campaign_id = data.get('campaign_id', '').strip()
-    target_wave = data.get('wave')
-
-    if not campaign_id or target_wave not in [2, 3]:
-        return jsonify({'error': 'Invalid params'}), 400
-
+# ─────────────────────────────────────────────────────────────────────────
+# ✅ REPLACES the old /api/admin/drip-campaign/force-wave.
+#
+# The old endpoint didn't send anything itself — it just stamped the
+# PRIOR wave's sent_at as "now" so the scheduler's own next-wave query
+# would pick the campaign up, bypassing the check that the prior wave
+# actually finished sending to everyone. That's a real risk (real
+# recipients silently skipped) dressed up as a convenience button, and it
+# gave the admin no way to tell "genuinely stuck" apart from "just
+# waiting its normal turn."
+#
+# This instead: figures out which wave is actually still incomplete for
+# this campaign, and resumes THAT wave by calling the exact same
+# _send_drip_wave() / _update_campaign_after_wave() functions the real
+# scheduler calls on its own tick — same quota check, same
+# already-sent-today check, same recipient selection, same completion
+# logic. It can never skip a prerequisite or bypass a limit, because it
+# IS the real scheduler logic, just triggered by a click instead of a
+# timer. If there's truly nothing to resume (today's quota already used,
+# the wave already hit its full recipient count, or every wave is
+# already done), it says so plainly instead of pretending to do something.
+#
+# Sending up to DAILY_EMAIL_LIMIT real emails with a per-email delay can
+# take minutes, so the actual send runs in a background thread — exactly
+# like the real scheduler already runs off its own request/response cycle
+# — instead of blocking this HTTP request for that whole time.
+# ─────────────────────────────────────────────────────────────────────────
+def _run_resume_in_background(campaign_id, campaign, wave_day, admin_email, admin_role):
     try:
-        url = f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}&select=id"
-        resp = requests.get(url, headers=_read_headers())
-        if resp.status_code not in [200, 206] or len(resp.json()) == 0:
-            return jsonify({'error': 'Campaign not found'}), 404
-        
-        now = datetime.now(timezone.utc).isoformat()
-        
-        if target_wave == 2:
-            update_data = {'drip_day1_sent_at': now, 'day4_scheduled_for': now, 'status': 'in_progress'}
-        else:
-            update_data = {'drip_day2_sent_at': now, 'day8_scheduled_for': now, 'status': 'in_progress'}
+        stats = _send_drip_wave(campaign, drip_day=wave_day)
+        _update_campaign_after_wave(campaign_id, drip_day=wave_day, stats=stats)
+        print(f"[AdminResume] Finished manual resume — campaign={campaign_id} wave={wave_day} stats={stats}")
+        if admin_email:
+            log_admin_action(admin_email, 'resume_drip_campaign', target=campaign_id,
+                              details={'wave': wave_day, 'stats': stats}, admin_role=admin_role)
+    except Exception as e:
+        print(f"[AdminResume] ❌ Background resume failed for campaign={campaign_id}: {e}")
+        traceback.print_exc()
 
-        patch_resp = requests.patch(f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}", json=update_data, headers=_get_headers())
 
-        if patch_resp.status_code in [200, 204]:
-            # ✅ NEW: admin audit log
-            admin = getattr(request, 'admin', None)
-            if admin:
-                log_admin_action(admin['email'], 'force_drip_wave', target=campaign_id,
-                                  details={'wave': target_wave}, admin_role=admin.get('role'))
-            return jsonify({'success': True, 'message': f'Wave {target_wave} forced.'}), 200
-        else: return jsonify({'error': f'Failed: {patch_resp.text}'}), 500
+@admin_bp.route('/api/admin/drip-campaign/resume', methods=['POST'])
+def resume_drip_campaign():
+    try:
+        data = request.json or {}
+        campaign_id = (data.get('campaign_id') or '').strip()
+        if not campaign_id:
+            return jsonify({'success': False, 'error': 'campaign_id is required'}), 400
+
+        rows = get_all_rows('blast_campaigns', f'id=eq.{campaign_id}&select=*')
+        if not rows:
+            return jsonify({'success': False, 'error': 'Campaign not found'}), 404
+        campaign = rows[0]
+
+        wave_day = _current_incomplete_wave(campaign)
+        if wave_day is None:
+            return jsonify({'success': False, 'error': 'This campaign has no wave left to resume — every wave is already complete.'}), 400
+
+        label = _WAVE_LABELS.get(wave_day, f'wave {wave_day}')
+        fields = WAVE_FIELDS[wave_day]
+        plan_limit = _get_limit_for_plan(campaign.get('plan_name', 'starter'))
+        already_sent = int(campaign.get(fields['delivered']) or 0)
+
+        # Same-request checks so an admin gets an immediate, accurate
+        # answer instead of always hearing "resuming in the background"
+        # even when there's nothing left to actually send right now.
+        if already_sent >= plan_limit:
+            return jsonify({'success': False, 'error': f'{label} already reached its full recipient count — nothing to resume.'}), 400
+        if _already_sent_today(campaign, wave_day):
+            return jsonify({'success': True, 'message': f"Today's sending quota for {label} was already used — it will continue automatically on the next eligible day. No action needed right now."}), 200
+
+        # Resuming a campaign that technically never started (payment
+        # succeeded but Wave 1 never flipped it to 'active') should still
+        # work — same auto-promotion the scheduler itself does.
+        if str(campaign.get('status', '')).lower() == 'initiated':
+            requests.patch(f"{SUPABASE_URL}/rest/v1/blast_campaigns?id=eq.{campaign_id}", json={'status': 'active'}, headers=_get_headers())
+            campaign['status'] = 'active'
+
+        admin = getattr(request, 'admin', None)
+        admin_email = admin['email'] if admin else None
+        admin_role = admin.get('role') if admin else None
+
+        threading.Thread(
+            target=_run_resume_in_background,
+            args=(campaign_id, campaign, wave_day, admin_email, admin_role),
+            daemon=True
+        ).start()
+
+        return jsonify({
+            'success': True,
+            'message': f"Resuming {label} now — sending in the background, same as the automatic scheduler. Refresh in a minute to see updated counts.",
+        }), 200
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -507,9 +708,15 @@ def campaigns_overview():
             'last_activity':      _last_activity(c),
             'initiated_at':       c.get('initiated_at') or c.get('created_at'),
             'resume_url':         c.get('resume_url'),
+            # ✅ NEW: drives the "paused campaigns" alert banner + per-row
+            # Resume button in CampaignsOverview.jsx — same diagnosis used
+            # by the single-campaign view and the resume action itself.
+            **{k: v for k, v in _wave_pause_status(c).items()},
         } for c in campaigns]
 
-        return jsonify({'success': True, 'count': len(rows), 'campaigns': rows}), 200
+        paused_count = sum(1 for r in rows if r['is_paused'])
+
+        return jsonify({'success': True, 'count': len(rows), 'paused_count': paused_count, 'campaigns': rows}), 200
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
@@ -2357,7 +2564,7 @@ def revoke_admin_access():
 # services/audit_log_service.py / the admin_audit_log table (migration:
 # backend/admin_audit_log_migration.sql). Every state-changing route
 # above (delete_user, refund_payment, update_maintenance, ban/unban,
-# force_drip_wave, grant/revoke_admin_access) writes into that table —
+# resume_drip_campaign, grant/revoke_admin_access) writes into that table —
 # this endpoint just reads it back out.
 # ─────────────────────────────────────────────────────────────────────────
 @admin_bp.route('/api/admin/audit-log', methods=['GET'])
