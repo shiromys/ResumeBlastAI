@@ -1193,18 +1193,189 @@ def get_recruiters_stats():
         return jsonify({'error': str(e)}), 500
 
 
-# ✅ NEW: backs the "Download Recruiter Emails" button on the Recruiters
-# page. Returns every email address in the `recruiters` table (the paid
-# recruiters database) so the frontend can build a CSV download from it —
-# same client-side "build a CSV from JSON" pattern Brevo Logs' Export CSV
-# button already uses. get_all_rows() paginates past Supabase's 1000-row
-# cap on its own, so this returns the full list even with 1500+ recruiters.
+# ✅ NEW: backs the "Download" buttons on the Recruiters page — now for
+# BOTH tables (originally paid-only), chosen via ?target_table=. Returns
+# full rows (not just emails) so a freemium download can round-trip
+# through the bulk-upload endpoint below: download → edit in a
+# spreadsheet → re-upload. For `recruiters`, those extra fields aren't
+# tracked at all (see add_recruiter() above), so they come back empty —
+# the `emails` key (plain string list) is kept exactly as it was for any
+# existing caller that only wants that. get_all_rows() paginates past
+# Supabase's 1000-row cap on its own, so this returns the full list even
+# with 1500+ recruiters.
 @admin_bp.route('/api/admin/recruiters/emails', methods=['GET'])
 def get_recruiter_emails():
     try:
-        rows = get_all_rows('recruiters', 'select=email&order=email.asc')
-        emails = sorted({(r.get('email') or '').strip() for r in rows if r.get('email')})
-        return jsonify({'success': True, 'count': len(emails), 'emails': emails}), 200
+        target_table = (request.args.get('target_table') or 'recruiters').strip()
+        if target_table not in ['recruiters', 'freemium_recruiters']:
+            return jsonify({'success': False, 'error': 'Invalid table'}), 400
+
+        select_fields = 'email' if target_table == 'recruiters' else 'email,name,company,industry,location'
+        rows = get_all_rows(target_table, f'select={select_fields}&order=email.asc')
+
+        seen = set()
+        emails = []
+        recruiters = []
+        for r in rows:
+            email = (r.get('email') or '').strip()
+            if not email or email.lower() in seen:
+                continue
+            seen.add(email.lower())
+            emails.append(email)
+            recruiters.append({
+                'email': email,
+                'name': r.get('name') or '',
+                'company': r.get('company') or '',
+                'industry': r.get('industry') or '',
+                'location': r.get('location') or '',
+            })
+
+        return jsonify({
+            'success': True,
+            'target_table': target_table,
+            'count': len(emails),
+            'emails': emails,          # unchanged shape for any existing caller
+            'recruiters': recruiters,  # ✅ NEW: full rows, used for the freemium CSV columns
+        }), 200
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# ✅ NEW: "Upload Recruiters File" — the bulk counterpart to the existing
+# single Add Recruiter form. Lets an admin download the list above, edit
+# it in a spreadsheet (fix a typo, add a large number of new emails at
+# once), and re-upload it here instead of adding them one at a time.
+#
+# Accepts a CSV file (multipart/form-data, field name "file") with an
+# `email` column (required, case-insensitive header match) and, for
+# freemium_recruiters only, optional `name`/`company`/`industry`/
+# `location` columns — the same fields the single Add form already takes.
+#
+# Behavior is UPSERT by email, scoped to whichever target_table was
+# chosen (never both): an email not already in that table is inserted; an
+# email that's already there has its freemium-only fields refreshed from
+# the file (the paid `recruiters` table has nothing else to refresh, so
+# those rows are simply left alone — never duplicated). Nothing is ever
+# deleted by an upload — removing a recruiter still only happens through
+# the existing Delete form — so a mistake in the uploaded file can never
+# wipe anyone out.
+@admin_bp.route('/api/admin/recruiters/bulk-upload', methods=['POST'])
+def bulk_upload_recruiters():
+    try:
+        target_table = (request.form.get('target_table') or '').strip()
+        if target_table not in ['recruiters', 'freemium_recruiters']:
+            return jsonify({'success': False, 'error': 'Invalid table'}), 400
+
+        if 'file' not in request.files or not request.files['file'].filename:
+            return jsonify({'success': False, 'error': 'No file uploaded'}), 400
+
+        raw = request.files['file'].read().decode('utf-8-sig', errors='ignore')
+        reader = csv.DictReader(io.StringIO(raw))
+        if not reader.fieldnames:
+            return jsonify({'success': False, 'error': 'Could not read any rows — is this a valid CSV?'}), 400
+
+        # Case/whitespace-insensitive header lookup — "Email", " email ",
+        # "EMAIL" all resolve the same way.
+        normalized = {(f or '').strip().lower(): f for f in reader.fieldnames}
+        if 'email' not in normalized:
+            return jsonify({'success': False, 'error': 'The file needs an "email" column'}), 400
+
+        MAX_ROWS = 10000
+        parsed_rows = []
+        seen_in_file = set()
+        for i, row in enumerate(reader):
+            if i >= MAX_ROWS:
+                return jsonify({'success': False, 'error': f'Too many rows — this upload accepts at most {MAX_ROWS} at a time.'}), 400
+            email = (row.get(normalized['email']) or '').strip().lower()
+            if not email or '@' not in email or email in seen_in_file:
+                continue
+            seen_in_file.add(email)
+            entry = {'email': email}
+            if target_table == 'freemium_recruiters':
+                for col in ('name', 'company', 'industry', 'location'):
+                    if col in normalized:
+                        val = (row.get(normalized[col]) or '').strip()
+                        if val:
+                            entry[col] = val
+            parsed_rows.append(entry)
+
+        if not parsed_rows:
+            return jsonify({'success': False, 'error': 'No valid email addresses found in that file'}), 400
+
+        # One read of who already exists in THIS table, so we know insert
+        # vs. update per row without a round trip per email.
+        existing_rows = get_all_rows(target_table, 'select=email')
+        existing_emails = {(r.get('email') or '').strip().lower() for r in existing_rows if r.get('email')}
+
+        to_insert = [r for r in parsed_rows if r['email'] not in existing_emails]
+        to_update = [r for r in parsed_rows if r['email'] in existing_emails]
+
+        inserted = 0
+        failed = []
+
+        # Bulk-insert the new ones in chunks — one HTTP call per chunk of
+        # up to 500, fast even for thousands of brand-new emails.
+        CHUNK = 500
+        bulk_insert_headers = {**_get_headers(), 'Prefer': 'return=minimal'}
+        for i in range(0, len(to_insert), CHUNK):
+            chunk = to_insert[i:i + CHUNK]
+            payload = []
+            for r in chunk:
+                row_payload = {'email': r['email'], 'is_active': True, 'created_at': datetime.utcnow().isoformat()}
+                if target_table == 'freemium_recruiters':
+                    row_payload.update({
+                        'name': r.get('name', ''),
+                        'company': r.get('company', ''),
+                        'industry': r.get('industry', 'Technology'),
+                        'location': r.get('location', 'Remote'),
+                    })
+                else:
+                    row_payload['email_status'] = 'active'
+                payload.append(row_payload)
+
+            resp = requests.post(f"{SUPABASE_URL}/rest/v1/{target_table}", json=payload, headers=bulk_insert_headers)
+            if resp.status_code in [200, 201, 204]:
+                inserted += len(chunk)
+            else:
+                failed.append(f"Insert batch {i}-{i + len(chunk)}: {resp.text[:200]}")
+
+        # Updates only matter for freemium — the paid table has nothing
+        # else on a row worth refreshing, so an already-existing paid
+        # email is correctly just left alone (never duplicated).
+        updated = 0
+        if target_table == 'freemium_recruiters':
+            for r in to_update:
+                fields = {k: v for k, v in r.items() if k != 'email'}
+                if not fields:
+                    continue
+                resp = requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/{target_table}?email=eq.{quote(r['email'])}",
+                    json=fields, headers=_get_headers()
+                )
+                if resp.status_code in [200, 204]:
+                    updated += 1
+                else:
+                    failed.append(f"Update {r['email']}: {resp.text[:200]}")
+
+        skipped_existing = len(to_update) - updated if target_table == 'freemium_recruiters' else len(to_update)
+
+        admin = getattr(request, 'admin', None)
+        if admin:
+            log_admin_action(admin['email'], 'bulk_upload_recruiters', target=target_table,
+                              details={'inserted': inserted, 'updated': updated, 'skipped_existing': skipped_existing, 'errors': len(failed)},
+                              admin_role=admin.get('role'))
+
+        return jsonify({
+            'success': True,
+            'target_table': target_table,
+            'total_rows_in_file': len(parsed_rows),
+            'inserted': inserted,
+            'updated': updated,
+            'skipped_existing': skipped_existing,
+            'errors': failed[:20],
+        }), 200
+
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500

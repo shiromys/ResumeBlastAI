@@ -9,6 +9,15 @@ function RecruitersManager({ user }) {
   const [loading, setLoading] = useState(false)
   const [stats, setStats] = useState(null)
   const [downloadingEmails, setDownloadingEmails] = useState(false) // ✅ NEW: "Download Recruiter Emails" button
+  const [downloadTable, setDownloadTable] = useState('recruiters') // ✅ NEW: which table to download — paid or freemium
+
+  // ✅ NEW: bulk upload (CSV) state — the bulk counterpart to the single
+  // Add Recruiter form above.
+  const [uploadTable, setUploadTable] = useState('recruiters')
+  const [uploadFile, setUploadFile] = useState(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadResult, setUploadResult] = useState(null)
+  const [uploadError, setUploadError] = useState('')
 
   const [newRecruiter, setNewRecruiter] = useState({
     target_table: 'recruiters',
@@ -142,34 +151,81 @@ function RecruitersManager({ user }) {
     }
   }
 
-  // ✅ NEW: "Download Recruiter Emails" — fetches every email in the
-  // `recruiters` table (paid recruiters DB) and saves it as a CSV file.
-  // Same client-side CSV-from-JSON pattern Brevo Logs' Export CSV button
-  // already uses elsewhere in the panel.
+  // ✅ NEW: "Download Recruiter Emails" — now for EITHER table (paid
+  // `recruiters` or `freemium_recruiters`), picked via downloadTable.
+  // Freemium downloads include name/company/industry/location columns too
+  // (the same fields the bulk upload below accepts), so download → edit
+  // in a spreadsheet → re-upload is a clean round trip. Same client-side
+  // CSV-from-JSON pattern Brevo Logs' Export CSV button already uses.
   const handleDownloadEmails = async () => {
     setDownloadingEmails(true)
     try {
-      const res = await adminFetch(`${API_URL}/api/admin/recruiters/emails`)
+      const res = await adminFetch(`${API_URL}/api/admin/recruiters/emails?target_table=${downloadTable}`)
       const data = await res.json()
       if (!res.ok || !data.success) throw new Error(data.error || 'Failed to fetch recruiter emails')
 
       if (!data.emails || data.emails.length === 0) {
-        alert('No recruiter emails found.')
+        alert('No recruiters found in that table.')
         return
       }
 
-      const csvContent = ['Email', ...data.emails].join('\n')
+      let csvContent
+      if (downloadTable === 'freemium_recruiters') {
+        const headers = ['Email', 'Name', 'Company', 'Industry', 'Location']
+        const rows = (data.recruiters || []).map(r => [r.email, r.name, r.company, r.industry, r.location])
+        csvContent = [headers.join(','), ...rows.map(row => row.map(cell => `"${(cell || '').replace(/"/g, '""')}"`).join(','))].join('\n')
+      } else {
+        csvContent = ['Email', ...data.emails].join('\n')
+      }
+
       const blob = new Blob([csvContent], { type: 'text/csv' })
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `recruiter-emails-${new Date().toISOString().split('T')[0]}.csv`
+      link.download = `${downloadTable}-${new Date().toISOString().split('T')[0]}.csv`
       link.click()
       window.URL.revokeObjectURL(url)
     } catch (e) {
       alert('❌ ' + e.message)
     } finally {
       setDownloadingEmails(false)
+    }
+  }
+
+  // ✅ NEW: "Upload Recruiters File" — bulk counterpart to the single Add
+  // Recruiter form. Uploads a CSV to whichever table is selected; the
+  // backend upserts by email (new emails inserted, existing ones' details
+  // refreshed for freemium) and never deletes anything.
+  const handleBulkUpload = async (e) => {
+    e.preventDefault()
+    if (!uploadFile) {
+      alert('Choose a CSV file first.')
+      return
+    }
+
+    setUploading(true)
+    setUploadResult(null)
+    setUploadError('')
+    try {
+      const formData = new FormData()
+      formData.append('target_table', uploadTable)
+      formData.append('file', uploadFile)
+
+      const res = await adminFetch(`${API_URL}/api/admin/recruiters/bulk-upload`, {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok || !data.success) throw new Error(data.error || 'Upload failed')
+
+      setUploadResult(data)
+      setUploadFile(null)
+      document.getElementById('recruiters-bulk-upload-input').value = ''
+      fetchStats()
+    } catch (err) {
+      setUploadError(err.message)
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -206,8 +262,17 @@ function RecruitersManager({ user }) {
             </p>
           </div>
 
-          {/* ✅ NEW: Download Recruiter Emails */}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '20px' }}>
+          {/* ✅ NEW: Download Recruiter Emails — now with a table selector */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
+            <select
+              value={downloadTable}
+              onChange={(e) => setDownloadTable(e.target.value)}
+              disabled={downloadingEmails}
+              style={{ padding: '10px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '13px' }}
+            >
+              <option value="recruiters">Paid Users DB (recruiters table)</option>
+              <option value="freemium_recruiters">Free Users DB (freemium_recruiters table)</option>
+            </select>
             <button
               onClick={handleDownloadEmails}
               disabled={downloadingEmails}
@@ -220,10 +285,68 @@ function RecruitersManager({ user }) {
                 cursor: downloadingEmails ? 'not-allowed' : 'pointer',
                 fontWeight: '600',
                 fontSize: '13px',
+                whiteSpace: 'nowrap',
               }}
             >
-              {downloadingEmails ? '⏳ Preparing...' : '📥 Download Recruiter Emails'}
+              {downloadingEmails ? '⏳ Preparing...' : '📥 Download Recruiters'}
             </button>
+          </div>
+
+          {/* ✅ NEW: Upload Recruiters File — bulk add/update counterpart to
+              the single Add Recruiter form below. Picks the same
+              recruiters/freemium_recruiters tables. */}
+          <div className="dashboard-section" style={{ marginBottom: '30px', background: '#EFF6FF', padding: '20px', borderRadius: '10px', border: '2px dashed #2563EB' }}>
+            <h2 style={{ fontSize: '20px', marginBottom: '8px', color: '#1E40AF' }}>📤 Upload Recruiters File</h2>
+            <p style={{ fontSize: '13px', color: '#1E3A8A', marginBottom: '16px' }}>
+              Download the list above, edit it in a spreadsheet (fix a detail, or add a large number of new emails), then upload it back here.
+              A CSV needs an <code>email</code> column — for the freemium table you can also include <code>name</code>, <code>company</code>, <code>industry</code>, <code>location</code>.
+              New emails are added; emails already in that table are left alone (paid) or have their freemium details refreshed — nothing is ever removed by an upload.
+            </p>
+            <form onSubmit={handleBulkUpload} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+              <div className="form-group">
+                <label>Select Target Database</label>
+                <select
+                  value={uploadTable}
+                  onChange={(e) => setUploadTable(e.target.value)}
+                  style={{ padding: '10px', borderRadius: '8px', border: '1px solid #2563EB', width: '100%', marginTop: '5px' }}
+                >
+                  <option value="recruiters">Paid Users DB (recruiters table)</option>
+                  <option value="freemium_recruiters">Free Users DB (freemium_recruiters table)</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>CSV File</label>
+                <input
+                  id="recruiters-bulk-upload-input"
+                  type="file"
+                  accept=".csv"
+                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                  style={{ width: '100%', padding: '9px', border: '1px solid #2563EB', borderRadius: '8px', marginTop: '5px', background: 'white' }}
+                />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <button type="submit" disabled={uploading || !uploadFile} style={{ padding: '12px 24px', background: uploading ? '#9CA3AF' : '#2563EB', color: 'white', border: 'none', borderRadius: '8px', cursor: (uploading || !uploadFile) ? 'not-allowed' : 'pointer', fontWeight: 'bold' }}>
+                  {uploading ? '⏳ Uploading...' : 'Upload File'}
+                </button>
+              </div>
+            </form>
+
+            {uploadError && (
+              <div style={{ marginTop: '16px', padding: '12px 16px', background: '#FEE2E2', border: '1px solid #FCA5A5', borderRadius: '8px', color: '#991B1B', fontSize: '13px' }}>
+                ❌ {uploadError}
+              </div>
+            )}
+
+            {uploadResult && (
+              <div style={{ marginTop: '16px', padding: '12px 16px', background: '#DCFCE7', border: '1px solid #86EFAC', borderRadius: '8px', color: '#166534', fontSize: '13px' }}>
+                ✅ Processed {uploadResult.total_rows_in_file} row(s): {uploadResult.inserted} added, {uploadResult.updated} updated, {uploadResult.skipped_existing} already up to date.
+                {uploadResult.errors && uploadResult.errors.length > 0 && (
+                  <div style={{ marginTop: '8px', color: '#991B1B' }}>
+                    ⚠️ {uploadResult.errors.length} row batch(es) had errors — check the server logs for details.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="stats-grid" style={{ marginBottom: '30px' }}>
