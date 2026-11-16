@@ -732,6 +732,15 @@ def get_brevo_logs():
         offset = int(request.args.get('offset', 0))
         event_type = request.args.get('event_type', '').strip()
         email_to = request.args.get('email_to', '').strip()
+        # ✅ NEW: combined "search by candidate name or email" box. The
+        # brevo_event_logs table has no dedicated candidate-name column —
+        # the candidate's name only ever appears embedded inside
+        # email_subject (e.g. "Tyiesha Warren - Brand Activator - Open to
+        # Work"), so a name search has to match against the subject text,
+        # while an email search should still match the recipient's address.
+        # One box, OR'd across both columns, covers "kamyar" and
+        # "kamyar@example.com" alike.
+        search = request.args.get('search', '').strip()
         start_date = request.args.get('start_date', '').strip()
         end_date = request.args.get('end_date', '').strip()
         campaign_id = request.args.get('campaign_id', '').strip()
@@ -739,7 +748,14 @@ def get_brevo_logs():
         params = [("select", "*")]
 
         if event_type: params.append(("event_type", f"eq.{event_type}"))
-        if email_to: params.append(("email_to", f"ilike.%{email_to}%"))
+        if search:
+            # PostgREST requires * instead of % for like/ilike patterns used
+            # inside an or=(...) combinator, since % would collide with the
+            # comma-delimited syntax of or().
+            safe_search = search.replace('*', '')
+            params.append(("or", f"(email_to.ilike.*{safe_search}*,email_subject.ilike.*{safe_search}*)"))
+        elif email_to:
+            params.append(("email_to", f"ilike.%{email_to}%"))
         if campaign_id: params.append(("campaign_id", f"eq.{campaign_id}"))
 
         def parse_frontend_date(date_str, is_end_date=False):
@@ -2581,3 +2597,4 @@ def admin_audit_log_route():
     except Exception as e:
         traceback.print_exc()
         return jsonify({'success': False, 'error': str(e)}), 500
+    

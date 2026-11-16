@@ -66,7 +66,10 @@ function AdminDashboard({ user, adminRole, onExit }) {
   const [brevoLogsError, setBrevoLogsError] = useState(null)
   const [brevoFilters, setBrevoFilters] = useState({
     event_type: '',
-    email_to: '',
+    // ✅ NEW: single combined box — matches a candidate's name OR a
+    // recruiter's email address (see fetchBrevoLogs, which sends this as
+    // `search` so the backend can OR it across email_to and email_subject).
+    search: '',
     start_date: '',
     end_date: '',
     limit: 100,
@@ -196,8 +199,9 @@ function AdminDashboard({ user, adminRole, onExit }) {
       if (brevoFilters.event_type) {
         queryParams.append('event_type', brevoFilters.event_type)
       }
-      if (brevoFilters.email_to) {
-        queryParams.append('email_to', brevoFilters.email_to)
+      if (brevoFilters.search) {
+        // ✅ NEW: one box, searches by candidate name OR recruiter email
+        queryParams.append('search', brevoFilters.search)
       }
       if (brevoFilters.start_date) {
         queryParams.append('start_date', brevoFilters.start_date)
@@ -799,12 +803,12 @@ function AdminDashboard({ user, adminRole, onExit }) {
                   </div>
 
                   <div>
-                    <label style={{ fontSize: '13px', fontWeight: '600', color: '#555' }}>Recipient Email</label>
-                    <input 
+                    <label style={{ fontSize: '13px', fontWeight: '600', color: '#555' }}>Search by Candidate Name or Email</label>
+                    <input
                       type="text"
-                      placeholder="Filter by email..."
-                      value={brevoFilters.email_to}
-                      onChange={(e) => handleBrevoFilterChange('email_to', e.target.value)}
+                      placeholder="e.g. kamyar or kamyar@example.com..."
+                      value={brevoFilters.search}
+                      onChange={(e) => handleBrevoFilterChange('search', e.target.value)}
                       style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', marginTop: '5px' }}
                     />
                   </div>

@@ -191,9 +191,9 @@ export default function CampaignsOverview({ onManage }) {
                 <th style={{ padding: '10px 14px' }}>Status</th>
                 <th style={{ padding: '10px 14px' }}>Candidate</th>
                 <th style={{ padding: '10px 14px' }}>Plan</th>
-                <th style={{ padding: '10px 14px' }}>Wave 1 (Day 1)</th>
-                <th style={{ padding: '10px 14px' }}>Wave 2 (Day 4)</th>
-                <th style={{ padding: '10px 14px' }}>Wave 3 (Day 8)</th>
+                <th style={{ padding: '10px 14px' }}>Wave 1 </th>
+                <th style={{ padding: '10px 14px' }}>Wave 2 </th>
+                <th style={{ padding: '10px 14px' }}>Wave 3 </th>
                 <th style={{ padding: '10px 14px' }}>Last Activity</th>
                 <th style={{ padding: '10px 14px' }}>Initiated</th>
                 <th style={{ padding: '10px 14px', textAlign: 'right' }}>Action</th>
