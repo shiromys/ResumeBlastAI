@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { adminFetch, downloadViaAdminFetch } from '../../services/adminApi'  // ✅ NEW: attaches the admin's Supabase token to every call; downloadViaAdminFetch saves CSV/HTML responses as real files
 import ContactSubmissions from './ContactSubmissions'
 import RecruitersManager from './RecruitersManager'
+import PlansPricingManager from './PlansPricingManager' // ✅ NEW: "Plans & Pricing" split out of RecruitersManager into its own independent page
 import IncompleteProfiles from './IncompleteProfiles'
 import './AdminStyles.css'
 import AppRegisteredRecruiters from './AppRegisteredRecruiters';
@@ -122,7 +123,7 @@ function AdminDashboard({ user, adminRole, onExit }) {
       return
     }
     
-    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'drip' && activeTab !== 'brevo-logs' && activeTab !== 'app-registered' && activeTab !== 'profiles' && activeTab !== 'guest-users') {
+    if (activeTab !== 'support' && activeTab !== 'recruiters' && activeTab !== 'plans-pricing' && activeTab !== 'drip' && activeTab !== 'brevo-logs' && activeTab !== 'app-registered' && activeTab !== 'profiles' && activeTab !== 'guest-users') {
       fetchData(activeTab)
     } else {
       setLoading(false)
@@ -617,11 +618,19 @@ function AdminDashboard({ user, adminRole, onExit }) {
             Brevo Logs
           </button>
           
+          {/* ✅ NEW: "Recruiters & Plans" split into two independent pages */}
           <button
             className={`nav-item ${activeTab === 'recruiters' ? 'active' : ''}`}
             onClick={() => setActiveTab('recruiters')}
           >
-            Recruiters & Plans
+            Recruiters
+          </button>
+
+          <button
+            className={`nav-item ${activeTab === 'plans-pricing' ? 'active' : ''}`}
+            onClick={() => setActiveTab('plans-pricing')}
+          >
+            Plans & Pricing
           </button>
 
           {/* ✅ NEW: Employer Signups Tab with Badge */}
@@ -806,7 +815,7 @@ function AdminDashboard({ user, adminRole, onExit }) {
                     <label style={{ fontSize: '13px', fontWeight: '600', color: '#555' }}>Search by Candidate Name or Email</label>
                     <input
                       type="text"
-                      placeholder="e.g. John or John@example.com..."
+                      placeholder="e.g. kamyar or kamyar@example.com..."
                       value={brevoFilters.search}
                       onChange={(e) => handleBrevoFilterChange('search', e.target.value)}
                       style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', marginTop: '5px' }}
@@ -1438,6 +1447,11 @@ function AdminDashboard({ user, adminRole, onExit }) {
 
             {activeTab === 'recruiters' && (
               <RecruitersManager user={user} />
+            )}
+
+            {/* ✅ NEW: independent "Plans & Pricing" page (used to be a tab inside Recruiters & Plans) */}
+            {activeTab === 'plans-pricing' && (
+              <PlansPricingManager />
             )}
 
             {activeTab === 'profiles' && (
