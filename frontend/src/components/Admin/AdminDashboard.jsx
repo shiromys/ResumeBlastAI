@@ -806,7 +806,7 @@ function AdminDashboard({ user, adminRole, onExit }) {
                     <label style={{ fontSize: '13px', fontWeight: '600', color: '#555' }}>Search by Candidate Name or Email</label>
                     <input
                       type="text"
-                      placeholder="e.g. kamyar or kamyar@example.com..."
+                      placeholder="e.g. John or John@example.com..."
                       value={brevoFilters.search}
                       onChange={(e) => handleBrevoFilterChange('search', e.target.value)}
                       style={{ width: '100%', padding: '10px', border: '1px solid #ddd', borderRadius: '4px', marginTop: '5px' }}
