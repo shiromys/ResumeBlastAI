@@ -256,10 +256,7 @@ function RecruitersManager({ user }) {
             color: '#1e40af',
             boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
           }}>
-            <span style={{ fontSize: '24px' }}>ℹ️</span>
-            <p style={{ margin: 0, fontSize: '15px', lineHeight: '1.6', fontWeight: '500' }}>
-              <strong>System Note:</strong> Please make sure to update the plans and pricing limits whenever a recruiter is added or deleted in the Manage Recruiter section to maintain accurate system settings.
-            </p>
+            
           </div>
 
           {/* ✅ NEW: Download Recruiter Emails — now with a table selector */}
