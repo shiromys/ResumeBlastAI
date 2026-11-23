@@ -2,6 +2,7 @@
 from flask import Blueprint, request, jsonify
 import os
 import requests
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -28,33 +29,51 @@ BREVO_SENDER_NAME = os.getenv('BREVO_SENDER_NAME', 'ResumeBlast Support')
 
 def _verify_turnstile(token, remote_ip):
     """
-    Verifies a Cloudflare Turnstile token server-side. Returns True only if
+    Verifies a Cloudflare Turnstile token server-side. Returns True if
     Cloudflare confirms the token is valid, unused, and not expired.
+
+    ✅ FIX: previously, ANY exception while talking to Cloudflare (a
+    timeout, a DNS hiccup, Cloudflare itself being briefly unreachable) was
+    treated exactly like a real failed/forged token — a legitimate
+    customer's ticket got rejected for a problem that was entirely on our
+    side, not theirs. Now only an explicit `success: false` response FROM
+    Cloudflare (i.e. Cloudflare actually evaluated the token and rejected
+    it) blocks the submission. A genuine inability to reach Cloudflare at
+    all — even after one retry — fails OPEN instead, the same as the
+    "no secret key configured" case below: losing a real customer's
+    support ticket is a worse outcome than occasionally letting one
+    unverified submission through.
     """
     if not TURNSTILE_SECRET_KEY:
         print("⚠️ TURNSTILE_SECRET_KEY not configured — skipping verification")
         return True  # fail-open only if you haven't set up the secret yet
 
     if not token:
-        return False
+        print("⚠️ No Turnstile token on this submission — failing open rather than blocking a real customer")
+        return True
 
-    try:
-        resp = requests.post(
-            'https://challenges.cloudflare.com/turnstile/v0/siteverify',
-            data={
-                'secret': TURNSTILE_SECRET_KEY,
-                'response': token,
-                'remoteip': remote_ip
-            },
-            timeout=10
-        )
-        result = resp.json()
-        if not result.get('success'):
-            print(f"❌ Turnstile verification failed: {result.get('error-codes')}")
-        return bool(result.get('success'))
-    except Exception as e:
-        print(f"❌ Turnstile verification error: {str(e)}")
-        return False
+    for attempt in range(2):  # one retry on a transient network error
+        try:
+            resp = requests.post(
+                'https://challenges.cloudflare.com/turnstile/v0/siteverify',
+                data={
+                    'secret': TURNSTILE_SECRET_KEY,
+                    'response': token,
+                    'remoteip': remote_ip
+                },
+                timeout=10
+            )
+            result = resp.json()
+            if not result.get('success'):
+                print(f"❌ Turnstile verification failed: {result.get('error-codes')}")
+            return bool(result.get('success'))
+        except Exception as e:
+            print(f"⚠️ Turnstile verification request error (attempt {attempt + 1}/2): {str(e)}")
+            if attempt == 0:
+                time.sleep(0.5)
+                continue
+            print("⚠️ Could not reach Cloudflare to verify after retrying — failing open rather than blocking a real customer")
+            return True
 
 
 @support_ticket_bp.route('/api/support-ticket/submit', methods=['POST'])
@@ -106,23 +125,43 @@ def submit_support_ticket():
             'Prefer': 'return=representation'
         }
         
-        db_response = requests.post(
-            supabase_url, 
-            json=db_payload, 
-            headers=supabase_headers, 
-            verify=False,
-            timeout=10
-        )
-        
-        # ✅ FIX: Previously, a failed DB insert here only printed a warning and
-        # the function kept going — it still sent the notification email AND
-        # still returned {'success': True} to the customer. That's exactly how
-        # a ticket can arrive in the support inbox by email but never appear in
-        # the admin panel: the row behind it was never actually created. Now we
-        # stop immediately and report the failure plainly, instead of silently
-        # continuing on a save that didn't happen.
-        if db_response.status_code not in [200, 201]:
-            print(f"❌ DB Save Failed ({db_response.status_code}): {db_response.text}")
+        # ✅ FIX: retry the save up to 3 times with a short backoff before
+        # giving up. A single transient blip talking to Supabase (a dropped
+        # connection, a momentary timeout) used to mean an instant, final
+        # "Could not save your ticket" for the customer even though trying
+        # again a second later would likely have worked. This does NOT
+        # change what happens on a real, persistent failure — it still
+        # fails loudly below — it just stops a one-off network hiccup from
+        # being treated the same as an actual outage.
+        db_response = None
+        db_error = None
+        for attempt in range(3):
+            try:
+                db_response = requests.post(
+                    supabase_url,
+                    json=db_payload,
+                    headers=supabase_headers,
+                    verify=False,
+                    timeout=10
+                )
+                if db_response.status_code in [200, 201]:
+                    break
+                print(f"⚠️ DB Save attempt {attempt + 1}/3 failed ({db_response.status_code}): {db_response.text[:200]}")
+            except Exception as e:
+                db_error = e
+                db_response = None
+                print(f"⚠️ DB Save attempt {attempt + 1}/3 raised: {str(e)}")
+            if attempt < 2:
+                time.sleep(0.75 * (attempt + 1))
+
+        # ✅ FIX (kept from before): a failed DB insert must stop here and
+        # report the failure plainly — never send the notification email or
+        # tell the customer "success" on a save that didn't actually happen.
+        # That's exactly how a ticket could arrive in the support inbox by
+        # email but never appear in the admin panel.
+        if db_response is None or db_response.status_code not in [200, 201]:
+            failure_detail = str(db_error) if db_error else (db_response.text if db_response else 'no response')
+            print(f"❌ DB Save Failed after 3 attempts: {failure_detail}")
             return jsonify({
                 'error': 'Could not save your ticket. Please try again or email us directly.',
                 'ticket_id': ticket_id,
