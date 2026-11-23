@@ -11,6 +11,45 @@ const PLAN_LIMITS = {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
+// ✅ FIX: a user can end up with more than one blast_campaigns row — most
+// often a real paid campaign plus a stray freemium ('free') row created
+// moments later by an unrelated flow. The old logic here was a pure
+// `order(created_at desc).limit(1)` query, so whichever row happened to be
+// created LAST won, even if it was an empty, already-"completed" freemium
+// row shadowing the real, currently-running paid campaign. That's exactly
+// what happened for at least one customer: dashboard showed 0 progress
+// forever because it was reading the wrong row, not because the real
+// campaign wasn't sending.
+//
+// This ranks candidate rows so the real, currently-relevant campaign is
+// always picked instead of just "whichever is newest":
+//   Tier 0: ongoing (active/in_progress/initiated) + paid plan
+//   Tier 1: ongoing + free plan
+//   Tier 2: finished (completed/other) + paid plan
+//   Tier 3: finished + free plan
+//   Tier 4: cancelled (always last resort)
+// Within a tier, the most recently created row wins, same as before.
+function campaignTier(c) {
+  const status = String(c.status || '').toLowerCase()
+  const isCancelled = status === 'cancelled'
+  const isOngoing = ['active', 'in_progress', 'initiated'].includes(status)
+  const isPaid = String(c.plan_name || '').toLowerCase() !== 'free'
+
+  if (isCancelled) return 4
+  if (isOngoing && isPaid) return 0
+  if (isOngoing && !isPaid) return 1
+  if (!isOngoing && isPaid) return 2
+  return 3
+}
+
+function pickBestCampaign(blasts) {
+  return [...blasts].sort((a, b) => {
+    const tierDiff = campaignTier(a) - campaignTier(b)
+    if (tierDiff !== 0) return tierDiff
+    return new Date(b.created_at) - new Date(a.created_at)
+  })
+}
+
 function UserDashboard({ user, onStartBlast }) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState({ blasts: [] })
@@ -32,10 +71,12 @@ function UserDashboard({ user, onStartBlast }) {
         .select('*')
         .eq('user_id', user.id)
         .order('created_at', { ascending: false })
-        .limit(1)
+        .limit(50)
 
       if (blasts && blasts.length > 0) {
-        setData({ blasts })
+        // ✅ FIX: pick the real/relevant campaign, not just the newest row —
+        // see pickBestCampaign() above for why this matters.
+        setData({ blasts: pickBestCampaign(blasts) })
         return
       }
 
