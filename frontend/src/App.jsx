@@ -212,18 +212,10 @@ function App() {
         if (prevUserIdRef.current === session.user.id) return
         prevUserIdRef.current = session.user.id
         setUser(session.user)
-<<<<<<< Updated upstream
         
         const adminStatus = await checkAdminStatus(session.user.email)
         setIsAdmin(adminStatus)
         if (adminStatus) navigate('/admin')
-=======
-
-        const adminStatus = await checkAdminStatus(session.access_token)
-        setIsAdmin(adminStatus.isAdmin)
-        setAdminRole(adminStatus.role)
-        if (adminStatus.isAdmin) navigate('/admin')
->>>>>>> Stashed changes
         else {
           const role = session?.user?.user_metadata?.role
           if (role === 'recruiter') navigate('/recruiter')
