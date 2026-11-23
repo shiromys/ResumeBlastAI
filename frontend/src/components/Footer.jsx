@@ -12,6 +12,11 @@ function Footer({ onViewChange }) {
         <div className="footer-section">
           <h4>Product</h4>
           <a href="/#how-it-works" className="footer-link">How It Works</a>
+          {/* ✅ NEW: additive only — existing "How It Works" anchor link above
+              is untouched, so logged-out/top-of-funnel behavior doesn't
+              change. This new link points at the detailed wave-by-wave
+              campaign guide instead. */}
+          <Link to="/campaign-explained" className="footer-link">Campaign Guide</Link>
           <a href="/#pricing" className="footer-link">Pricing</a>
         </div>
         <div className="footer-section">

@@ -7,8 +7,8 @@ import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import LandingPage from './components/LandingPage'
 import RecruiterLanding from './components/RecruiterLanding'
-import RecruiterAuth from './components/RecruiterAuth' 
-import RecruiterOnboarding from './components/RecruiterOnboarding' 
+import RecruiterAuth from './components/RecruiterAuth'
+import RecruiterOnboarding from './components/RecruiterOnboarding'
 import ResumeUpload from './components/ResumeUpload'
 import AuthModal from './components/AuthModal'
 import ResumeAnalysis from './components/ResumeAnalysis'
@@ -21,6 +21,7 @@ import ContactPage from './components/ContactPage'
 import LegalPage from './components/LegalPage'
 import EmployerNetwork from './components/EmployerNetwork' // ✅ NEW
 import HowItWorksPage from './pages/HowItWorksPage'
+import CampaignExplainedPage from './pages/CampaignExplainedPage' // ✅ NEW: detailed post-purchase campaign guide
 import PricingPage from './pages/PricingPage'
 import ScrollToTop from './components/ScrollToTop' // ✅ ADDED
 import BlogPage from './pages/BlogPage'
@@ -31,7 +32,7 @@ import usePageTracking from './hooks/usePageTracking'
 import ComplianceBanner from './components/ComplianceBanner'
 import ThankYouPage from './pages/ThankYouPage'
 
-// ✅ FIX: Modified to accept isAuth parameter. 
+// ✅ FIX: Modified to accept isAuth parameter.
 // If a user is logged in, we ignore guest logic to prevent session conflicts.
 const detectGuestSession = (params, isAuth) => {
   if (isAuth) return null; // Force exit if user is logged in
@@ -111,12 +112,12 @@ function App() {
         const detectedGuestId = isPaymentReturn ? detectGuestSession(params, isAuthenticated) : null
         const isGuestReturning = !!detectedGuestId
 
-        console.log('🔍 Session init:', { 
+        console.log('🔍 Session init:', {
           isAuthenticated,
-          isPaymentReturn, 
+          isPaymentReturn,
           isGuestReturning,
           detectedGuestId,
-          sessionId: sessionId?.slice(0, 20) 
+          sessionId: sessionId?.slice(0, 20)
         })
 
         // ✅ HELPER: Restore Resume State from LocalStorage
@@ -148,7 +149,7 @@ function App() {
           setUser(session.user)
           setIsGuest(false)
           // Explicitly clear guest flags when a real user is found
-          localStorage.removeItem('is_guest_session') 
+          localStorage.removeItem('is_guest_session')
           localStorage.removeItem('guest_id')
           localStorage.removeItem('guestId')
           prevUserIdRef.current = session.user.id
@@ -196,12 +197,12 @@ function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
         setIsGuest(false)
-        
+
         // Aggressively clear all guest-related local storage items on login
         localStorage.removeItem('is_guest_session')
         localStorage.removeItem('guest_id')
         localStorage.removeItem('guestId')
-        
+
         const savedResume = localStorage.getItem('pending_blast_resume_data');
         if (savedResume && savedResume.includes('temp_')) {
           localStorage.removeItem('pending_blast_resume_data');
@@ -211,10 +212,18 @@ function App() {
         if (prevUserIdRef.current === session.user.id) return
         prevUserIdRef.current = session.user.id
         setUser(session.user)
+<<<<<<< Updated upstream
         
         const adminStatus = await checkAdminStatus(session.user.email)
         setIsAdmin(adminStatus)
         if (adminStatus) navigate('/admin')
+=======
+
+        const adminStatus = await checkAdminStatus(session.access_token)
+        setIsAdmin(adminStatus.isAdmin)
+        setAdminRole(adminStatus.role)
+        if (adminStatus.isAdmin) navigate('/admin')
+>>>>>>> Stashed changes
         else {
           const role = session?.user?.user_metadata?.role
           if (role === 'recruiter') navigate('/recruiter')
@@ -257,23 +266,23 @@ function App() {
       return
     }
     switch (view) {
-      case 'home': 
+      case 'home':
         window.scrollTo(0, 0)
         navigate((user || isGuest) ? '/workbench' : '/')
         break
-      case 'recruiter': 
+      case 'recruiter':
         window.scrollTo(0, 0)
         navigate('/recruiter')
         break
-      case 'employer-network': 
+      case 'employer-network':
         window.scrollTo(0, 0)
         navigate('/employer-network')
         break
-      case 'dashboard': 
+      case 'dashboard':
         window.scrollTo(0, 0)
         navigate('/dashboard')
         break
-      case 'contact': 
+      case 'contact':
         window.scrollTo(0, 0)
         navigate('/contact')
         break
@@ -409,6 +418,13 @@ function App() {
 
           <Route path="/how-it-works" element={
             <HowItWorksPage onGetStarted={handleStartBlast} />
+          } />
+
+          {/* ✅ NEW: detailed, post-purchase campaign guide — linked from the nav,
+              footer, and support/purchase emails. Separate from /how-it-works,
+              which stays the top-of-funnel marketing page. */}
+          <Route path="/campaign-explained" element={
+            <CampaignExplainedPage onGetStarted={handleStartBlast} />
           } />
 
           <Route path="/pricing" element={

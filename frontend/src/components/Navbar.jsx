@@ -50,6 +50,12 @@ function Navbar({ user, isGuest, isAdmin, onViewChange, onLoginClick, onLogout }
                 {!isGuest && (
                   <li><Link className="nav-link" to="/dashboard?profile=1" onClick={close}>My Profile</Link></li>
                 )}
+                {/* ✅ NEW: purely additive — logged-in/guest users previously had
+                    no "how it works" link at all (it was only shown when
+                    logged out, pointing at the general marketing page).
+                    This points them at the detailed post-purchase guide
+                    instead, without touching the logged-out branch above. */}
+                <li><Link className="nav-link" to="/campaign-explained" onClick={close}>How It Works</Link></li>
                 <li><Link className="nav-link" to="/contact" onClick={close}>Contact</Link></li>
                 {isAdmin && (
                   <li>
