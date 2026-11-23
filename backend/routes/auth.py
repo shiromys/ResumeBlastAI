@@ -249,6 +249,39 @@ def relink_guest_data():
         return jsonify({'success': False, 'error': str(e)}), 500
 
 
+@auth_bp.route('/api/auth/send-welcome-email', methods=['POST'])
+def send_welcome_email():
+    """
+    ✅ NEW: sends the one-time welcome email to a brand-new user right after
+    they finish signing up, via Resend.com (see welcome_email_service.py).
+
+    Called by authService.js's signUp() as a best-effort side effect —
+    same posture as relink-guest-data just above: this must never block or
+    fail the signup itself, no matter what happens here. If Resend is down
+    or misconfigured, the new user still gets their account; they just
+    don't get the welcome email, which is logged but swallowed.
+    """
+    try:
+        data = request.get_json() or {}
+        email = (data.get('email') or '').strip().lower()
+        full_name = (data.get('full_name') or '').strip()
+
+        if not email:
+            return jsonify({'success': False, 'error': 'email is required'}), 400
+
+        from services.welcome_email_service import WelcomeEmailService
+        service = WelcomeEmailService()
+        result = service.send_welcome_email(email, full_name)
+
+        if not result.get('success'):
+            return jsonify(result), 500
+        return jsonify(result), 200
+
+    except Exception as e:
+        print(f"⚠️ [Auth] send-welcome-email error (non-blocking): {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 # ─────────────────────────────────────────────
 # NEW: Forgot Password endpoints
 # ─────────────────────────────────────────────

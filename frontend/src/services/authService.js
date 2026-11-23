@@ -123,6 +123,20 @@ export const signUp = async (email, password, fullName) => {
       console.warn('⚠️ relink-guest-data call failed (non-blocking):', relinkErr);
     }
 
+    // ✅ NEW: fire-and-forget welcome email for brand-new accounts, sent via
+    // Resend (see backend/services/welcome_email_service.py). Same
+    // best-effort posture as relink-guest-data just above — this must never
+    // block or fail the signup itself.
+    try {
+      await fetch(`${API_URL}/api/auth/send-welcome-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.toLowerCase(), full_name: fullName }),
+      });
+    } catch (welcomeErr) {
+      console.warn('⚠️ send-welcome-email call failed (non-blocking):', welcomeErr);
+    }
+
     // ✅ STEP 3: Insert user into users table (THIS WAS MISSING!)
     console.log('Step 3: Inserting user into users table...');
     const { data: userData, error: userError } = await supabase
