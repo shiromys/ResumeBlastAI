@@ -16,10 +16,8 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 // moments later by an unrelated flow. The old logic here was a pure
 // `order(created_at desc).limit(1)` query, so whichever row happened to be
 // created LAST won, even if it was an empty, already-"completed" freemium
-// row shadowing the real, currently-running paid campaign. That's exactly
-// what happened for at least one customer: dashboard showed 0 progress
-// forever because it was reading the wrong row, not because the real
-// campaign wasn't sending.
+// row shadowing the real, currently-running paid campaign. Same fix as
+// backend/routes/admin.py's get_drip_stats() in this repo.
 //
 // This ranks candidate rows so the real, currently-relevant campaign is
 // always picked instead of just "whichever is newest":

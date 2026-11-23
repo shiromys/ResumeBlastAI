@@ -438,6 +438,40 @@ def _wave_pause_status(campaign):
     }
 
 
+# ✅ FIX: a user can have more than one blast_campaigns row — most often a
+# real paid campaign plus a stray freemium 'free' row created moments later
+# by an unrelated flow (same bug, same fix, as
+# frontend/src/components/UserDashboard.jsx). Every lookup below used to
+# just take "the first non-cancelled row in created_at desc order", which
+# lets a stray/empty row outrank and hide the real, currently-running paid
+# campaign purely by being newer. These helpers rank candidates instead:
+#   Tier 0: ongoing (active/in_progress/initiated) + paid plan
+#   Tier 1: ongoing + free plan
+#   Tier 2: finished (completed/other) + paid plan
+#   Tier 3: finished + free plan
+# Cancelled rows are filtered out by callers before this runs, same as before.
+def _campaign_tier(c):
+    status = str(c.get('status') or '').lower()
+    is_ongoing = status in ('active', 'in_progress', 'initiated')
+    is_paid = str(c.get('plan_name') or '').lower() != 'free'
+    if is_ongoing and is_paid:
+        return 0
+    if is_ongoing and not is_paid:
+        return 1
+    if not is_ongoing and is_paid:
+        return 2
+    return 3
+
+def _pick_best_campaign(rows):
+    """rows: non-cancelled campaigns, already ordered by created_at desc (so
+    within the same tier, the most recent one wins, same as before this fix)."""
+    best, best_tier = None, None
+    for c in rows:
+        t = _campaign_tier(c)
+        if best is None or t < best_tier:
+            best, best_tier = c, t
+    return best
+
 @admin_bp.route('/api/admin/drip-stats', methods=['GET'])
 def get_drip_stats():
     user_id = request.args.get('user_id', '').strip()
@@ -456,17 +490,11 @@ def get_drip_stats():
             
             if not campaign:
                 res = get_all_rows('blast_campaigns', f'user_id=eq.{user_id}&order=created_at.desc')
-                for c in res:
-                    if str(c.get('status')).lower() != 'cancelled':
-                        campaign = c
-                        break
-            
+                campaign = _pick_best_campaign([c for c in res if str(c.get('status')).lower() != 'cancelled'])
+
             if not campaign and not user_id.startswith('guest_'):
                 res = get_all_rows('blast_campaigns', f'user_id=eq.guest_{user_id}&order=created_at.desc')
-                for c in res:
-                    if str(c.get('status')).lower() != 'cancelled':
-                        campaign = c
-                        break
+                campaign = _pick_best_campaign([c for c in res if str(c.get('status')).lower() != 'cancelled'])
 
             # ✅ FIX: "ids displayed in User Details show as no campaign
             # found when pasted here, even though the campaign is present."
@@ -489,10 +517,7 @@ def get_drip_stats():
                 resolved_email = (user_rows[0].get('email') if user_rows else None) or ''
                 if _is_usable_email(resolved_email):
                     res = get_all_rows('blast_campaigns', f'candidate_email=ilike.{quote(resolved_email)}&order=created_at.desc')
-                    for c in res:
-                        if str(c.get('status')).lower() != 'cancelled':
-                            campaign = c
-                            break
+                    campaign = _pick_best_campaign([c for c in res if str(c.get('status')).lower() != 'cancelled'])
 
         if not campaign and email:
             # ✅ FIX: was an exact, case-sensitive 'eq.' match with no
@@ -501,16 +526,13 @@ def get_drip_stats():
             # (read as a literal space by the HTTP layer). Same ilike+quote
             # pattern already used for this elsewhere in this file.
             res = get_all_rows('blast_campaigns', f'candidate_email=ilike.{quote(email)}&order=created_at.desc')
-            for c in res:
-                if str(c.get('status')).lower() != 'cancelled':
-                    campaign = c
-                    break
-        
+            campaign = _pick_best_campaign([c for c in res if str(c.get('status')).lower() != 'cancelled'])
+
         if not campaign:
             return jsonify({'success': False, 'message': 'Campaign not found'}), 404
-        
+
         campaign_id = campaign.get('id')
-        
+
         d1 = int(campaign.get('drip_day1_delivered') or 0)
         d2 = int(campaign.get('drip_day2_delivered') or 0)
         d3 = int(campaign.get('drip_day3_delivered') or 0)
