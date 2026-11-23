@@ -32,6 +32,16 @@ function Navbar({ user, isGuest, isAdmin, onViewChange, onLoginClick, onLogout }
                   </Link>
                 </li>
 
+                {/* ✅ NEW: purely additive — logged-out visitors previously had no
+                    way to reach the detailed, wave-by-wave campaign guide at all.
+                    The existing "How It Works" link above is untouched and still
+                    goes to the general marketing page. */}
+                <li>
+                  <Link className="nav-link" to="/campaign-explained" onClick={close}>
+                    Campaign Guide
+                  </Link>
+                </li>
+
                 <li>
                   <Link className="nav-link" to="/pricing" onClick={close}>
                     Pricing
